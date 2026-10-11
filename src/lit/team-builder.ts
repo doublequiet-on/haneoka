@@ -11,6 +11,7 @@ import { fetchCatalogVisuals } from "../lib/catalog-visuals";
 import { fetchCrossServerTeamBuilderData } from "../lib/team-builder/data/cross-server";
 import type { TeamBuilderData } from "../lib/team-builder/data";
 import { compileFromTeamData, type EngineMaster } from "../lib/team-builder/engine/master";
+import { clock } from "../lib/team-builder/engine/execution";
 import { EngineClient } from "../lib/team-builder/engine/client";
 import type { EngineRequest, EngineResponse, Goal, TeamEvaluation } from "../lib/team-builder/engine/api";
 import { BoxStore, type BoxSnapshot } from "../lib/team-builder/sync/box-store";
@@ -149,6 +150,7 @@ export class TeamBuilder extends LitElement {
   }
   private releaseSearch?: () => void;
   protected updated() {
+    if (this.activeContext && this.activeContext !== this.calculationContext()) this.engine?.cancel();
     this.syncAppBar();
     if (this.error !== this.errorShown) {
       this.errorShown = this.error;
@@ -325,6 +327,7 @@ export class TeamBuilder extends LitElement {
         return {
           kind: "event",
           measure: s.measure,
+          ranking: s.fullRanking ? undefined : "primary",
           route: s.route,
           eventId: s.eventId,
           songs: s.route === "skip" ? [] : s.songs,
@@ -378,40 +381,70 @@ export class TeamBuilder extends LitElement {
       timeLimitMs: s.timeLimit ? s.timeLimit * 1000 : null,
     };
   }
-  async run() {
+  private activeContext = "";
+  private runGeneration = 0;
+  calculationContext() {
+    return JSON.stringify([this.snapshot?.owner, this.loadedServer, this.data?.identity, this.data?.crossServer?.identities, this.request()]);
+  }
+  async run(verify = false) {
+    const started = clock();
     const request = this.request();
     if (!request || !this.engine || this.running) return;
+    const contextKey = this.calculationContext();
+    const generation = ++this.runGeneration;
     const settings = { ...this.settings };
+    request.contextKey = contextKey;
+    if (verify) {
+      request.timeLimitMs = null;
+      if (!this.stale) {
+        request.seeds = this.results?.results.flatMap(result => result.hits);
+        if (request.goal.kind !== "plan") request.completed = this.results?.results.filter(result => result.proven);
+      }
+    }
+    request.deadline = request.timeLimitMs === null ? Infinity : started + request.timeLimitMs;
+    this.activeContext = contextKey;
     this.running = true;
     this.error = "";
     this.progress = { done: 0, total: 1, started: performance.now() };
     this.expanded = new Set();
     this.compare = [];
     this.requestUpdate();
+    const accept = (response: EngineResponse) => {
+      if (generation !== this.runGeneration || contextKey !== this.calculationContext()) return;
+      if (response.stopReason === "error") this.error = this.t("searchFailed", "The search failed: {reason}", { reason: response.error ?? "engine-error" });
+      this.results = response;
+      this.resultsFor = contextKey;
+      this.resultSettings = settings;
+      this.requestUpdate();
+    };
     const loading = beginLoading(this.t("searching", "Searching teams"));
     try {
-      this.results = await this.engine.run(request, (done, total) => {
+      accept(await this.engine.run(request, (done, total) => {
+        if (contextKey !== this.calculationContext()) return;
         this.progress = { ...this.progress!, done, total };
         this.requestUpdate();
-      });
-      this.resultsFor = JSON.stringify(request);
-      this.resultSettings = settings;
+      }, snapshot => {
+        if (snapshot.contextKey === contextKey) accept(snapshot.response);
+      }));
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) this.error = this.t("searchFailed", "The search failed: {reason}", { reason: error instanceof Error ? error.message : String(error) });
+      if (contextKey === this.calculationContext() && !(error instanceof DOMException && error.name === "AbortError")) this.error = this.t("searchFailed", "The search failed: {reason}", { reason: error instanceof Error ? error.message : String(error) });
     } finally {
       loading.finish();
-      this.running = false;
-      this.progress = null;
-      this.requestUpdate();
-      void this.updateComplete.then(() => this.querySelector<HTMLElement>(".tb-results")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      if (generation === this.runGeneration) {
+        this.activeContext = "";
+        this.running = false;
+        this.progress = null;
+        this.requestUpdate();
+      }
     }
   }
+
   cancel() {
     if (this.pt.running) this.pt.stop();
     else this.engine?.cancel();
   }
   get stale() {
-    return !!this.results && this.resultsFor !== JSON.stringify(this.request());
+    return !!this.results && this.resultsFor !== this.calculationContext();
   }
 
   private renderTabs(): TemplateResult {

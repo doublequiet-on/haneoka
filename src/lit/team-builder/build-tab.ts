@@ -388,7 +388,7 @@ function candidates(host: TeamBuilder): TemplateResult {
           set({ timeLimit: v || null });
         }}
         >
-          ${[0, 5, 15, 60].map(
+          ${[3, 5, 15, 60, 0].map(
             (limit) => html`
               <md-select-option value=${String(limit)}>
                 <div slot="headline">${limit ? `${limit} s` : host.t("noLimit", "Until proven")}</div>
@@ -545,6 +545,9 @@ export function renderBuildTab(host: TeamBuilder): TemplateResult {
                 onSelect: (route) =>
                   set({ route, measure: route !== "live" && s.measure === "challenge-points" ? "points" : s.measure }),
               })}
+                  <label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${s.fullRanking}
+                    @change=${(e: Event) => set({ fullRanking: (e.target as HTMLInputElement).checked })}></md-checkbox>
+                    <span>${host.t("fullRanking", "Full reward ranking")}</span></label>
                   ${segmented({
                 label: host.t("measure", "Maximize"),
                 value: s.measure,

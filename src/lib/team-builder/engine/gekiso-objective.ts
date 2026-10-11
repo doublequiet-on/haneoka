@@ -36,6 +36,8 @@ export interface GekisoSearchInput {
   constraints: Constraints;
   k: number;
   timeLimitMs?: number;
+  initialTeams?: Team[];
+  onCandidate?: (hits: readonly SearchHit<GekisoDetail>[]) => void;
   shard?: { index: number; count: number };
   /** Known lower bound on the k-th key (teams other shards found). */
   floor?: number;
@@ -417,7 +419,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     return { key, detail: { scores, skills, seeds: ctx.seeds } };
   };
 
-  const deadline = input.timeLimitMs ? started + input.timeLimitMs : Infinity;
+  const deadline = input.timeLimitMs == null ? Infinity : started + input.timeLimitMs;
   /** Exact power of a complete team (leader first). */
   const teamPowerOf = (team: Team) =>
     teamPower(master, input.player, team.members.map((i) => members[i]!), team.snaps.map((j) => (j < 0 ? null : snaps[j]!)), 0, input.music, []);
@@ -539,6 +541,14 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   // Luck charts are ranked by the whole-pool estimate below, which ignores leader shards: one shard does it.
   if (chart.luck && input.shard && input.shard.index !== 0)
     return { hits: [], proven: false, bound: null, stats: { ...stats, elapsedMs: performance.now() - started }, levels: levels.length };
+  const publish = () => input.onCandidate?.([...hits.values()].sort((a, b) => b.key - a.key).slice(0, input.k));
+  for (const team of input.initialTeams ?? []) {
+    if (performance.now() > deadline) break;
+    const power = teamPowerOf(team);
+    const { key, detail } = exact(team, power.total);
+    hits.set(setKey(team), { team, key, detail, power: power.total, slotPowers: power.slots, totals: { power: power.total, skill: 0, skillLow: 0, bonus: 0 } });
+    publish();
+  }
   const seeded = seedCache.get(seedKey);
   if (seeded) for (const hit of seeded) hits.set(setKey(hit.team), hit);
   else {
@@ -576,6 +586,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       const hitKey = setKey(team);
       const previous = hits.get(hitKey);
       if (!previous || previous.key < key) hits.set(hitKey, { team, power: power.total, slotPowers: power.slots, totals: { power: power.total, skill: 0, skillLow: 0, bonus: 0 }, key, detail });
+      publish();
     }
     if (performance.now() <= deadline) {
       if (seedCache.size > 8) seedCache.clear();
@@ -609,6 +620,10 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       constraints: levelConstraints(level),
       k: input.k,
       seeds,
+      onCandidate: candidates => {
+        for (const hit of candidates) { const key = setKey(hit.team); if (!hits.has(key) || hits.get(key)!.key < hit.key) hits.set(key, hit); }
+        publish();
+      },
       floor: Number.isFinite(floor) ? floor : undefined,
       timeLimitMs: Number.isFinite(deadline) ? Math.max(1, deadline - performance.now()) : undefined,
     });

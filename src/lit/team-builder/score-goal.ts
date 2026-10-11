@@ -32,8 +32,5 @@ export function scoreText(host: TeamBuilder, message: readonly [string, string])
 }
 
 export function scoreProof(host: TeamBuilder, proven: boolean): string {
-  const settings = resultSettings(host);
-  if (settings.goal === "score" || settings.goal === "gekiso")
-    return scoreText(host, SCORE_GOALS[settings.criterion][proven ? "proven" : "unproven"]);
-  return proven ? host.t("proven", "Proven optimal") : host.t("unproven", "Time limit reached: best found so far");
+  return proven ? host.t("proven", "Proven optimal") : host.t("recommendation", "Recommendation");
 }

@@ -118,11 +118,13 @@ export interface SearchInput<Detail> {
   /** Aspiration: teams below this key are pruned. The result is exact when it still holds k teams at or above the
    * floor; otherwise the caller searches again with a lower floor. */
   floor?: number;
+  floorExclusive?: boolean;
   progress?: (done: number, total: number) => void;
   /** Keep every legal photo option when scalar dominance has not been established for the objective. */
   disableSnapDominance?: boolean;
   /** Defaults to true: evaluate competitive candidates as they arrive and retain the exact Top-K. */
   streaming?: boolean;
+  onCandidate?: (hits: readonly SearchHit<Detail>[]) => void;
 }
 export interface SearchHit<Detail> {
   team: Team;
@@ -432,7 +434,7 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
   const retainedKeys = new Map<string, number>();
   // Equality is prunable only after k distinct legal teams have been evaluated exactly.
   // Until then lower bounds (including seeds and other shards' floors) retain their strict comparison.
-  const cannotImprove = (upper: number) => streaming && hits.length >= k && upper <= hits[k - 1]!.key;
+  const cannotImprove = (upper: number) => (!!input.floorExclusive && upper <= input.floor!) || streaming && hits.length >= k && upper <= hits[k - 1]!.key;
   const retain = (candidate: Candidate, evaluated?: { key: number; detail: Detail }) => {
     if (!streaming) {
       candidates.push(candidate);
@@ -466,6 +468,7 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
     hits.splice(index, 0, hit);
     retainedKeys.set(candidate.setKey, exact.key);
     if (hits.length > k) retainedKeys.delete(setKeyOf(hits.pop()!.team));
+    input.onCandidate?.(hits);
   };
   /** Compact when the pool doubles past what survived the last compaction, keeping the work amortized linear. */
   let compactAt = 4096;
@@ -485,7 +488,7 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
   const floor = input.floor ?? -Infinity;
   let timedOut = false;
   let unexploredBound = -Infinity;
-  const deadline = input.timeLimitMs ? started + input.timeLimitMs : Infinity;
+  const deadline = input.timeLimitMs == null ? Infinity : started + input.timeLimitMs;
   // More leader shards than eligible leaders is normal. An empty shard has no reason to re-evaluate global seeds.
   if (!leaders.length) return { hits: [], proven: true, bound: null, stats: { ...stats, elapsedMs: performance.now() - started } };
 
@@ -541,7 +544,10 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
     seedKeys.push({ seed, key });
     retain({ setKey, team: { members: [...team], snaps: [...seed.snaps] }, power, slotPowers, totals: { power, skill: weight, skillLow: weightLow, bonus }, low: key, high: key }, evaluated);
   };
-  for (const seed of input.seeds ?? []) if (seedValid(seed)) evaluateSeed(seed);
+  for (const seed of input.seeds ?? []) {
+    if (performance.now() > deadline) break;
+    if (seedValid(seed)) evaluateSeed(seed);
+  }
   for (const [leaderIndex, leader] of leaders.entries()) {
     input.progress?.(leaderIndex, leaders.length);
     if (performance.now() > deadline) timedOut = true;

@@ -1,3 +1,4 @@
+import { improvementPercent } from "../../lib/team-builder/engine/execution";
 /** Search results: ranked team cards, per-song rankings, plan summary, comparison. */
 import { html, nothing, type TemplateResult } from "lit";
 import type { EngineHit, SongRef, Timeline } from "../../lib/team-builder/engine/api";
@@ -379,7 +380,7 @@ function renderHit(host: TeamBuilder, hit: EngineHit, index: number): TemplateRe
           <strong class="tb-hit__value tabular">${main.value}</strong>
         </div>
         <div class="tb-hit__actions">
-          ${iconButton({ icon: "bookmark_add", label: host.t("saveTeam", "Save team"), onClick: () => saveTeam(host, hit.members.map(cardIdOf), hit.snaps.map((snap) => (snap ? cardIdOf(snap) : null)), hit.song) })}
+          ${iconButton({ icon: "bookmark_add", label: host.t("saveTeam", "Save team"), disabled: host.stale, onClick: () => saveTeam(host, hit.members.map(cardIdOf), hit.snaps.map((snap) => (snap ? cardIdOf(snap) : null)), hit.song) })}
           ${iconButton({ icon: "compare_arrows", label: host.t("compare", "Compare"), toggle: true, pressed: compared, onClick: () => {
             host.compare = compared ? host.compare.filter((item) => item !== key) : [...host.compare, key].slice(-3);
             host.requestUpdate();
@@ -455,14 +456,19 @@ export function renderResults(host: TeamBuilder): TemplateResult {
   const shown = tab === "overall" || !multi ? (multi ? results.overall : results.results[0]?.hits ?? []) : (results.results.find((result) => result.song && `${result.song.songId}:${result.song.difficulty}` === tab)?.hits ?? []);
   const groups = multi && tab !== "overall" ? results.results.filter((result) => result.song && `${result.song.songId}:${result.song.difficulty}` === tab) : results.results;
   const proven = groups.length > 0 && groups.every((result) => result.proven);
+  const gap = proven ? null : improvementPercent(groups);
   const stats = results.results.reduce((total, result) => total + result.stats.exact, 0);
   return html`
     <section class="tb-results stack" aria-live="polite">
       <div class="row row--wrap row--between tb-results__summary">
-        <span class=${`tb-proof${proven ? " is-proven" : ""}`}>${icon(proven ? "verified" : "hourglass_bottom", 18)}${scoreProof(host, proven)}</span>
+        <span class=${`tb-proof${proven ? " is-proven" : ""}`}>${icon(proven ? "verified" : "hourglass_bottom", 18)}${scoreProof(host, proven)}${gap === null ? nothing : html` · ${host.t("improvementBound", "Up to {percent}% improvement", { percent: format(host, gap, 1) })}`}</span>
         ${host.stale
           ? html`<button class="button button--tonal button--small" type="button" title=${host.t("staleResults", "Conditions changed since this search.")} @click=${() => void host.run()}>${icon("refresh", 18)}${host.t("rerun", "Search again")}</button>`
           : html`<span class="tb-results__meta tabular">${host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, results.elapsedMs), exact: stats })}</span>`}
+      </div>
+      <div class="cluster">
+        <button class="button button--tonal" type="button" ?disabled=${proven || host.stale || host.running}
+          @click=${() => void host.run(true)}>${host.t("continueOptimal", "Continue verifying optimality")}</button>
       </div>
       ${results.unknownCards.length ? html`<p class="inline-message">${host.t("unknownCards", "{count} saved cards are not in this data release and were skipped.", { count: results.unknownCards.length })}</p>` : nothing}
       ${results.plan
@@ -489,7 +495,7 @@ export function renderResults(host: TeamBuilder): TemplateResult {
       ${compareTable(host, shown)}
       ${shown.length
         ? shown.map((hit, index) => renderHit(host, hit, index))
-        : html`<div class="state"><p class="state__title">${host.t("noTeams", "No team meets these conditions")}</p></div>`}
+        : html`<div class="state"><p class="state__title">${proven ? host.t("noTeams", "No team meets these conditions") : host.t("noCandidate", "No recommendation yet")}</p></div>`}
     </section>
   `;
 }

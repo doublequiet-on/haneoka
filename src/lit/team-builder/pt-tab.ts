@@ -20,6 +20,7 @@ import {
   type PtMeasure,
   type PtScope,
 } from "../../lib/team-builder/pt-recommendation";
+import { clock, improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
 import { PtCheckpoint } from "../../lib/team-builder/pt-checkpoint";
 import { formation } from "./results";
 import { sectionHeading } from "./catalog";
@@ -113,7 +114,7 @@ export class PtController {
       goal: {
         kind: "event",
         ranking: "pt-only",
-        measure: "points",
+        measure: this.measure,
         route: "live",
         eventId: s.eventId ?? -1,
         songs: [...s.songs].sort((a, b) => a.songId - b.songId || a.difficulty - b.difficulty),
@@ -134,10 +135,11 @@ export class PtController {
         minBonusPercent: s.minBonus,
       },
       k: 1,
-      timeLimitMs: null,
+      timeLimitMs: 3000,
     };
   }
-  cycle(): PtCycleInput {
+  cycle(): PtCycleInput | null {
+    if (!this.host.settings.ptCycle) return null;
     return {
       songs: [...this.host.settings.planChallengeSongs].sort(
         (a, b) => a.songId - b.songId || a.difficulty - b.difficulty,
@@ -146,27 +148,28 @@ export class PtController {
     };
   }
   private inputSignature() {
-    return canonical([this.request(), this.cycle()]);
+    return canonical([this.request(), this.cycle(), this.owner, this.host.data?.identity]);
   }
   sync() {
     const request = this.request();
     const signature = this.inputSignature();
     if (signature !== this.signature) {
+      if (this.running) this.stop();
       this.signature = signature;
       this.issues = [];
       if (request?.goal.kind === "event" && this.host.master) {
-        for (const route of ["live", "challenge"] as const)
-          for (const measure of ["points", "items"] as const) {
+        for (const route of (this.cycle() ? ["live", "challenge"] : ["live"]) as ("live" | "challenge")[])
+          for (const measure of [this.measure]) {
             const goal = { ...request.goal, route, measure };
             if (route === "live") goal.cpExchange = { numerator: 0, denominator: 1 };
             else {
-              goal.songs = this.cycle().songs;
-              goal.consumption = this.cycle().consumption;
+              goal.songs = this.cycle()!.songs;
+              goal.consumption = this.cycle()!.consumption;
               delete goal.gekiso;
             }
             this.issues.push(...validatePtRequest(this.host.master, { ...request, goal }));
           }
-        if (!this.cycle().songs.length) this.issues.push({ code: "chart", target: "challenge-selection" });
+        if (this.cycle() && !this.cycle()!.songs.length) this.issues.push({ code: "chart", target: "challenge-selection" });
         this.issues = [...new Map(this.issues.map((issue) => [`${issue.code}:${issue.target}`, issue])).values()];
       }
     }
@@ -174,7 +177,7 @@ export class PtController {
   get stale() {
     return (
       !!this.job &&
-      (canonical([this.job.request, this.job.cycle]) !== this.inputSignature() ||
+      (canonical([this.job.request, this.job.cycle, this.job.owner, this.host.data?.identity]) !== this.inputSignature() ||
         this.job.owner !== this.owner ||
         this.job.dataFingerprint !== this.dataFingerprint)
     );
@@ -214,6 +217,7 @@ export class PtController {
     this.restoreKey = "";
   }
   async start(resume: boolean, scope?: PtScope) {
+    const deadline = resume ? Infinity : clock() + 3000;
     this.sync();
     const host = this.host;
     if (this.issues.length) {
@@ -264,7 +268,7 @@ export class PtController {
         host.engine,
         this.store,
         (next) => {
-          if (generation !== this.generation) return;
+          if (generation !== this.generation || signature !== this.inputSignature()) return;
           this.job = next;
           host.requestUpdate();
         },
@@ -275,7 +279,7 @@ export class PtController {
           }
         },
       );
-      await this.runner.run(job, scope);
+      await this.runner.run(job, scope, deadline);
     } catch (error) {
       if (generation === this.generation) this.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -446,6 +450,12 @@ function renderSetup(host: TeamBuilder): TemplateResult {
         ],
         onSelect: (value) => host.updateSettings({ ptMode: value as "solo" | "gekiso" }),
       })}
+      ${segmented({ label: host.t("measure", "Reward"), value: pt.measure,
+        options: [{ value: "points", label: t("points", "Event points") }, { value: "items", label: t("items", "Items") }],
+        onSelect: value => { pt.measure = value as PtMeasure; pt.sync(); host.requestUpdate(); } })}
+      <label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${s.ptCycle}
+        @change=${(e: Event) => host.updateSettings({ ptCycle: (e.target as HTMLInputElement).checked })}></md-checkbox>
+        <span>${host.t("cpCycle", "Long-term CP conversion")}</span></label>
       <div class="pt-form-grid">
         ${ptField(
           host,
@@ -513,7 +523,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
             open: () => picker(s.songs, (songs) => host.updateSettings({ songs })),
           }),
         )}
-        ${ptField(
+        ${s.ptCycle ? html` ${ptField(
           host,
           "challenge-selection",
           songButton(host, {
@@ -550,7 +560,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
               )}
             </md-outlined-select>
           `,
-        )}
+        )} ` : nothing}
       </div>
     </section>
     ${accordion({
@@ -641,7 +651,7 @@ function renderRun(host: TeamBuilder): TemplateResult {
                 ?disabled=${blocked}
                 @click=${() => void pt.start(true)}
               >
-                ${icon("play_arrow", 18)}${t("resume", "Continue")}
+                ${icon("play_arrow", 18)}${host.t("continueOptimal", "Continue verifying optimality")}
               </button>
             `
           : nothing
@@ -679,27 +689,15 @@ function renderRanking(host: TeamBuilder): TemplateResult {
   const catalog = host.catalog!;
   const ranking = ptSongRanking(job, pt.measure);
   const challenge = ptChallengeBest(job, pt.measure);
-  const shown = pt.showAll ? ranking : ranking.slice(0, 5);
+  const gap = ptComplete(job) ? null : improvementPercent(job.tasks.filter(task => task.measure === pt.measure && task.route === "live").map(task => task.result ?? pendingSong(task.song)));
+  const shown = pt.showAll ? ranking : ranking.slice(0, job.scope === "top-one" ? 1 : 5);
   const currency = pt.measure === "points" ? t("points", "Event PT") : t("items", "Shop medals");
   const number = (n: number) => new Intl.NumberFormat(host.locale, { maximumFractionDigits: 1 }).format(n);
-  const settled = job.tasks.filter((task) => task.status !== "queued" && task.status !== "running").length;
-  const pruned = job.tasks.filter((task) => task.status === "pruned").length;
+  const settled = job.tasks.filter((task) => task.status === "complete" || task.status === "empty" || task.status === "pruned").length;
   return html`
     <section class="stack" aria-live="polite">
       <div class="pt-results-bar">
-        ${segmented({
-          label: t("objective", "Reward"),
-          value: pt.measure,
-          options: [
-            { value: "points", label: t("points", "Event PT") },
-            { value: "items", label: t("items", "Shop medals") },
-          ],
-          onSelect: (value) => {
-            pt.measure = value as PtMeasure;
-            pt.showAll = false;
-            host.requestUpdate();
-          },
-        })}
+        <span class="tb-proof">${ptComplete(job) ? host.t("proven", "Proven optimal") : host.t("recommendation", "Recommendation")}${gap === null ? nothing : html` · ${host.t("improvementBound", "Up to {percent}% improvement", { percent: number(gap) })}`}</span>
         <span class="pt-progress tabular">${settled}/${job.tasks.length}</span>
         ${
           pt.stale
@@ -709,16 +707,11 @@ function renderRanking(host: TeamBuilder): TemplateResult {
             : nothing
         }
       </div>
-      ${
-        pt.running
-          ? html`
-              <md-linear-progress
-                .value=${job.tasks.length ? settled / job.tasks.length : 0}
-                aria-label=${t("start", "Calculate")}
-              ></md-linear-progress>
-            `
-          : nothing
-      }
+      <md-linear-progress
+        style=${pt.running ? "" : "visibility: hidden"}
+        .value=${job.tasks.length ? settled / job.tasks.length : 0}
+        aria-label=${t("start", "Calculate")}
+      ></md-linear-progress>
       ${
         challenge
           ? html`
@@ -739,6 +732,7 @@ function renderRanking(host: TeamBuilder): TemplateResult {
             `
           : nothing
       }
+      ${!ranking.length && !pt.running ? html`<div class="state"><p class="state__title">${host.t("noCandidate", "No recommendation yet")}</p></div>` : nothing}
       ${shown.map((hit, position) => {
         const index = ranking.indexOf(hit) + 1 || position + 1;
         return html`
@@ -754,13 +748,13 @@ function renderRanking(host: TeamBuilder): TemplateResult {
               </div>
               <strong class="tabular">${number(hit.event!.mean)} ${currency}</strong>
             </header>
-            <p class="pt-breakdown tabular">
-              ${t("breakdown", "Live {direct} + CP {converted}", { direct: number(hit.event!.directMean!), converted: number(hit.event!.convertedMean!) })}
-            </p>
+            ${job.cycle ? html`<p class="pt-breakdown tabular">${t("breakdown", "Live {direct} + CP {converted}", { direct: number(hit.event!.directMean ?? hit.event!.mean), converted: number(hit.event!.convertedMean ?? 0) })}</p>` : nothing}
             ${formation(host, hit)}
           </article>
         `;
       })}
+      <button class="button button--tonal" type="button" ?disabled=${host.running || pt.stale}
+        @click=${() => void pt.start(true, "top-five")}>${t("topFive", "Top five")}</button>
       ${
         ranking.length > 5
           ? html`
@@ -778,7 +772,7 @@ function renderRanking(host: TeamBuilder): TemplateResult {
           : nothing
       }
       ${
-        pruned && !ptAllComplete(job) && !pt.running
+        !ptAllComplete(job) && !pt.running
           ? html`
               <button
                 class="button button--tonal"

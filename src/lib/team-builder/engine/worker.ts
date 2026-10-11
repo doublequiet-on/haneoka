@@ -7,6 +7,7 @@ import { convertChartBytes } from "./chart";
 import { ChartCache, evaluateTeam, explainTeam, runEngine } from "./api";
 import type { EngineCall, EngineReply } from "./protocol";
 
+let activeId = 0;
 let master: EngineMaster | null = null;
 let charts: ChartCache | null = null;
 const post = (reply: EngineReply) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(reply);
@@ -20,18 +21,22 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
         const pinned = teamBuilderSourceIdentity(call.data, "songs", ref.songId);
         const difficulty = engine.songs.get(ref.songId)?.difficulties.find((row) => row.difficulty === ref.difficulty);
         if (!difficulty?.file) throw new Error("chart-file-missing");
+        post({ type: "phase", id: activeId, phase: "network" });
         const response = await fetch(pinnedSongAssetUrl(pinned, difficulty.file), { credentials: "omit" });
         if (!response.ok) throw new Error(`chart-http:${response.status}`);
         // The URL pins the release; a server that labels it must agree.
         const release = response.headers.get("x-haneoka-release-id");
         if (release && release !== pinned.releaseId) throw new Error("chart-release-identity-mismatch");
-        return convertChartBytes(new Uint8Array(await response.arrayBuffer()));
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        post({ type: "phase", id: activeId, phase: "computation" });
+        return convertChartBytes(bytes);
       });
       post({ type: "ready", id: call.id });
       return;
     }
     if (!master || !charts) throw new Error("engine-not-ready");
     if (call.type === "run") {
+      activeId = call.id;
       let last = 0;
       const result = await runEngine(master, charts, call.request, (done, total) => {
         const now = performance.now();
@@ -39,7 +44,7 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
           last = now;
           post({ type: "progress", id: call.id, done, total });
         }
-      });
+      }, snapshot => post({ type: "snapshot", id: call.id, snapshot }));
       post({ type: "result", id: call.id, result });
     } else if (call.type === "evaluate") post({ type: "result", id: call.id, result: await evaluateTeam(master, charts, call.request) });
     else if (call.type === "explain") post({ type: "result", id: call.id, result: await explainTeam(master, charts, call.request) });

@@ -1,16 +1,29 @@
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
 import type { TeamBuilderData } from "../data";
 import type { EngineRequest, EngineResponse, TeamEvaluation, Timeline } from "./api";
-import type { EngineCall, EngineReply, EvaluateRequest, ExplainRequest } from "./protocol";
-import { aspirationHeld, compareHits, mergeShardResponses, planSummary } from "./merge";
+import type { EngineCall, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
+import { clock, deadlineOf, remaining, emptyResponse, completeResponse } from "./execution";
+import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
 
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void };
+type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void; snapshot?: (value: EngineSnapshot) => void };
 
 /** One engine Worker: compiles the release once, then serves calls. */
 class EngineWorker {
   private worker: Worker | null = null;
   private ready: Promise<void> | null = null;
   private nextId = 1;
+  private phase: "initializationMs" | "networkMs" | "computationMs" | null = null;
+  private phaseAt = 0;
+  private readonly times = { initializationMs: 0, networkMs: 0, computationMs: 0 };
+  private setPhase(phase: typeof this.phase) {
+    const now = clock();
+    if (this.phase) this.times[this.phase] += now - this.phaseAt;
+    this.phaseAt = now;
+    this.phase = phase;
+  }
+  timing() {
+    return { ...this.times, ...(this.phase ? { [this.phase]: this.times[this.phase] + clock() - this.phaseAt } : {}) };
+  }
   private readonly pending = new Map<number, Pending>();
   constructor(
     private readonly data: TeamBuilderData,
@@ -18,14 +31,18 @@ class EngineWorker {
   ) {}
   private spawn(): Promise<void> {
     if (this.ready) return this.ready;
+    this.setPhase("initializationMs");
     const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: this.name });
     this.worker = worker;
     worker.onmessage = (event: MessageEvent<EngineReply>) => {
       const reply = event.data;
       const pending = this.pending.get(reply.id);
       if (!pending) return;
-      if (reply.type === "progress") pending.progress?.(reply.done, reply.total);
+      if (reply.type === "phase") this.setPhase(reply.phase === "network" ? "networkMs" : "computationMs");
+      else if (reply.type === "progress") pending.progress?.(reply.done, reply.total);
+      else if (reply.type === "snapshot") pending.snapshot?.(reply.snapshot);
       else {
+        this.setPhase(null);
         this.pending.delete(reply.id);
         if (reply.type === "error") pending.reject(new Error(reply.message));
         else pending.resolve(reply.type === "result" ? reply.result : undefined);
@@ -39,16 +56,17 @@ class EngineWorker {
     this.ready = this.call({ type: "init", id: 0, data: this.data }) as Promise<void>;
     return this.ready;
   }
-  private call(message: EngineCall, progress?: Pending["progress"]): Promise<unknown> {
+  private call(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, progress });
+      this.pending.set(id, { resolve, reject, progress, snapshot });
       this.worker!.postMessage({ ...message, id });
     });
   }
-  async send<T>(message: EngineCall, progress?: Pending["progress"]): Promise<T> {
+  async send<T>(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<T> {
     await this.spawn();
-    return (await this.call(message, progress)) as T;
+    if (message.type === "run") this.setPhase("computationMs");
+    return (await this.call(message, progress, snapshot)) as T;
   }
   /** Calls in flight; 0 when idle. */
   get load() {
@@ -67,6 +85,7 @@ class EngineWorker {
     this.reset();
   }
   private reset() {
+    this.setPhase(null);
     this.worker?.terminate();
     this.worker = null;
     this.ready = null;
@@ -92,7 +111,9 @@ const SHARDS_PER_WORKER = 4;
  * replaces every Worker, so a long search never blocks. */
 export class EngineClient {
   private readonly pool: EngineWorker[];
+  private readonly dataIdentity: string;
   constructor(data: TeamBuilderData) {
+    this.dataIdentity = JSON.stringify([data.identity, data.crossServer?.identities]);
     this.pool = Array.from({ length: poolSize() }, (_, index) => new EngineWorker(data, `team-engine-${index + 1}`));
   }
   /** Warm one Worker; the others compile lazily only if a search actually fans out. */
@@ -103,88 +124,159 @@ export class EngineClient {
   private idlest() {
     return [...this.pool].sort((a, b) => a.load - b.load || Number(b.started) - Number(a.started))[0]!;
   }
-  async run(request: EngineRequest, progress?: Pending["progress"]): Promise<EngineResponse> {
-    const parallel = this.pool.length > 1 && request.members.length >= PARALLEL_MIN_MEMBERS;
-    if (!parallel) return this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress);
-    const started = performance.now();
-    // Most searches prove their ranking in well under a second on one Worker; only those that don't fan out, and
-    // the teams found so far give every shard its starting floor.
-    const initial: Record<string, number> = {};
-    // Gekisou seeding alone outlasts the quick window, so it fans out at once.
-    if (!request.noFloor && request.goal.kind !== "gekiso") {
-      const quick = await this.idlest().send<EngineResponse>({
-        type: "run",
-        id: 0,
-        request: { ...request, timeLimitMs: Math.min(request.timeLimitMs ?? Infinity, QUICK_MS) },
-      });
-      if (quick.results.every((result) => result.proven || result.excludedBelow !== undefined)) return quick;
-      if (request.goal.kind !== "plan")
-        for (const result of quick.results)
-          if (result.song && result.hits.length >= request.k) initial[`${result.song.songId}:${result.song.difficulty}`] = result.hits[request.k - 1]!.key;
+  private queue: Promise<unknown> = Promise.resolve();
+  private activeStop: ((reason: StopReason) => void) | null = null;
+  private generation = 0;
+
+  run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<EngineResponse> {
+    const started = clock();
+    const generation = this.generation;
+    const task = { ...request, deadline: deadlineOf(request), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waiting = new Promise<EngineResponse>(resolve => {
+      if (Number.isFinite(task.deadline)) timer = setTimeout(() => {
+        expired = true;
+        const response = { ...emptyResponse(task), stopReason: "budget" as const, elapsedMs: clock() - started };
+        snapshot?.({ requestId: task.requestId, contextKey: task.contextKey, response, stopReason: "budget", coverage: { completed: 0, total: response.results.length } });
+        resolve(response);
+      }, remaining(task.deadline));
+    });
+    const queued = this.queue.then(() => {
+      clearTimeout(timer);
+      if (expired || generation !== this.generation) return { ...emptyResponse(task), stopReason: expired ? "budget" as const : "cancelled" as const };
+      return this.execute(task, started, progress, snapshot);
+    });
+    this.queue = queued.catch(() => {});
+    return Promise.race([queued, waiting]).finally(() => clearTimeout(timer));
+  }
+
+  private async execute(request: EngineRequest, started: number, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<EngineResponse> {
+    const before = this.pool.map(worker => worker.timing());
+    let latest = emptyResponse(request);
+    if (request.seeds?.length) {
+      for (const result of latest.results) result.hits = request.seeds.filter(hit => hit.song?.songId === result.song?.songId && hit.song?.difficulty === result.song?.difficulty).slice(0, request.k);
+      latest.overall = latest.results.flatMap(result => result.hits).sort(compareHits).slice(0, request.k);
     }
-    if (request.goal.kind === "plan") return this.plan(request, request.goal, started, progress);
-    const merged = await this.sharded(request, initial, progress);
-    merged.elapsedMs = performance.now() - started;
-    if (aspirationHeld(merged, request.k) || request.noFloor) return merged;
-    // A floor admitted fewer than k teams: search again without it.
-    return this.run({ ...request, noFloor: true }, progress);
-  }
-  /** Leader shards are many and small, handed to whichever Worker is free: subtree sizes vary widely, and each new
-   * task starts from the best k-th key found so far. */
-  private async sharded(request: EngineRequest, initial: Record<string, number>, progress?: Pending["progress"], offset = 0, total = 1): Promise<EngineResponse> {
-    const count = this.pool.length * SHARDS_PER_WORKER;
-    const responses: EngineResponse[] = [];
-    let next = 0;
-    const floors = (): Record<string, number> => {
-      if (!responses.length) return initial;
-      const merged = mergeShardResponses(responses, request.k, 0);
-      const out: Record<string, number> = { ...initial };
-      for (const result of merged.results)
-        if (result.song && result.hits.length >= request.k) {
-          const key = `${result.song.songId}:${result.song.difficulty}`;
-          out[key] = Math.max(out[key] ?? -Infinity, result.hits[request.k - 1]!.key);
+    let stopped = false;
+    let lastShown = -Infinity;
+    const publish = (response: EngineResponse, force = false) => {
+      if (stopped) return;
+      const hadCandidate = latest.overall.length > 0;
+      for (const result of response.results) {
+        const previous = latest.results.find(part => part.song?.songId === result.song?.songId && part.song?.difficulty === result.song?.difficulty);
+        if (previous && !result.proven) {
+          const seen = new Set<string>();
+          result.hits = [...result.hits, ...previous.hits].sort(compareHits).filter(hit => {
+            const key = [...hit.members].sort().join(",");
+            if (seen.has(key)) return false;
+            seen.add(key); return true;
+          }).slice(0, request.k);
         }
-      return out;
-    };
-    const worker = async (engine: EngineWorker) => {
-      while (next < count) {
-        const index = next++;
-        responses.push(await engine.send<EngineResponse>({ type: "run", id: 0, request: { ...request, shard: { index, count }, floors: floors() } }));
-        progress?.(offset + responses.length / count, total);
       }
+      response.overall = response.results.flatMap(result => result.hits).sort(compareHits).slice(0, request.k);
+      latest = response;
+      latest.timing = this.pool.reduce((total, worker, index) => {
+        const timing = worker.timing();
+        for (const field of ["initializationMs", "networkMs", "computationMs"] as const) total[field] += timing[field] - before[index]![field];
+        return total;
+      }, { initializationMs: 0, networkMs: 0, computationMs: 0, wallMs: clock() - started });
+      latest.elapsedMs = clock() - started;
+      if (!force && (hadCandidate || !latest.overall.length) && clock() - lastShown < 100) return;
+      lastShown = clock();
+      snapshot?.({ requestId: request.requestId!, contextKey: request.contextKey!, response: latest, stopReason: latest.stopReason,
+        coverage: { completed: latest.results.filter(result => result.proven || result.exclusion).length, total: latest.results.length } });
     };
-    await Promise.all(this.pool.map(worker));
-    return mergeShardResponses(responses, request.k, 0);
+    let stop!: (reason: StopReason) => void;
+    const interrupted = new Promise<EngineResponse>(resolve => {
+      stop = reason => {
+        if (stopped) return;
+        publish({ ...latest, stopReason: reason }, true);
+        stopped = true;
+        for (const worker of this.pool) worker.cancel();
+        resolve(latest);
+      };
+    });
+    this.activeStop = stop;
+    const deadline = request.deadline!;
+    const timer = Number.isFinite(deadline) ? setTimeout(() => stop("budget"), remaining(deadline)) : undefined;
+    const accept = (value: EngineSnapshot) => {
+      if (!stopped && value.requestId === request.requestId && value.contextKey === request.contextKey) publish(value.response);
+    };
+    const work = async (): Promise<EngineResponse> => {
+      if (!remaining(deadline)) { stop("budget"); return latest; }
+      if (completeResponse(latest)) return latest;
+      const parallel = this.pool.length > 1 && request.members.length >= PARALLEL_MIN_MEMBERS && request.goal.kind !== "plan";
+      if (!parallel) return this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, accept);
+      let seeds = request.seeds ?? [];
+      if (!request.noFloor && request.goal.kind !== "gekiso") {
+        const quick = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, deadline: Math.min(deadline, clock() + QUICK_MS) } }, progress, accept);
+        publish(quick);
+        if (completeResponse(quick)) return quick;
+        seeds = quick.results.flatMap(result => result.hits);
+      }
+      const count = this.pool.length * SHARDS_PER_WORKER;
+      const responses = Array.from({ length: count }, () => emptyResponse(request));
+      for (const response of responses) for (const result of response.results)
+        result.hits = seeds.filter(hit => hit.song?.songId === result.song?.songId && hit.song?.difficulty === result.song?.difficulty).slice(0, request.k);
+      let next = 0, done = 0;
+      const merge = () => mergeShardResponses(responses, request.k, clock() - started);
+      const runShard = async (engine: EngineWorker) => {
+        while (!stopped && remaining(deadline) > 0 && next < count) {
+          const index = next++;
+          const current = merge();
+          const floors = Object.fromEntries(current.results.filter(result => result.song && result.hits.length >= request.k).map(result => [`${result.song!.songId}:${result.song!.difficulty}`, result.hits[request.k - 1]!.key]));
+          const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds, shard: { index, count }, floors } }, undefined, value => {
+            if (stopped || value.contextKey !== request.contextKey || value.requestId !== request.requestId) return;
+            responses[index] = value.response;
+            publish(merge());
+          });
+          if (stopped) return;
+          responses[index] = response;
+          publish(merge());
+          progress?.(++done / count, 1);
+        }
+      };
+      await Promise.all(this.pool.map(runShard));
+      const merged = merge();
+      if (!aspirationHeld(merged, request.k) && !request.noFloor && remaining(deadline))
+        return this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: merged.overall, noFloor: true } }, progress, accept);
+      return merged;
+    };
+    try {
+      const response = await Promise.race([work(), interrupted]);
+      if (!stopped) publish({ ...response, stopReason: completeResponse(response) ? "complete" : "budget" }, true);
+      return latest;
+    } catch (error) {
+      if (stopped) return latest;
+      latest.error = error instanceof Error ? error.message : String(error);
+      stop("error");
+      if (latest.overall.length) return latest;
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      if (this.activeStop === stop) this.activeStop = null;
+    }
   }
-  /** A plan's normal lives are priced by the best challenge live, so the stages run one after the other, each
-   * over the pool. */
-  private async plan(request: EngineRequest, goal: Extract<EngineRequest["goal"], { kind: "plan" }>, started: number, progress?: Pending["progress"]): Promise<EngineResponse> {
-    const challengeRequest: EngineRequest = {
-      ...request,
-      goal: { kind: "event", measure: "points", route: "challenge", eventId: goal.eventId, songs: goal.challengeSongs, consumption: goal.challengePointsPerLive, play: goal.play },
-    };
-    let challenge = await this.sharded(challengeRequest, {}, progress, 0, 2);
-    if (!aspirationHeld(challenge, request.k)) challenge = await this.sharded({ ...challengeRequest, noFloor: true }, {}, progress, 0, 2);
-    const bestChallenge = challenge.overall[0] ?? null;
-    const pointsPerChallenge = bestChallenge?.event?.mean ?? 0;
-    const normal = await this.sharded({ ...request, goal: { ...goal, challengePointsPerPlay: pointsPerChallenge } }, {}, progress, 1, 2);
-    const bestNormal = normal.results.flatMap((result) => result.hits).sort(compareHits)[0] ?? null;
-    return {
-      plan: planSummary(goal, bestNormal, bestChallenge, pointsPerChallenge),
-      results: [...challenge.results, ...normal.results],
-      overall: [...(bestNormal ? [bestNormal] : []), ...(bestChallenge ? [bestChallenge] : [])],
-      unknownCards: normal.unknownCards,
-      elapsedMs: performance.now() - started,
-    };
+  private enqueue<T>(work: () => Promise<T>): Promise<T> {
+    const generation = this.generation;
+    const queued = this.queue.then(() => {
+      if (generation !== this.generation) throw new DOMException("Cancelled", "AbortError");
+      return work();
+    });
+    this.queue = queued.catch(() => {});
+    return queued;
   }
   evaluate(request: EvaluateRequest) {
-    return this.pool[0]!.send<TeamEvaluation[]>({ type: "evaluate", id: 0, request });
+    return this.enqueue(() => this.pool[0]!.send<TeamEvaluation[]>({ type: "evaluate", id: 0, request }));
   }
   explain(request: ExplainRequest) {
-    return this.pool[0]!.send<Timeline>({ type: "explain", id: 0, request });
+    return this.enqueue(() => this.pool[0]!.send<Timeline>({ type: "explain", id: 0, request }));
   }
   /** Stops everything in flight; the next call starts fresh Workers. */
   cancel() {
+    this.generation++;
+    this.activeStop?.("cancelled");
     for (const worker of this.pool) worker.cancel();
   }
   dispose() {

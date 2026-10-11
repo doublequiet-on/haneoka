@@ -1,3 +1,4 @@
+import "./team-builder-execution.test";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { compileFromMasterTables, type EventEffectRow, type Song, type SkillEffectRow } from "../../src/lib/team-builder/engine/master";
@@ -263,6 +264,28 @@ test("the real engine entry ranks event results by reward, other reward, then me
   assert.equal(actual.results[0]!.proven, true);
   assert.deepEqual(actual.overall.map(hit => [hit.key, hit.score!.mean]), expected.map(hit => [hit.key, (hit.detail as EventDetail).scores.mean]));
   assert.equal(new Set(actual.overall.map(hit => [...hit.members].sort().join(","))).size, 3);
+  const primaryRequest: EngineRequest = { ...request, k: 1, goal: { ...request.goal as Extract<EngineRequest["goal"], { kind: "event" }>, ranking: "primary" } };
+  const primary = await runEngine(master, cache, primaryRequest);
+  const primaryExpected = exhaustive({ ...data, objective: eventObjective(data, rewards, "points", 2, 0, Infinity, "primary"), k: 1 });
+  assert.equal(primary.overall[0]!.key, primaryExpected[0]!.key);
+  const cutoff = { key: primary.overall[0]!.key, contextKey: "test", ranking: "reward-song-difficulty-v1" as const, comparison: "gt" as const };
+  const excluded = await runEngine(master, cache, { ...primaryRequest, contextKey: "test", cutoff });
+  assert.deepEqual(excluded.results[0]!.exclusion, cutoff);
+  const tied = await runEngine(master, cache, { ...primaryRequest, contextKey: "test", cutoff: { ...cutoff, comparison: "gte" } });
+  assert.equal(tied.overall[0]!.key, cutoff.key);
+  const expired = await runEngine(master, new ChartCache(master, async () => { throw Error("must not load charts"); }), { ...primaryRequest, deadline: 0 });
+  assert.equal(expired.overall.length, 0);
+  assert.equal(expired.results[0]!.proven, false);
+  const resumed = await runEngine(master, new ChartCache(master, async () => { throw Error("completed chart must not reload"); }), { ...primaryRequest, completed: primary.results });
+  assert.equal(resumed.overall[0]!.key, cutoff.key);
+  let powerCandidate: EngineHit | undefined;
+  const power = await runEngine(master, cache, { ...request, goal: { kind: "power", song: null, challengeEventId: null }, k: 1 }, undefined,
+    snapshot => { powerCandidate = snapshot.response.overall[0]; });
+  assert.ok(powerCandidate);
+  assert.equal(powerCandidate.key, powerCandidate.power);
+  assert.equal(power.results[0]!.proven, true);
+
+
 });
 
 test("merging equal-reward duplicates always keeps the higher mean score", () => {
