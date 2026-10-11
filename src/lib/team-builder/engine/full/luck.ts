@@ -42,6 +42,14 @@ export interface LuckCurve {
   both: Map<number, number>;
 }
 
+/** Settlement of one selected luck range; residues retain the history that per-note marginals discard. */
+export interface LuckSettlement {
+  modulus: number;
+  initial: number;
+  noteScore: (id: number, bonus: boolean, skill: boolean) => number;
+  residues: Float64Array;
+}
+
 /** A lottery state packed into an integer: gauge (8 bits), lots (3), next + 1 (3), rush (3), minimum (2), then flags
  * missUsed, prevMiss, frameLot, frameMiss, bonus (rush luck running), skill and skillPrev (the rush checker as asked
  * this frame and the frame before). */
@@ -73,6 +81,7 @@ export function luckCurve(
   frames: readonly { timeMs: number; judged: readonly { noteId: number; timeMs: number }[] }[],
   luckRanges: readonly number[],
   missRules: readonly MissRule[],
+  settlement?: LuckSettlement,
 ): LuckCurve {
   // Lottery tables.
   const base = { good: [] as Item[], great: [] as Item[], perfect: [] as Item[], hold: [] as Item[] };
@@ -145,14 +154,22 @@ export function luckCurve(
     return pack(g % max, lotsOf(s) + Math.trunc(g / max), nextOf(s), rushOf(s), minimumOf(s), flagsOf(s));
   };
   let dist = new Map<number, number>();
+  // Keep the score residue above the 26 lottery bits, using arithmetic so residues above 63 do not wrap at bit 32.
+  const stateSize = 2 ** 26;
+  let residue = 0;
   const push = (out: Map<number, number>, s: number, p: number) => {
-    if (p > 0) out.set(s, (out.get(s) ?? 0) + p);
+    const key = s + stateSize * residue;
+    if (p > 0) out.set(key, (out.get(key) ?? 0) + p);
   };
   let spare = new Map<number, number>();
   const map = (fn: (s: number, p: number, out: Map<number, number>) => void) => {
     const out = spare;
     out.clear();
-    for (const [s, p] of dist) fn(s, p, out);
+    for (const [key, p] of dist) {
+      residue = Math.floor(key / stateSize);
+      fn(key % stateSize, p, out);
+    }
+    residue = 0;
     spare = dist;
     dist = out;
     if (dist.size > peak) peak = dist.size;
@@ -200,7 +217,7 @@ export function luckCurve(
     if (first < 0) continue;
     let last = record.frames.findIndex((frame, k) => k > first && frame.states[range] === S_FINISH);
     if (last < 0) last = record.frames.length - 1;
-    dist = new Map([[pack(0, 0, INVALID, 0, 0, 0), 1]]);
+    dist = new Map([[pack(0, 0, INVALID, 0, 0, 0) + stateSize * (settlement?.initial ?? 0), 1]]);
     spare = new Map();
     for (let k = first; k <= last; k++) {
       const frame = record.frames[k]!;
@@ -257,7 +274,7 @@ export function luckCurve(
             if (state === S_PLAYING && lotsOf(s) > 0 && !(s & FRAME_LOT)) {
               const tmp = new Map<number, number>();
               consume(s, q, pendingBuff, tmp);
-              for (const [c, cq] of tmp) tail(c, cq);
+              for (const [c, cq] of tmp) tail(c % stateSize, cq);
             } else tail(s, q);
           }
         });
@@ -295,6 +312,13 @@ export function luckCurve(
           sk = 0,
           both = 0;
         const skillBit = atFrameTime ? SKILL : SKILL_PREV;
+        if (settlement) {
+          map((s, p, out) => {
+            residue = (residue + settlement.noteScore(id, !!(s & BONUS), !!(s & skillBit))) % settlement.modulus;
+            push(out, s, p);
+          });
+          return;
+        }
         for (const [s, p] of dist) {
           const bonus = (s & BONUS) !== 0,
             skill = (s & skillBit) !== 0;
@@ -339,6 +363,9 @@ export function luckCurve(
         if (changed && state === S_COMPLETE) next &= ~MISS_USED;
         push(out, next, p);
       });
+    }
+    if (settlement) {
+      for (const [key, p] of dist) settlement.residues[Math.floor(key / stateSize)]! += p;
     }
   }
   return curve;

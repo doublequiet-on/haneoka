@@ -1,4 +1,5 @@
 import "./team-builder-execution.test";
+import "./team-builder-gekiso-expectation.test";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { compileFromMasterTables, type EventEffectRow, type Song, type SkillEffectRow } from "../../src/lib/team-builder/engine/master";
