@@ -11,6 +11,7 @@ import { fetchCatalogVisuals } from "../lib/catalog-visuals";
 import { fetchCrossServerTeamBuilderData } from "../lib/team-builder/data/cross-server";
 import type { TeamBuilderData } from "../lib/team-builder/data";
 import { compileFromTeamData, type EngineMaster } from "../lib/team-builder/engine/master";
+import { maxMemberGrowth, maxSnapGrowth } from "../lib/team-builder/engine/box";
 import { clock } from "../lib/team-builder/engine/execution";
 import { EngineClient } from "../lib/team-builder/engine/client";
 import type { EngineRequest, EngineResponse, Goal, TeamEvaluation } from "../lib/team-builder/engine/api";
@@ -247,6 +248,10 @@ export class TeamBuilder extends LitElement {
       this.view = readBox(snapshot.entries);
       const stored = this.view.prefs[SETTINGS_KEY.slice(5)];
       if (stored && typeof stored === "object") this.settings = { ...DEFAULT_SETTINGS, ...(stored as Partial<BuildSettings>) };
+      if (this.settings.goal === "event" || this.settings.goal === "plan") {
+        this.settings = { ...this.settings, rewardMode: this.settings.goal, goal: "score" };
+        if (ownerChanged) this.tab = "pt";
+      }
     }
     this.requestUpdate();
     void this.pt.restore();
@@ -280,8 +285,8 @@ export class TeamBuilder extends LitElement {
     const base =
       s.scope === "theoretical"
         ? {
-            members: [...this.master.members.values()].map((card) => ({ key: `m${card.id}`, cardId: card.id, level: null, awake: null, rank: null, liveSkillLevel: null, gekisoSkillLevel: null })),
-            snaps: [...this.master.snaps.values()].map((card) => ({ key: `s${card.id}`, cardId: card.id, level: null, rank: null })),
+            members: [...this.master.members.values()].map((card) => ({ key: `m${card.id}`, cardId: card.id, ...maxMemberGrowth(this.master!, card) })),
+            snaps: [...this.master.snaps.values()].map((card) => ({ key: `s${card.id}`, cardId: card.id, ...maxSnapGrowth(this.master!, card) })),
           }
         : engineInputs(this.view);
     const master = this.master;
@@ -301,8 +306,12 @@ export class TeamBuilder extends LitElement {
     };
     return { members: base.members.filter((row) => memberOk(row.cardId)), snaps: base.snaps.filter((row) => snapOk(row.cardId)) };
   }
+  get searchSettings(): BuildSettings {
+    const goal = this.tab === "pt" && this.settings.rewardMode !== "recommendation" ? this.settings.rewardMode : this.settings.goal;
+    return { ...this.settings, goal };
+  }
   goal(): Goal | null {
-    const s = this.settings;
+    const s = this.searchSettings;
     const play = s.playMode === "ap" ? { great: 0, good: 0, bad: 0, miss: 0 } : { great: s.great / 100, good: s.good / 100, bad: 0, miss: s.miss / 100, missEvery: s.missEvery || 0 };
     const challengeId = s.challengeRules && s.eventId !== null ? s.eventId : null;
     switch (s.goal) {
@@ -351,16 +360,16 @@ export class TeamBuilder extends LitElement {
         };
     }
   }
-  request(): EngineRequest | null {
-    const goal = this.goal();
+  request(goal = this.goal()): EngineRequest | null {
     if (!goal || !this.view) return null;
     const cards = this.engineCards();
     const s = this.settings;
     const theoretical = s.scope === "theoretical";
+    const trial = goal.kind === "event" && goal.ranking === "pt-only";
     const memberKeys = new Set(cards.members.map((row) => row.key));
     const snapKeys = new Set(cards.snaps.map((row) => row.key));
     const locked = (kind: "m" | "s") =>
-      theoretical ? [] : [...(kind === "m" ? this.view!.members : this.view!.snaps).values()].filter((row) => row.use && row.lock).map((row) => `${kind}${row.cardId}`);
+      theoretical ? [] : [...(kind === "m" ? this.view!.members : this.view!.snaps).values()].filter((row) => row.lock && (trial || row.use)).map((row) => `${kind}${row.cardId}`);
     return {
       members: cards.members,
       snaps: cards.snaps,
@@ -368,14 +377,14 @@ export class TeamBuilder extends LitElement {
       unknownPolicy: theoretical ? "max" : s.unknownPolicy,
       goal,
       constraints: {
-        requiredMembers: locked("m").filter((key) => memberKeys.has(key)),
+        requiredMembers: locked("m").filter((key) => trial || memberKeys.has(key)),
         excludedMembers: [],
-        requiredSnaps: locked("s").filter((key) => snapKeys.has(key)),
+        requiredSnaps: locked("s").filter((key) => trial || snapKeys.has(key)),
         excludedSnaps: [],
-        leader: s.leader !== null && memberKeys.has(`m${s.leader}`) ? `m${s.leader}` : null,
-        bindings: s.bindings.filter(([member]) => memberKeys.has(`m${member}`)).map(([member, snap]) => [`m${member}`, snap === null ? null : `s${snap}`]),
+        leader: s.leader !== null && (trial || memberKeys.has(`m${s.leader}`)) ? `m${s.leader}` : null,
+        bindings: s.bindings.filter(([member]) => trial || memberKeys.has(`m${member}`)).map(([member, snap]) => [`m${member}`, snap === null ? null : `s${snap}`]),
         noSnaps: s.noSnaps,
-        minBonusPercent: s.minBonus,
+        minBonusPercent: goal.kind === "event" || goal.kind === "plan" ? s.minBonus : null,
       },
       k: s.k,
       timeLimitMs: s.timeLimit ? s.timeLimit * 1000 : null,
@@ -392,7 +401,7 @@ export class TeamBuilder extends LitElement {
     if (!request || !this.engine || this.running) return;
     const contextKey = this.calculationContext();
     const generation = ++this.runGeneration;
-    const settings = { ...this.settings };
+    const settings = this.searchSettings;
     request.contextKey = contextKey;
     if (verify) {
       request.timeLimitMs = null;

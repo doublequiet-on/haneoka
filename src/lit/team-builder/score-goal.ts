@@ -25,7 +25,14 @@ export const SCORE_GOALS = {
   },
 } as const;
 
-export const resultSettings = (host: TeamBuilder): BuildSettings => host.resultSettings ?? host.settings;
+export const resultSettings = (host: TeamBuilder): BuildSettings => {
+  if (host.tab === "pt" && host.settings.rewardMode === "recommendation") {
+    const goal = host.pt.job?.request.goal;
+    return { ...host.settings, goal: "event", route: "live", measure: goal?.kind === "event" ? goal.measure : host.pt.measure,
+      songs: goal?.kind === "event" ? goal.songs : host.settings.songs };
+  }
+  return host.resultSettings ?? host.searchSettings;
+};
 
 export function scoreText(host: TeamBuilder, message: readonly [string, string]): string {
   return host.t(message[0], message[1]);

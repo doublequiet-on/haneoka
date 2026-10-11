@@ -130,7 +130,7 @@ function orderTimeline(host: TeamBuilder, hit: EngineHit, index: number) {
   const value = timelines.get(key);
   if (value) return value;
   timelines.set(key, "loading");
-  const request = host.request();
+  const request = host.tab === "pt" && host.settings.rewardMode === "recommendation" ? host.pt.job?.request : host.request();
   if (request && host.engine && hit.song)
     void host.engine
       .explain({ members: request.members, snaps: request.snaps, unknownPolicy: request.unknownPolicy, team: { members: hit.members, snaps: hit.snaps, leader: hit.members[0]! }, song: hit.song, eventOrder: ORDERS[index]!.map((slot) => hit.members[slot]!), play: { great: 0, good: 0, bad: 0, miss: 0 } })
@@ -365,22 +365,22 @@ export function saveTeam(host: TeamBuilder, members: number[], snaps: (number | 
   host.requestUpdate();
 }
 
-function renderHit(host: TeamBuilder, hit: EngineHit, index: number): TemplateResult {
+export function renderHit(host: TeamBuilder, hit: EngineHit, index: number, options: { rank?: TemplateResult; subtitle?: string; stale?: boolean; content?: TemplateResult } = {}): TemplateResult {
   const key = hitKey(hit);
   const expanded = host.expanded.has(key);
   const compared = host.compare.includes(key);
   const main = primary(host, hit);
   const catalog = host.catalog!;
   return html`
-    <article class=${`card card--outlined tb-hit${index === 0 ? " is-best" : ""}`} aria-label=${`#${index + 1} · ${main.label} ${main.value}`}>
+    <article class=${`card card--outlined tb-hit${index === 0 ? " is-best" : ""}`} aria-label=${`${options.subtitle ?? `#${index + 1}`} · ${main.label} ${main.value}`}>
       <header class="tb-hit__header">
-        <span class="tb-hit__rank">${index + 1}</span>
+        <span class="tb-hit__rank">${options.rank ?? index + 1}</span>
         <div class="tb-hit__main">
-          <span class="tb-hit__label">${main.label}${hit.song && resultSettings(host).songs.length > 1 ? html` · <span class="clamp-1">${catalog.songTitle(hit.song.songId)} ${catalog.difficultyLabel(hit.song.songId, hit.song.difficulty)}</span>` : nothing}</span>
+          <span class="tb-hit__label">${main.label}${hit.song ? html` · <span class="clamp-1">${catalog.songTitle(hit.song.songId)} ${catalog.difficultyLabel(hit.song.songId, hit.song.difficulty)}</span>` : nothing}${options.subtitle ? html` · ${options.subtitle}` : nothing}</span>
           <strong class="tb-hit__value tabular">${main.value}</strong>
         </div>
         <div class="tb-hit__actions">
-          ${iconButton({ icon: "bookmark_add", label: host.t("saveTeam", "Save team"), disabled: host.stale, onClick: () => saveTeam(host, hit.members.map(cardIdOf), hit.snaps.map((snap) => (snap ? cardIdOf(snap) : null)), hit.song) })}
+          ${iconButton({ icon: "bookmark_add", label: host.t("saveTeam", "Save team"), disabled: options.stale ?? host.stale, onClick: () => saveTeam(host, hit.members.map(cardIdOf), hit.snaps.map((snap) => (snap ? cardIdOf(snap) : null)), hit.song) })}
           ${iconButton({ icon: "compare_arrows", label: host.t("compare", "Compare"), toggle: true, pressed: compared, onClick: () => {
             host.compare = compared ? host.compare.filter((item) => item !== key) : [...host.compare, key].slice(-3);
             host.requestUpdate();
@@ -390,6 +390,7 @@ function renderHit(host: TeamBuilder, hit: EngineHit, index: number): TemplateRe
         </div>
       </header>
       <div class="cluster tb-hit__chips">${chips(host, hit)}</div>
+      ${options.content ?? nothing}
       ${formation(host, hit)}
       <button class="button button--text tb-hit__more" type="button" aria-expanded=${String(expanded)} @click=${() => {
         if (expanded) host.expanded.delete(key);
@@ -406,7 +407,7 @@ function renderHit(host: TeamBuilder, hit: EngineHit, index: number): TemplateRe
   `;
 }
 
-function compareTable(host: TeamBuilder, hits: EngineHit[]): TemplateResult {
+export function compareTable(host: TeamBuilder, hits: EngineHit[]): TemplateResult {
   const picked = host.compare.map((key) => hits.find((hit) => hitKey(hit) === key)).filter((hit): hit is EngineHit => !!hit);
   if (picked.length < 2) return html``;
   const catalog = host.catalog!;
@@ -440,7 +441,7 @@ function compareTable(host: TeamBuilder, hits: EngineHit[]): TemplateResult {
 
 export function renderResults(host: TeamBuilder): TemplateResult {
   const results = host.results;
-  if (!results) {
+  if (!results || (["event", "plan"].includes(host.resultSettings?.goal ?? "score") !== (host.tab === "pt"))) {
     return html`
       <section class="surface tb-results tb-results--empty">
         <div class="state">

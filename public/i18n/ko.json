@@ -1349,6 +1349,7 @@
   },
   "tools": {
     "teamBuilder": {
+      "rewardSearch": "보상 팀 편성",
       "improvementBound": "최대 {percent}% 향상",
       "recommendation": "추천",
       "continueOptimal": "최적 검증 계속",

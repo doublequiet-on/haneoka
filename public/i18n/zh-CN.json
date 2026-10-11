@@ -1349,6 +1349,7 @@
   },
   "tools": {
     "teamBuilder": {
+      "rewardSearch": "奖励配队",
       "improvementBound": "可提升上限 {percent}%",
       "recommendation": "推荐",
       "continueOptimal": "继续验证最优",

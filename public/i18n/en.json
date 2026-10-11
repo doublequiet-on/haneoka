@@ -1349,6 +1349,7 @@
   },
   "tools": {
     "teamBuilder": {
+      "rewardSearch": "Reward team search",
       "improvementBound": "Up to {percent}% improvement",
       "recommendation": "Recommendation",
       "continueOptimal": "Continue verifying optimality",

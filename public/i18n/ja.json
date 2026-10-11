@@ -1349,6 +1349,7 @@
   },
   "tools": {
     "teamBuilder": {
+      "rewardSearch": "報酬編成",
       "improvementBound": "改善上限 {percent}%",
       "recommendation": "おすすめ",
       "continueOptimal": "最適性の検証を続ける",

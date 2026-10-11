@@ -4,6 +4,7 @@ import type { Criterion } from "../../lib/team-builder/engine/objectives";
 export type Tab = "build" | "box" | "account" | "teams" | "pt";
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
 export interface BuildSettings {
+  rewardMode: "recommendation" | "event" | "plan";
   fullRanking: boolean;
   ptCycle: boolean;
   ptMode: "solo" | "gekiso";
@@ -50,6 +51,7 @@ export interface BuildSettings {
   gekisoRank: number;
 }
 export const DEFAULT_SETTINGS: BuildSettings = {
+  rewardMode: "recommendation",
   fullRanking: false,
   ptCycle: false,
   ptMode: "solo",
