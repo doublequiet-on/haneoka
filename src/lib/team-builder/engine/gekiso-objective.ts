@@ -148,6 +148,10 @@ const seededByChart = new WeakMap<GekisoChart, Map<string, SearchHit<GekisoDetai
 export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetail> & { levels: number } {
   const started = performance.now();
   const { master, members, snaps, chart, criterion } = input;
+  const deadline = input.timeLimitMs == null ? Infinity : started + input.timeLimitMs;
+  // Luck uses a shard-independent whole-pool estimate; other shards must not repeat its calibration.
+  if (chart.luck && input.shard && input.shard.index !== 0)
+    return { hits: [], proven: false, bound: null, stats: { leaders: 0, memberNodes: 0, snapNodes: 0, candidates: 0, exact: 0, elapsedMs: performance.now() - started }, levels: 0 };
   const n = chart.notes.length;
   const count = chart.full.convertedCount;
   const unit = master.live.adjustment * chart.difficultyFactor;
@@ -269,14 +273,19 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
 
   // Luck: the strongest luck members and supports at once raise every rush skill's odds; the estimate uses them.
   const luckDeck: Performer[] = [];
-  if (chart.luck) {
+  const calibrateLuck = () => {
+    if (!chart.luck) return true;
     const baseDeck: Performer[] = [];
-    const memberLuck = members
-      .map((_, i) => ({ i, value: gkMember[i]!.gekisouSkill && bonusOf[i] === 0 ? gain([gkMember[i]!], baseDeck) : 0 }))
+    const memberLuck: { i: number; value: number }[] = [];
+    for (let i = 0; i < members.length; i++) {
+      if (performance.now() >= deadline) return false;
+      memberLuck.push({ i, value: gkMember[i]!.gekisouSkill && bonusOf[i] === 0 ? gain([gkMember[i]!], baseDeck) : 0 });
+    }
+    const ranked = memberLuck
       .filter((item) => item.value > 0)
       .sort((a, b) => b.value - a.value);
     const characters = new Set<number>();
-    for (const { i } of memberLuck) {
+    for (const { i } of ranked) {
       if (characters.has(members[i]!.card.characterId) || characters.size === 5) continue;
       characters.add(members[i]!.card.characterId);
       luckDeck.push(gkMember[i]!);
@@ -284,6 +293,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     const seen = new Set<string>();
     const supports: { p: Performer; value: number }[] = [];
     for (const snap of snaps) {
+      if (performance.now() >= deadline) return false;
       const skills = snap.card.gekisoSupportSkillIds.map((id, k) => [id, snap.gekisoSkillLevels[k] ?? 1] as const).filter(([id]) => id);
       const key = JSON.stringify(skills);
       if (!skills.length || seen.has(key)) continue;
@@ -292,7 +302,8 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       supports.push({ p, value: gain([p], baseDeck) });
     }
     for (const { p } of supports.sort((a, b) => b.value - a.value).slice(0, 5)) luckDeck.push(p);
-  }
+    return true;
+  };
 
   const slotSkills = new Map<string, SlotSkill>();
   const slotSkill = (member: number, snap: number) => {
@@ -335,7 +346,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   };
 
   // Lower bounds: no Gekisou member skills, each support alone.
-  const base = weights(contextOf([]));
+  let base: Weights | undefined;
   const supportLow = new Map<string, number>();
   const lowOf = (member: number, snap: number) => {
     const p = supportPerformer(member, snap);
@@ -346,7 +357,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       if (value === undefined) supportLow.set(key, (value = Math.max(0, gain([p], []))));
       support = value;
     }
-    return liveWeight(slotSkill(member, snap), base, criterion === "min" ? "worst" : "mean") + support;
+    return liveWeight(slotSkill(member, snap), base ??= weights(contextOf([])), criterion === "min" ? "worst" : "mean") + support;
   };
 
   const relative = 3e-6;
@@ -419,7 +430,6 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     return { key, detail: { scores, skills, seeds: ctx.seeds } };
   };
 
-  const deadline = input.timeLimitMs == null ? Infinity : started + input.timeLimitMs;
   /** Exact power of a complete team (leader first). */
   const teamPowerOf = (team: Team) =>
     teamPower(master, input.player, team.members.map((i) => members[i]!), team.snaps.map((j) => (j < 0 ? null : snaps[j]!)), 0, input.music, []);
@@ -431,6 +441,10 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   const stats = { leaders: 0, memberNodes: 0, snapNodes: 0, candidates: 0, exact: 0, elapsedMs: 0 };
   let proven = !chart.luck;
   let bound: number | null = null;
+  const finish = () => ({
+    hits: [...hits.values()].sort((a, b) => b.key - a.key).slice(0, input.k),
+    proven, bound, stats: { ...stats, elapsedMs: performance.now() - started }, levels: levels.length,
+  });
   // Support gains on a coarse level grid: a gain at a higher level bounds every lower one.
   const grid = maxLevel > 0 ? [...new Set([0, Math.ceil(maxLevel / 4), Math.ceil(maxLevel / 2), Math.ceil((3 * maxLevel) / 4), maxLevel])].sort((a, b) => a - b) : [0];
   const levelData = new Map<number, { within: EngineMaster; deck: Performer[]; weights: Weights }>();
@@ -469,11 +483,16 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   /** Fills an objective's per-slot caches (support gains need simulations) before a timed search starts. */
   const warm = (objective: ObjectiveAdapter<unknown>) => {
     const excluded = new Set(input.constraints.excludedSnaps);
-    members.forEach((_, i) => {
-      if (input.constraints.excludedMembers.includes(i)) return;
+    for (let i = 0; i < members.length; i++) {
+      if (performance.now() >= deadline) return false;
+      if (input.constraints.excludedMembers.includes(i)) continue;
       objective.skill(i, -1);
-      if (!input.constraints.noSnaps) snaps.forEach((_, j) => excluded.has(j) || objective.skill(i, j));
-    });
+      if (!input.constraints.noSnaps) for (let j = 0; j < snaps.length; j++) {
+        if (performance.now() >= deadline) return false;
+        if (!excluded.has(j)) objective.skill(i, j);
+      }
+    }
+    return true;
   };
   const levelConstraints = (level: number): Constraints => ({
     ...input.constraints,
@@ -539,18 +558,51 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   let seedCache = seededByChart.get(chart);
   if (!seedCache) seededByChart.set(chart, (seedCache = new Map()));
   // Luck charts are ranked by the whole-pool estimate below, which ignores leader shards: one shard does it.
-  if (chart.luck && input.shard && input.shard.index !== 0)
-    return { hits: [], proven: false, bound: null, stats: { ...stats, elapsedMs: performance.now() - started }, levels: levels.length };
   const publish = () => input.onCandidate?.([...hits.values()].sort((a, b) => b.key - a.key).slice(0, input.k));
   for (const team of input.initialTeams ?? []) {
     if (performance.now() > deadline) break;
     const power = teamPowerOf(team);
     const { key, detail } = exact(team, power.total);
+    stats.exact++;
     hits.set(setKey(team), { team, key, detail, power: power.total, slotPowers: power.slots, totals: { power: power.total, skill: 0, skillLow: 0, bonus: 0 } });
     publish();
   }
+  if (chart.luck && !hits.size && performance.now() < deadline) {
+    // A feasibility seed is settled before calibration. Empty optional slots avoid making the most complex
+    // support combination block the first result; the score search still includes every usable snapshot.
+    const seed = searchTeams({
+      master, player: input.player, members, snaps, music: input.music,
+      objective: {
+        skill: () => [0, 0], memberBonus: (member) => bonusOf[member]!, snapBonus: () => 0,
+        bound: () => 0, interval: () => [0, 0], exact: () => ({ key: 0, detail: null }),
+        preferSnap: (_member, snap) => snap < 0 ? 1 : 0,
+        preferMember: (member) => {
+          const skill = gkMember[member]!.gekisouSkill;
+          return skill ? -(master.gekisoSkills.get(skill[0])?.effects ?? []).filter(row =>
+            row.level === skill[1] && row.type >= 11000 && row.type <= 11005).length : 0;
+        },
+      },
+      constraints: input.constraints, k: 1,
+      timeLimitMs: Math.min(100, deadline - performance.now()),
+    });
+    const candidate = seed.hits[0];
+    if (candidate && performance.now() < deadline) {
+      const { team, power, slotPowers } = candidate;
+      const evaluated = exact(team, power);
+      stats.exact++;
+      hits.set(setKey(team), { ...candidate, ...evaluated, team, power, slotPowers });
+      publish();
+    }
+  }
+  if (performance.now() >= deadline || !calibrateLuck()) {
+    proven = false;
+    return finish();
+  }
   const seeded = seedCache.get(seedKey);
-  if (seeded) for (const hit of seeded) hits.set(setKey(hit.team), hit);
+  if (seeded) for (const hit of seeded) {
+    const key = setKey(hit.team);
+    if (!hits.has(key) || hits.get(key)!.key < hit.key) hits.set(key, hit);
+  }
   else {
     const pool = new Map<string, { team: Team; value: number }>();
     // A few levels are enough to seed: the per-level passes below still visit every level.
@@ -558,7 +610,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     for (const level of seedLevels) {
       if (performance.now() > deadline) break;
       const surrogate = objectiveFor(level, true);
-      warm(surrogate);
+      if (!warm(surrogate)) break;
       const out = searchTeams({
         master,
         player: input.player,
@@ -604,7 +656,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       break;
     }
     const objective = objectiveFor(level, false) as ObjectiveAdapter<GekisoDetail>;
-    warm(objective);
+    if (!warm(objective)) { proven = false; break; }
     const best = [...hits.values()].sort((a, b) => b.key - a.key).slice(0, input.k);
     const seeds = best.map((hit) => hit.team);
     // Seeds rarely hold this level's bonus: the k-th best of every level so far is the floor any team must beat.
@@ -641,12 +693,5 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       if (!previous || previous.key < hit.key) hits.set(key, hit);
     }
   }
-  stats.elapsedMs = performance.now() - started;
-  return {
-    hits: [...hits.values()].sort((a, b) => b.key - a.key).slice(0, input.k),
-    proven,
-    bound,
-    stats,
-    levels: levels.length,
-  };
+  return finish();
 }

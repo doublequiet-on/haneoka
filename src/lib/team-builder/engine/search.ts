@@ -61,6 +61,8 @@ export interface ObjectiveAdapter<Detail> {
   jointTargets?(limit: number): readonly { bonus: number; product: number }[];
   /** Snap ordering hint: higher first within a slot (e.g. recovery when life drains). */
   preferSnap?(member: number, snap: number): number;
+  /** Member and leader traversal hint: higher first, without excluding any member. */
+  preferMember?(member: number): number;
   /** Optional tighter upper bound for a complete team, checked before `interval`. */
   leafBound?(team: Team, totals: Totals): number;
   /** Interval containing the exact key of a complete team with exact power. */
@@ -477,7 +479,9 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
   );
   // Leader order: strongest optimistic slot first, so the threshold rises early.
   const memberScore = (i: number) => bases[i]!.fixedPoints + best[i]!.power;
-  leaders.sort((a, b) => memberScore(b) - memberScore(a));
+  const preferMember = objective.preferMember;
+  const preference = (a: number, b: number) => preferMember ? preferMember(b) - preferMember(a) : 0;
+  leaders.sort((a, b) => preference(a, b) || memberScore(b) - memberScore(a));
   // Interleaved over the strength order, so every shard holds a balanced mix of strong and weak leaders.
   if (input.shard && input.shard.count > 1) {
     const { index, count } = input.shard;
@@ -581,12 +585,12 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
         break;
       }
       const ordered = (must.length ? must : list).sort(
-        (a, b) => slotPower(b) + best[b]!.power - (slotPower(a) + best[a]!.power),
+        (a, b) => preference(a, b) || slotPower(b) + best[b]!.power - (slotPower(a) + best[a]!.power),
       );
       (must.length ? forced : free).push(ordered);
     }
     if (!groups.size || forced.length > 4) continue;
-    free.sort((a, b) => slotPower(b[0]!) + best[b[0]!]!.power - (slotPower(a[0]!) + best[a[0]!]!.power));
+    free.sort((a, b) => preference(a[0]!, b[0]!) || slotPower(b[0]!) + best[b[0]!]!.power - (slotPower(a[0]!) + best[a[0]!]!.power));
     const characters = [...forced, ...free];
     const forcedCount = forced.length;
     // Per character, the optimistic slot values of its best member.

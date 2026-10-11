@@ -1,9 +1,10 @@
 import "./team-builder-execution.test";
 import "./team-builder-gekiso-expectation.test";
+import "./team-builder-gekiso-cold-start.test";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { compileFromMasterTables, type EventEffectRow, type Song, type SkillEffectRow } from "../../src/lib/team-builder/engine/master";
-import { searchTeams, NO_CONSTRAINTS, type SearchInput, type SearchHit, type Team } from "../../src/lib/team-builder/engine/search";
+import { searchTeams, NO_CONSTRAINTS, type SearchInput, type SearchHit, type Team, type ObjectiveAdapter } from "../../src/lib/team-builder/engine/search";
 import { teamPower, type MemberState, type SnapState, type PlayerState } from "../../src/lib/team-builder/engine/power";
 import { eventObjective, eventScoreTieObjective, liveScoreObjective, scoreCapObjective, type EventRoute, type EventDetail } from "../../src/lib/team-builder/engine/objectives";
 import { mergeShardResponses } from "../../src/lib/team-builder/engine/merge";
@@ -30,6 +31,23 @@ function fixture(n = 7, s = 2) {
     characterMemory: new Map(), musicMemory: new Map() };
   return { master, members, snaps, player, music: null };
 }
+
+test("member traversal hints keep the exhaustive constrained Top-K", () => {
+  const data = fixture(7, 2);
+  const constraints = { ...NO_CONSTRAINTS, requiredMembers: [1], excludedMembers: [6], requiredSnaps: [0], bindings: new Map([[0, 0]]) };
+  for (const direction of [-1, 1]) {
+    const objective: ObjectiveAdapter<null> = {
+      skill: () => [0, 0], memberBonus: () => 0, snapBonus: () => 0,
+      bound: totals => totals.power, interval: (_team, totals) => [totals.power, totals.power],
+      exact: (_team, power) => ({ key: power, detail: null }), preferMember: member => direction * member,
+    };
+    const input: SearchInput<null> = { ...data, constraints, objective, k: 3, disableSnapDominance: true };
+    const expected = exhaustive(input).slice(0, input.k).map(hit => hit.key);
+    const result = searchTeams(input);
+    assert.equal(result.proven, true);
+    assert.deepEqual(result.hits.map(hit => hit.key), expected);
+  }
+});
 
 /** Independent full enumeration, with no bounds, dominance, seed or candidate trimming. */
 function exhaustive<D>(input: SearchInput<D>, compare = (a: SearchHit<D>, b: SearchHit<D>) => b.key - a.key): SearchHit<D>[] {
