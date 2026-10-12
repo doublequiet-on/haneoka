@@ -87,7 +87,7 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   attributes: [],
   bands: [],
   minRarity: 0,
-  timeLimit: 3,
+  timeLimit: null,
   just: 100,
   gekisoRank: 1,
 };

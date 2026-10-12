@@ -2,10 +2,10 @@
 import type { TeamBuilderData } from "../data";
 import type { EngineRequest, EngineResponse, SongRef, TeamEvaluation, Timeline } from "./api";
 import type { EngineCall, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
-import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs, MAX_SEARCH_MS } from "./execution";
+import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs } from "./execution";
 import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
 
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void; snapshot?: (value: EngineSnapshot) => void; search?: number };
+type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void; snapshot?: (value: EngineSnapshot) => void };
 
 /** One engine Worker: compiles the release once, then serves calls. */
 class EngineWorker {
@@ -59,7 +59,7 @@ class EngineWorker {
   private call(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, progress, snapshot, ...(message.type === "run" ? { search: clock() } : {}) });
+      this.pending.set(id, { resolve, reject, progress, snapshot });
       this.worker!.postMessage({ ...message, id });
     });
   }
@@ -78,11 +78,6 @@ class EngineWorker {
   /** Starts the Worker and compiles the release ahead of the first call. */
   warm(): Promise<void> {
     return this.spawn().catch(() => {});
-  }
-  /** Busy only with searches started before [time]: a search that outlived its deadline. */
-  overdue(time: number) {
-    const searches = [...this.pending.values()].filter(pending => pending.search !== undefined);
-    return searches.length > 0 && searches.every(pending => pending.search! < time);
   }
   cancel() {
     for (const pending of this.pending.values()) pending.reject(new DOMException("Cancelled", "AbortError"));
@@ -140,7 +135,7 @@ export class EngineClient {
   run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<EngineResponse> {
     const started = clock();
     const generation = this.generation;
-    const task = { ...request, deadline: Math.min(deadlineOf(request), started + MAX_SEARCH_MS), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
+    const task = { ...request, deadline: deadlineOf(request), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
     let expired = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const waiting = new Promise<EngineResponse>(resolve => {
@@ -202,12 +197,7 @@ export class EngineClient {
         if (stopped) return;
         publish({ ...latest, stopReason: reason }, true);
         stopped = true;
-        // Searches carry the same deadline and end on their own: keeping their Workers spares the next search
-        // compiling the release again. Only one that overruns is stopped.
-        if (reason === "budget") {
-          const at = clock();
-          setTimeout(() => { for (const worker of this.pool) if (worker.overdue(at)) worker.cancel(); }, 1500);
-        } else for (const worker of this.pool) worker.cancel();
+        for (const worker of this.pool) worker.cancel();
         resolve(latest);
       };
     });

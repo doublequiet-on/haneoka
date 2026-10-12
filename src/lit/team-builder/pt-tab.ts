@@ -19,7 +19,7 @@ import {
   type PtMeasure,
   type PtScope,
 } from "../../lib/team-builder/pt-recommendation";
-import { clock, improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
+import { improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
 import { PtCheckpoint } from "../../lib/team-builder/pt-checkpoint";
 import { compareTable, renderHit } from "./results";
 import { renderBuildTab, renderCandidates } from "./build-tab";
@@ -209,7 +209,8 @@ export class PtController {
     this.restoreKey = "";
   }
   async start(resume: boolean, scope?: PtScope) {
-    const deadline = resume ? Infinity : clock() + 3000;
+    // Results stream in as they are found; the search runs until every song is proven or it is stopped.
+    const deadline = Infinity;
     this.sync();
     const host = this.host;
     if (this.issues.length) {
