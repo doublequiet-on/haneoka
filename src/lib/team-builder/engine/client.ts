@@ -1,11 +1,11 @@
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
 import type { TeamBuilderData } from "../data";
-import type { EngineRequest, EngineResponse, TeamEvaluation, Timeline } from "./api";
+import type { EngineRequest, EngineResponse, SongRef, TeamEvaluation, Timeline } from "./api";
 import type { EngineCall, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
-import { clock, deadlineOf, remaining, emptyResponse, completeResponse } from "./execution";
+import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs, MAX_SEARCH_MS } from "./execution";
 import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
 
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void; snapshot?: (value: EngineSnapshot) => void };
+type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void; snapshot?: (value: EngineSnapshot) => void; search?: number };
 
 /** One engine Worker: compiles the release once, then serves calls. */
 class EngineWorker {
@@ -59,7 +59,7 @@ class EngineWorker {
   private call(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, progress, snapshot });
+      this.pending.set(id, { resolve, reject, progress, snapshot, ...(message.type === "run" ? { search: clock() } : {}) });
       this.worker!.postMessage({ ...message, id });
     });
   }
@@ -76,8 +76,13 @@ class EngineWorker {
     return this.ready !== null;
   }
   /** Starts the Worker and compiles the release ahead of the first call. */
-  warm() {
-    void this.spawn().catch(() => {});
+  warm(): Promise<void> {
+    return this.spawn().catch(() => {});
+  }
+  /** Busy only with searches started before [time]: a search that outlived its deadline. */
+  overdue(time: number) {
+    const searches = [...this.pending.values()].filter(pending => pending.search !== undefined);
+    return searches.length > 0 && searches.every(pending => pending.search! < time);
   }
   cancel() {
     for (const pending of this.pending.values()) pending.reject(new DOMException("Cancelled", "AbortError"));
@@ -94,10 +99,13 @@ class EngineWorker {
 
 /** How many Workers share a search: the device's cores, minus one for the page, at most eight. */
 const poolSize = () => {
-  const cores = typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
-  // Each Worker holds its own compiled release (tens of MB): low-memory phones get fewer.
-  const memory = typeof navigator !== "undefined" ? ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8) : 8;
-  const limit = memory <= 2 ? 2 : memory <= 4 ? 4 : 8;
+  const nav = typeof navigator !== "undefined" ? (navigator as Navigator & { deviceMemory?: number }) : null;
+  const cores = nav?.hardwareConcurrency || 4;
+  // A searching Worker's heap grows to a few hundred MB, and a phone browser discards a tab long before a desktop
+  // one does. Browsers that do not report memory (Safari, Firefox) are sized by form factor alone.
+  const phone = !!nav && (/Android|iPhone|iPad|iPod|Mobile/u.test(nav.userAgent) || (nav.maxTouchPoints > 1 && /Macintosh/u.test(nav.userAgent)));
+  const memory = nav?.deviceMemory ?? (phone ? 2 : 8);
+  const limit = memory <= 2 ? 2 : memory <= 4 ? 3 : phone ? 4 : 8;
   return Math.max(1, Math.min(limit, cores - 1));
 };
 /** Below this many members a single Worker finishes before the others would compile the release. */
@@ -118,7 +126,8 @@ export class EngineClient {
   }
   /** Warm one Worker; the others compile lazily only if a search actually fans out. */
   warm() {
-    this.pool[0]?.warm();
+    // The others compile once the first is ready, so the first search can use every Worker.
+    void this.pool[0]?.warm().then(() => { for (const worker of this.pool.slice(1)) void worker.warm(); });
   }
   /** The idlest Worker, preferring one that has already compiled the release. */
   private idlest() {
@@ -131,7 +140,7 @@ export class EngineClient {
   run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<EngineResponse> {
     const started = clock();
     const generation = this.generation;
-    const task = { ...request, deadline: deadlineOf(request), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
+    const task = { ...request, deadline: Math.min(deadlineOf(request), started + MAX_SEARCH_MS), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
     let expired = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const waiting = new Promise<EngineResponse>(resolve => {
@@ -193,7 +202,12 @@ export class EngineClient {
         if (stopped) return;
         publish({ ...latest, stopReason: reason }, true);
         stopped = true;
-        for (const worker of this.pool) worker.cancel();
+        // Searches carry the same deadline and end on their own: keeping their Workers spares the next search
+        // compiling the release again. Only one that overruns is stopped.
+        if (reason === "budget") {
+          const at = clock();
+          setTimeout(() => { for (const worker of this.pool) if (worker.overdue(at)) worker.cancel(); }, 1500);
+        } else for (const worker of this.pool) worker.cancel();
         resolve(latest);
       };
     });
@@ -208,6 +222,42 @@ export class EngineClient {
       if (completeResponse(latest)) return latest;
       const parallel = this.pool.length > 1 && request.members.length >= PARALLEL_MIN_MEMBERS && request.goal.kind !== "plan";
       if (!parallel) return this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, accept);
+      const songs = requestSongs(request);
+      if (songs.length > 1 && songs.every((song): song is SongRef => song !== null)) {
+        // Songs run whole, side by side: a Worker keeps only the current song's chart, seeds and contexts, and
+        // shards that each walked the whole list would prepare every song once per shard. Each song gets an even
+        // share of the time left, so every song has teams when the deadline arrives.
+        const same = (song: SongRef) => (hit: { song: SongRef | null }) => hit.song?.songId === song.songId && hit.song?.difficulty === song.difficulty;
+        const parts = latest.results.map(result => result);
+        const merged = (): EngineResponse => ({ ...latest, results: [...parts], overall: [], elapsedMs: clock() - started });
+        let next = 0, done = 0;
+        const runSong = async (engine: EngineWorker) => {
+          while (!stopped && remaining(deadline) > 0 && next < songs.length) {
+            const index = next++;
+            const song = songs[index]!;
+            if (parts[index]!.proven) { progress?.(++done / songs.length, 1); continue; }
+            const share = remaining(deadline) * this.pool.length / (songs.length - index);
+            const part: EngineRequest = {
+              ...request,
+              goal: { ...request.goal, songs: [song] } as EngineRequest["goal"],
+              deadline: Math.min(deadline, clock() + share),
+              seeds: request.seeds?.filter(same(song)),
+              completed: request.completed?.filter(same(song)),
+            };
+            const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: part }, undefined, value => {
+              if (stopped || value.contextKey !== request.contextKey || value.requestId !== request.requestId) return;
+              parts[index] = value.response.results[0] ?? parts[index]!;
+              publish(merged());
+            });
+            if (stopped) return;
+            parts[index] = response.results[0] ?? parts[index]!;
+            publish(merged());
+            progress?.(++done / songs.length, 1);
+          }
+        };
+        await Promise.all(this.pool.map(runSong));
+        return merged();
+      }
       let seeds = request.seeds ?? [];
       if (!request.noFloor && request.goal.kind !== "gekiso") {
         const quick = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, deadline: Math.min(deadline, clock() + QUICK_MS) } }, progress, accept);

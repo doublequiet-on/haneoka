@@ -638,7 +638,8 @@
         "effectsByLevel": "Effects by level",
         "artworkCard": "Artwork card",
         "unlockConditions": "Unlock conditions",
-        "gekisouSupportSkill": "Gekiso support skill"
+        "gekisouSupportSkill": "Gekiso support skill",
+        "cardMovieGacha": "Gacha movie"
       },
       "costs": {
         "mode": "Material calculation",
@@ -2971,6 +2972,16 @@
       "reportUser": "Report user",
       "relationshipActions": "User relationship actions",
       "relationshipFailed": "Could not update this relationship"
+    },
+    "app": {
+      "title": "Sign in to the app",
+      "signedInAs": "Signed in as",
+      "continue": "Continue in the app",
+      "useAnother": "Use another account",
+      "cancel": "Cancel",
+      "returned": "Returned to the app",
+      "invalid": "Open this page from the app",
+      "failed": "Could not sign in to the app"
     }
   },
   "community": {
@@ -3501,7 +3512,10 @@
           "mysekai": "Project Sekai My Sekai conversations",
           "live": "Project Sekai virtual live MCs"
         }
-      }
+      },
+      "gameAccountPlayerId": "Player ID {id}",
+      "gameAccountRank": "Player rank {value}",
+      "gameAccountRating": "High score rating {value}"
     }
   },
   "legal": {
