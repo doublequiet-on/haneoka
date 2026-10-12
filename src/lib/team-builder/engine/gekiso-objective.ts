@@ -14,7 +14,7 @@ import type { OrderScores } from "./live";
 import { performer } from "./full/deck";
 import type { Performer } from "./full/conditions";
 import { M_ALL, M_COMBO } from "./full/gekisou";
-import { gekisoContext, gekisoPerformer, scoreOrdersGekiso, type GekisoChart, type GekisoContext } from "./gekiso";
+import { gekisoContext, gekisoPerformer, scoreOrdersGekiso, settleSlack, type GekisoChart, type GekisoContext } from "./gekiso";
 import { bestOrder5, type Criterion } from "./objectives";
 
 export interface GekisoDetail {
@@ -437,11 +437,11 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     });
     return (power * total) / count;
   };
-  const exact = (team: Team, power: number) => {
+  const exact = (team: Team, power: number, settle = true) => {
     const ctx = contextOf(deckOf(team));
     const skills = team.members.map((member, slot) => slotSkill(member, team.snaps[slot]!));
     const t0 = performance.now();
-    const scores = scoreOrdersGekiso(master, chart, ctx, power, skills);
+    const scores = scoreOrdersGekiso(master, chart, ctx, power, skills, undefined, settle);
     timing.orders++;
     timing.ordersMs += performance.now() - t0;
     const key = criterion === "min" ? scores.min : criterion === "max" ? scores.max : scores.mean;
@@ -647,9 +647,26 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       for (const hit of out.hits) pool.set(setKey(hit.team) + "#" + hit.team.snaps.join(","), { team: hit.team, value: hit.key });
     }
     // The optimistic values overrate some teams by a few percent: score the most promising ones exactly.
-    const ranked = [...pool.values()].sort((a, b) => b.value - a.value).slice(0, chart.luck ? Math.max(120, input.k * 12) : Math.max(60, input.k * 12));
+    let ranked: { team: Team; value: number }[] = [...pool.values()].sort((a, b) => b.value - a.value).slice(0, chart.luck ? Math.max(120, input.k * 12) : Math.max(60, input.k * 12));
+    // Settling a Luck range's rank remainder runs the lottery once per order, and the remainder only takes off less
+    // than a point per range. The unsettled scores bound the settled ones from above, so teams are settled best
+    // bound first, and the rest can no longer reach the top k once their bound falls to its k-th settled score.
+    const slack = chart.luck ? settleSlack(chart) : 0;
+    const upper = new Map<Team, number>();
+    if (slack > 0) {
+      for (const candidate of ranked) {
+        if (performance.now() > deadline) break;
+        upper.set(candidate.team, exact(candidate.team, teamPowerOf(candidate.team).total, false).key);
+      }
+      ranked = ranked.filter((candidate) => upper.has(candidate.team)).sort((a, b) => upper.get(b.team)! - upper.get(a.team)!);
+    }
+    const kth = () => {
+      const keys = [...hits.values()].map((hit) => hit.key).sort((a, b) => b - a);
+      return keys.length >= input.k ? keys[input.k - 1]! : -Infinity;
+    };
     for (const { team } of ranked) {
       if (performance.now() > deadline) break;
+      if (slack > 0 && upper.get(team)! <= kth()) break;
       const power = teamPowerOf(team);
       const { key, detail } = exact(team, power.total);
       stats.exact++;

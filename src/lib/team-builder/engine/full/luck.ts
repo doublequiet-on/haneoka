@@ -75,6 +75,56 @@ const pack = (gauge: number, lots: number, next: number, rush: number, minimum: 
 const FLAGS = MISS_USED | PREV_MISS | FRAME_LOT | FRAME_MISS | BONUS | SKILL | SKILL_PREV;
 const flagsOf = (s: number) => s & FLAGS;
 
+/** A probability distribution over packed states: open addressing over typed arrays, iterated in insertion order
+ * like the Map it replaces, so every sum adds the same terms in the same order. */
+class Dist {
+  keys = new Float64Array(256);
+  values = new Float64Array(256);
+  size = 0;
+  private slots = new Int32Array(512).fill(-1);
+  private mask = 511;
+  private shift = 23;
+  private slot(key: number) {
+    const low = key % 4294967296, high = Math.floor(key / 4294967296);
+    // Fibonacci hashing: the product's high bits mix every input bit.
+    let h = Math.imul((low ^ Math.imul(high, 0x85ebca6b)) | 0, 0x9e3779b1) >>> this.shift;
+    for (;;) {
+      const at = this.slots[h]!;
+      if (at < 0 || this.keys[at] === key) return h;
+      h = (h + 1) & this.mask;
+    }
+  }
+  add(key: number, p: number) {
+    const h = this.slot(key);
+    const at = this.slots[h]!;
+    if (at >= 0) {
+      this.values[at]! += p;
+      return;
+    }
+    if (this.size === this.keys.length) {
+      const keys = new Float64Array(this.size * 2), values = new Float64Array(this.size * 2);
+      keys.set(this.keys);
+      values.set(this.values);
+      this.keys = keys;
+      this.values = values;
+    }
+    this.keys[this.size] = key;
+    this.values[this.size] = p;
+    this.slots[h] = this.size++;
+    if (this.size * 2 > this.mask) this.grow();
+  }
+  private grow() {
+    this.mask = this.mask * 2 + 1;
+    this.shift--;
+    this.slots = new Int32Array(this.mask + 1).fill(-1);
+    for (let i = 0; i < this.size; i++) this.slots[this.slot(this.keys[i]!)] = i;
+  }
+  clear() {
+    if (this.size) this.slots.fill(-1);
+    this.size = 0;
+  }
+}
+
 export function luckCurve(
   tables: GekisouTables,
   record: LuckRecord,
@@ -153,21 +203,22 @@ export function luckCurve(
     if (max > g) return pack(g, lotsOf(s), nextOf(s), rushOf(s), minimumOf(s), flagsOf(s));
     return pack(g % max, lotsOf(s) + Math.trunc(g / max), nextOf(s), rushOf(s), minimumOf(s), flagsOf(s));
   };
-  let dist = new Map<number, number>();
+  let dist = new Dist();
   // Keep the score residue above the 26 lottery bits, using arithmetic so residues above 63 do not wrap at bit 32.
   const stateSize = 2 ** 26;
   let residue = 0;
-  const push = (out: Map<number, number>, s: number, p: number) => {
-    const key = s + stateSize * residue;
-    if (p > 0) out.set(key, (out.get(key) ?? 0) + p);
+  const push = (out: Dist, s: number, p: number) => {
+    if (p > 0) out.add(s + stateSize * residue, p);
   };
-  let spare = new Map<number, number>();
-  const map = (fn: (s: number, p: number, out: Map<number, number>) => void) => {
+  let spare = new Dist();
+  const map = (fn: (s: number, p: number, out: Dist) => void) => {
     const out = spare;
     out.clear();
-    for (const [key, p] of dist) {
+    const { keys, values, size } = dist;
+    for (let i = 0; i < size; i++) {
+      const key = keys[i]!;
       residue = Math.floor(key / stateSize);
-      fn(key % stateSize, p, out);
+      fn(key % stateSize, values[i]!, out);
     }
     residue = 0;
     spare = dist;
@@ -178,7 +229,7 @@ export function luckCurve(
   let peak = 0,
     steps = 0;
   /** Consumes one lot: the drawn result, the rush bonus, the next draw (every guarantee lasts one draw). */
-  const consume = (s: number, p: number, buff: number, out: Map<number, number>) => {
+  const consume = (s: number, p: number, buff: number, out: Dist) => {
     const lots = lotsOf(s) - 1;
     let minimum = minimumOf(s);
     let first: [number, number][];
@@ -217,8 +268,9 @@ export function luckCurve(
     if (first < 0) continue;
     let last = record.frames.findIndex((frame, k) => k > first && frame.states[range] === S_FINISH);
     if (last < 0) last = record.frames.length - 1;
-    dist = new Map([[pack(0, 0, INVALID, 0, 0, 0) + stateSize * (settlement?.initial ?? 0), 1]]);
-    spare = new Map();
+    dist = new Dist();
+    dist.add(pack(0, 0, INVALID, 0, 0, 0) + stateSize * (settlement?.initial ?? 0), 1);
+    spare = new Dist();
     for (let k = first; k <= last; k++) {
       const frame = record.frames[k]!;
       const t = frames[k]!.timeMs;
@@ -272,9 +324,9 @@ export function luckCurve(
             if (b & SKILL) s |= SKILL_PREV;
             if (skill) s |= SKILL;
             if (state === S_PLAYING && lotsOf(s) > 0 && !(s & FRAME_LOT)) {
-              const tmp = new Map<number, number>();
+              const tmp = new Dist();
               consume(s, q, pendingBuff, tmp);
-              for (const [c, cq] of tmp) tail(c % stateSize, cq);
+              for (let i = 0; i < tmp.size; i++) tail(tmp.keys[i]! % stateSize, tmp.values[i]!);
             } else tail(s, q);
           }
         });
@@ -319,7 +371,8 @@ export function luckCurve(
           });
           return;
         }
-        for (const [s, p] of dist) {
+        for (let i = 0; i < dist.size; i++) {
+          const s = dist.keys[i]!, p = dist.values[i]!;
           const bonus = (s & BONUS) !== 0,
             skill = (s & skillBit) !== 0;
           if (bonus) r += p;
@@ -365,7 +418,7 @@ export function luckCurve(
       });
     }
     if (settlement) {
-      for (const [key, p] of dist) settlement.residues[Math.floor(key / stateSize)]! += p;
+      for (let i = 0; i < dist.size; i++) settlement.residues[Math.floor(dist.keys[i]! / stateSize)]! += dist.values[i]!;
     }
   }
   return curve;

@@ -20,7 +20,8 @@ import { memberEventPercent, snapEventPercent, teamPower, type MemberState, type
 import { resolveBox, type MemberInput, type SnapInput, type UnknownPolicy } from "./box";
 import { searchTeams, type Constraints, type ObjectiveAdapter, type SearchOutput, type SearchHit, type Team } from "./search";
 import { resolveSlotSkill, windowMs } from "./skills";
-import { gekisoChart, type GekisoChart } from "./gekiso";
+import { fullOrdersGekiso, gekisoChart, type GekisoChart } from "./gekiso";
+import { performer } from "./full/deck";
 import { gekisoSearch } from "./gekiso-objective";
 import { compareHits, planSummary } from "./merge";
 import { validatePtChart, validatePtRequest } from "./pt-eligibility";
@@ -354,6 +355,10 @@ const scoreCaps = new Map<string, number>();
 const prepFingerprint = (request: EngineRequest) =>
   JSON.stringify([request.goal, request.members, request.snaps, request.player, request.unknownPolicy, request.constraints, request.k]);
 
+/** How far the closed-form Gekisou scores may stray from the whole-live simulation, relative. Measured within 4e-6
+ * over every order of the best teams of Combo and Just charts; the margin keeps a wide reserve. */
+export const GEKISO_CLOSED_FORM_MARGIN = 3e-5;
+
 export async function runEngine(master: EngineMaster, charts: ChartCache, request: EngineRequest, onProgress?: (done: number, total: number) => void, onSnapshot?: (snapshot: EngineSnapshot) => void): Promise<EngineResponse> {
   const started = performance.now();
   const deadline = deadlineOf(request);
@@ -502,7 +507,12 @@ export async function runEngine(master: EngineMaster, charts: ChartCache, reques
       });
     } else if (goal.kind === "gekiso") {
       const gekiso = await charts.gekiso(song!, goal.accuracy, goal.rank);
-      const out = gekisoSearch({
+      // The search ranks on the closed form, within a few 1e-5 of the game's own scores. Every team that could still
+      // reach the top k after that difference is scored on the whole-live simulation, which decides the ranking.
+      const exactRanking = !gekiso.luck && goal.seeds <= 1;
+      const margin = (key: number) => Math.max(1, Math.abs(key)) * GEKISO_CLOSED_FORM_MARGIN;
+      let extra = exactRanking ? 4 : 0;
+      const search = () => gekisoSearch({
         onCandidate: publish,
         initialTeams: savedSeeds,
         master,
@@ -515,11 +525,28 @@ export async function runEngine(master: EngineMaster, charts: ChartCache, reques
         seeds: Array.from({ length: Math.max(0, goal.seeds) }, (_, i) => i),
         criterion: goal.criterion,
         constraints,
-        k: request.k,
+        k: request.k + extra,
         timeLimitMs: songBudget(),
         shard: request.shard,
         floor: song ? request.floors?.[`${song.songId}:${song.difficulty}`] : undefined,
       });
+      let out = search();
+      if (exactRanking) {
+        // More teams within the margin than the search returned: widen until the last one falls outside it.
+        while (out.proven && out.hits.length === request.k + extra && out.hits.length >= request.k &&
+          out.hits.at(-1)!.key >= out.hits[request.k - 1]!.key - 2 * margin(out.hits[request.k - 1]!.key)) {
+          extra *= 2;
+          out = search();
+        }
+        const kth = out.hits[Math.min(request.k, out.hits.length) - 1]?.key ?? -Infinity;
+        const finalists = out.hits.filter((hit) => hit.key >= kth - 2 * margin(kth)).map((hit) => {
+          const deck = hit.team.members.map((member, slot) => performer(master, members[member]!, hit.team.snaps[slot]! >= 0 ? snaps[hit.team.snaps[slot]!]! : null));
+          const scores = fullOrdersGekiso(master, gekiso, deck, hit.power, music?.musicType ?? 0);
+          const key = goal.criterion === "min" ? scores.min : goal.criterion === "max" ? scores.max : scores.mean;
+          return { ...hit, key, detail: { ...hit.detail, scores } };
+        });
+        out = { ...out, hits: finalists.sort((a, b) => b.key - a.key).slice(0, request.k) };
+      }
       results.push({
         song,
         proven: out.proven,

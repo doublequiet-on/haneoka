@@ -346,6 +346,10 @@ function expectedContext(master: EngineMaster, chart: GekisoChart, deck: readonl
   return { judgement, gk, up, luck, seeds: 0, nominal: { probabilities, noteUp, rushUp: rush, rushFactor: f(1 + bonus), rankRemainder } };
 }
 
+/** How far an unsettled score can lie above the settled one: one point for each Luck range's rank remainder. */
+export const settleSlack = (chart: GekisoChart) =>
+  chart.rangePercent.filter((_, r) => chart.setup.missions[r] === M_LUCK).length;
+
 /** Per-order scores: live skills and snap skills on top of the shared Gekisou context, plus rank bonuses. */
 export function scoreOrdersGekiso(
   master: EngineMaster,
@@ -354,11 +358,14 @@ export function scoreOrdersGekiso(
   power: number,
   slots: readonly SlotSkill[],
   debug?: (order: number, note: number, score: number, live: number) => void,
+  /** False leaves out the Luck ranges' rank remainders, each in [0, 1): an upper bound within
+   * [settleSlack](chart) of the settled score, for every order. */
+  settle = true,
 ): OrderScores {
   if (ctx.draws) {
     const scores = new Float64Array(ORDERS.length);
     for (const draw of ctx.draws()) {
-      const result = scoreOrdersGekiso(master, chart, draw, power, slots, debug);
+      const result = scoreOrdersGekiso(master, chart, draw, power, slots, debug, settle);
       result.scores.forEach((value, order) => { scores[order]! += value / ctx.seeds; });
     }
     return summarizeOrders(power, scores);
@@ -462,7 +469,7 @@ export function scoreOrdersGekiso(
     }
     for (let r = 0; r < ranges; r++) {
       if (nominal && outcomes && chart.setup.missions[r] === M_LUCK) {
-        score += rangeScore[r]! * chart.rangePercent[r]! / 100 - nominal.rankRemainder(r, outcomes, remainders);
+        score += rangeScore[r]! * chart.rangePercent[r]! / 100 - (settle ? nominal.rankRemainder(r, outcomes, remainders) : 0);
       } else score += Math.floor((rangeScore[r]! * chart.rangePercent[r]!) / 100);
     }
     scores[orderIndex] = score;
@@ -483,4 +490,20 @@ function summarizeOrders(power: number, scores: Float64Array): OrderScores {
     if (value > max) [max, maxOrder] = [value, index];
   });
   return { power, scores, mean: total / scores.length, min, max, minOrder, maxOrder };
+}
+
+/** Exact order scores on the game's own frame loop: every member order of the deck (by slot, leader first) played
+ * through the whole live. The closed-form `scoreOrdersGekiso` stays within a few 1e-5 of these; ranking ties and the
+ * reported scores are settled here. Lottery-free charts only: a Luck range's draw has no single outcome. */
+export function fullOrdersGekiso(master: EngineMaster, chart: GekisoChart, deck: readonly Performer[], power: number, skillTargetMusicType: number): OrderScores {
+  if (chart.luck) throw new Error("full Gekisou scores need a lottery-free chart");
+  const scores = new Float64Array(ORDERS.length);
+  const { frames, dt } = chart.play;
+  const params = { skillTargetMusicType, power, level: chart.full.level, convertedCount: chart.full.convertedCount, musicLengthMs: chart.musicLengthMs, assist: 1 };
+  ORDERS.forEach((order, index) => {
+    const model = new LiveModel(master, order.map((slot) => deck[slot]!), chart.full.notes, chart.full.events, params, chart.setup, 0);
+    for (let k = 0; k < frames.length; k++) model.frame(frames[k]!.timeMs, frames[k]!.judged, dt[k]!);
+    scores[index] = model.score.score;
+  });
+  return summarizeOrders(power, scores);
 }
