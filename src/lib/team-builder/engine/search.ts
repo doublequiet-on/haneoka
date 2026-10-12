@@ -47,6 +47,8 @@ export interface ObjectiveAdapter<Detail> {
   preserveSnapOptions?: boolean;
   /** Upper bound of the key for optimistic totals. */
   bound(totals: Totals): number;
+  /** Optional tighter bound once some members are chosen (leader first), `left` members still to come. */
+  memberBound?(members: readonly number[], totals: Totals, left: number): number;
   /** Tighter bounds after the members and each snap prefix are fixed. */
   assignmentBound?(members: readonly number[], options: readonly (readonly number[])[]):
     (totals: Totals, assigned: readonly number[], from: number) => number;
@@ -627,12 +629,18 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
       return table[Math.min(from, values.length)]![Math.min(count, 4)]!;
     };
     if (characters.length < 4) continue;
-    const leaderBound = objective.bound({
+    // The member-set bound costs more: only asked when the plain one does not prune.
+    const memberSetBound = (chosenMembers: readonly number[], totals: Totals, left: number) => {
+      const plain = objective.bound(totals);
+      if (!objective.memberBound || plain < Math.max(frontier.threshold, floor)) return plain;
+      return Math.min(plain, objective.memberBound(chosenMembers, totals, left));
+    };
+    const leaderBound = memberSetBound([leader], {
       power: leaderTotals.power + topSum(charPower, 0, 4),
       skill: leaderTotals.skill + topSum(charSkill, 0, 4),
       skillLow: 0,
       bonus: Math.min(leaderTotals.bonus + topSum(charBonus, 0, 4), memberOnlyBound(memberBonus[leader]!, 0, 4)),
-    });
+    }, 4);
     if (leaderBound < Math.max(frontier.threshold, floor) || cannotImprove(leaderBound)) continue;
     if (timedOut) {
       // Unexplored: its optimistic bound limits every team it leads.
@@ -666,12 +674,12 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
         }
         return;
       }
-      const bound = objective.bound({
+      const bound = memberSetBound([leader, ...chosen], {
         power: power + topSum(charPower, index, left),
         skill: weight + topSum(charSkill, index, left),
         skillLow: 0,
         bonus: Math.min(bonus + topSum(charBonus, index, left), memberOnlyBound(memberPart, index, left)),
-      });
+      }, left);
       if (bound < Math.max(frontier.threshold, floor) || cannotImprove(bound)) return;
       if (constraints.minBonus !== null && bonus + topSum(charBonus, index, left) < constraints.minBonus) return;
       if (constraints.maxBonus != null && bonus - memberOptimisticSnapBonus(chosen) > constraints.maxBonus) return;

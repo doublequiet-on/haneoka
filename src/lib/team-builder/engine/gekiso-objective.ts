@@ -14,7 +14,7 @@ import type { OrderScores } from "./live";
 import { performer } from "./full/deck";
 import type { Performer } from "./full/conditions";
 import { M_ALL, M_COMBO } from "./full/gekisou";
-import { gekisoContext, gekisoPerformer, scoreOrdersGekiso, settleSlack, type GekisoChart, type GekisoContext } from "./gekiso";
+import { gekisoContext, gekisoPerformer, rushOnlyFactor, scoreOrdersGekiso, settleSlack, type GekisoChart, type GekisoContext } from "./gekiso";
 import { bestOrder5, type Criterion } from "./objectives";
 
 export interface GekisoDetail {
@@ -41,6 +41,10 @@ export interface GekisoSearchInput {
   shard?: { index: number; count: number };
   /** Known lower bound on the k-th key (teams other shards found). */
   floor?: number;
+  /** Stops after seeding: one Worker seeds, and every shard starts from its teams (`seeded`). */
+  seedOnly?: boolean;
+  /** `initialTeams` already hold the seeding's teams. */
+  seeded?: boolean;
   progress?: (done: number, total: number) => void;
 }
 
@@ -77,6 +81,51 @@ function favouredBand(master: EngineMaster, skills: readonly (readonly [number, 
         }
     }
   return 0;
+}
+
+/** Whether the favoured band's variant of support skills has every effect the other variants have, at least as
+ * strong: rows outside the favoured band only differ from a favoured row by a smaller value. */
+function favouredDominates(master: EngineMaster, skills: readonly (readonly [number, number])[]): boolean {
+  const band = (cid: number) => {
+    const c = master.conditions.get(cid);
+    return c?.type === 5000 ? c : null;
+  };
+  const shape = (group: number, flip: boolean) =>
+    JSON.stringify(
+      (master.conditionSets.get(group) ?? []).map((set) =>
+        set.map((cid) => {
+          const c = band(cid);
+          return c ? [5000, flip || c.positive, c.targetIds] : cid;
+        }),
+      ),
+    );
+  for (const [id, level] of skills) {
+    const rows = (master.gekisoSupportSkills.get(id)?.effects ?? []).filter((row) => row.level === level);
+    for (const row of rows) {
+      if ([row.triggerGroup, row.releaseGroup, row.resetGroup].some((group) => (master.conditionSets.get(group) ?? []).flat().some(band))) return false;
+      const negative = (master.conditionSets.get(row.conditionGroup) ?? []).flat().some((cid) => band(cid) && !band(cid)!.positive);
+      if (!negative) continue;
+      const wanted = shape(row.conditionGroup, true);
+      const twin = rows.find(
+        (other) =>
+          other !== row &&
+          other.type === row.type &&
+          other.triggerType === row.triggerType &&
+          other.executeLimit === row.executeLimit &&
+          other.seconds === row.seconds &&
+          other.limitCount === row.limitCount &&
+          other.maxValue === row.maxValue &&
+          JSON.stringify(other.targetIds) === JSON.stringify(row.targetIds) &&
+          other.triggerGroup === row.triggerGroup &&
+          other.releaseGroup === row.releaseGroup &&
+          other.resetGroup === row.resetGroup &&
+          other.value >= row.value &&
+          shape(other.conditionGroup, false) === wanted,
+      );
+      if (!twin) return false;
+    }
+  }
+  return true;
 }
 
 /** Performer attributes any Gekisou skill condition reads: contexts differing only elsewhere are equal. */
@@ -154,9 +203,6 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   const started = performance.now();
   const { master, members, snaps, chart, criterion } = input;
   const deadline = input.timeLimitMs == null ? Infinity : started + input.timeLimitMs;
-  // Luck uses a shard-independent whole-pool estimate; other shards must not repeat its calibration.
-  if (chart.luck && input.shard && input.shard.index !== 0)
-    return { hits: [], proven: false, bound: null, stats: { leaders: 0, memberNodes: 0, snapNodes: 0, candidates: 0, exact: 0, elapsedMs: performance.now() - started }, levels: 0 };
   const n = chart.notes.length;
   const count = chart.full.convertedCount;
   const unit = master.live.adjustment * chart.difficultyFactor;
@@ -177,21 +223,33 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   const readMembers = readAttributes(master, "members");
   const timing = { contexts: 0, contextMs: 0, orders: 0, ordersMs: 0 };
   /** A performer's context key (the fields its simulation reads), computed once per performer object. */
-  const performerKeys = new WeakMap<Performer, string>();
+  const performerKeys = new WeakMap<Performer, number>();
+  const performerIds = new Map<string, number>();
+  const performerJson: string[] = [];
+  const performerKey = (p: Performer) => {
+    let id = performerKeys.get(p);
+    if (id === undefined) {
+      const key = JSON.stringify([p.gekisouSkill, p.missionOnly ?? 0, p.gekisouSupportSkills, ...(p.gekisouSupportSkills.length ? readAll : readMembers).map((field) => p[field])]);
+      id = performerIds.get(key);
+      if (id === undefined) {
+        performerIds.set(key, (id = performerJson.length));
+        performerJson.push(key);
+      }
+      performerKeys.set(p, id);
+    }
+    return id;
+  };
+  // Simulated decks are ordered by the performers' fields, whichever order the search met them in.
+  const byFields = (a: number, b: number) => (performerJson[a]! < performerJson[b]! ? -1 : performerJson[a]! > performerJson[b]! ? 1 : 0);
+  /** Decks with the same key simulate alike. */
+  const contextKey = (deck: readonly Performer[]) => deck.map(performerKey).sort(byFields).join(",");
   const contextOf = (deck: Performer[], within = master) => {
     const tag = `${within === master ? "base" : (levelTags.get(within) ?? "?")}|${seedTag}`;
     let cache = chartCache.get(tag);
     if (!cache) chartCache.set(tag, (cache = new Map()));
-    const keyed = deck.map((p) => {
-      let key = performerKeys.get(p);
-      if (key === undefined) {
-        key = JSON.stringify([p.gekisouSkill, p.missionOnly ?? 0, p.gekisouSupportSkills, ...(p.gekisouSupportSkills.length ? readAll : readMembers).map((field) => p[field])]);
-        performerKeys.set(p, key);
-      }
-      return { p, key };
-    });
-    keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-    const key = keyed.map((item) => item.key).join("|");
+    const keyed = deck.map((p) => ({ p, key: performerKey(p) }));
+    keyed.sort((a, b) => byFields(a.key, b.key));
+    const key = keyed.map((item) => item.key).join(",");
     let value = cache.get(key);
     if (!value) {
       const t0 = performance.now();
@@ -210,7 +268,8 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     }
     return value;
   };
-  type Weights = { base: number; general: Float64Array; byJudgement: Float64Array[] };
+  /** `rush`: per unit rush factor, the expected weight of notes read while rush is on (Luck charts). */
+  type Weights = { base: number; general: Float64Array; byJudgement: Float64Array[]; rush: number };
   const weightCache = new WeakMap<GekisoContext, Weights>();
   /** Linear weight of a context per unit power: `base` without live skills, prefix sums of live-factor weights. */
   const weights = (ctx: GekisoContext): Weights => {
@@ -218,15 +277,18 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     if (value) return value;
     const general = new Float64Array(n + 1);
     const byJudgement = [4, 5, 6].map(() => new Float64Array(n + 1));
-    let base = 0;
+    let base = 0, rush = 0;
+    const probabilities = ctx.nominal?.probabilities;
+    const bonus = ctx.nominal ? ctx.nominal.rushFactor - 1 : 0;
     for (let i = 0; i < n; i++) {
       const beta = rangeFactor[i]! * unit * chart.noteFrac[i]! * chart.judgeFrac[ctx.judgement[i]!]! * chart.comboFactor[i]! * ctx.gk[i]!;
       base += beta * ctx.up[i]!;
+      if (probabilities) rush += beta * (probabilities[2]![i]! + probabilities[3]![i]! + bonus * probabilities[3]![i]!);
       const live = beta * ctx.luck[i]!;
       general[i + 1] = general[i]! + live;
       for (let k = 0; k < 3; k++) byJudgement[k]![i + 1] = byJudgement[k]![i]! + (ctx.judgement[i] === k + 4 ? live : 0);
     }
-    weightCache.set(ctx, (value = { base, general, byJudgement }));
+    weightCache.set(ctx, (value = { base, general, byJudgement, rush }));
     return value;
   };
   const gain = (deck: Performer[], ref: Performer[], within = master) => weights(contextOf([...ref, ...deck], within)).base - weights(contextOf(ref, within)).base;
@@ -320,6 +382,13 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       supports.push({ p, value: gain([p], baseDeck) });
     }
     for (const { p } of supports.sort((a, b) => b.value - a.value).slice(0, 5)) luckDeck.push(p);
+    luckMembers.push(...ranked.map(({ i }) => gkMember[i]!));
+    // Every lottery-changing support, in each band variant a slot can give it unless the favoured one dominates.
+    for (const { p } of supports) {
+      if (!luckChain(p)) continue;
+      luckSupports.push(p);
+      if (p.bandId && !favouredDominates(master, p.gekisouSupportSkills)) luckSupports.push({ ...p, bandId: p.bandId === 1 ? 2 : 1 });
+    }
     return true;
   };
 
@@ -380,6 +449,65 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
 
   const relative = 3e-6;
   const absolute = n + 4;
+  /** Luck charts: per Gekisou deck (by performer shape, so member sets with the same Luck skills share it) and set
+   * of lottery-changing supports, its weights and each other support's gain given that lottery. */
+  const shapeKeys = new WeakMap<Performer, string>();
+  const shapeOf = (p: Performer) => {
+    let key = shapeKeys.get(p);
+    if (key === undefined) shapeKeys.set(p, (key = JSON.stringify(p)));
+    return key;
+  };
+  const rushFactors = new Map<Performer, number | null>();
+  const rushFactorOf = (p: Performer) => {
+    if (!rushFactors.has(p)) rushFactors.set(p, rushOnlyFactor(master, p));
+    return rushFactors.get(p)!;
+  };
+  const memberBases = new Map<string, number>();
+  /** A support's variants across slots, reduced to the favoured band's when that one has every effect stronger. */
+  const dominance = new Map<string, boolean>();
+  const strongest = (variants: Set<Performer>): Performer[] => {
+    const list = [...variants];
+    if (list.length < 2) return list;
+    const skills = JSON.stringify(list[0]!.gekisouSupportSkills);
+    if (list.some((p) => JSON.stringify(p.gekisouSupportSkills) !== skills)) return list;
+    const favoured = list.find((p) => p.bandId === favouredBand(master, p.gekisouSupportSkills));
+    if (!favoured) return list;
+    let dominates = dominance.get(skills);
+    if (dominates === undefined) dominance.set(skills, (dominates = favouredDominates(master, favoured.gekisouSupportSkills)));
+    return dominates ? [favoured] : list;
+  };
+  /** The pool's Luck member skills strongest first, and its lottery-changing supports (set by `calibrateLuck`). */
+  const luckMembers: Performer[] = [];
+  const luckSupports: Performer[] = [];
+  const luckBases = new Map<string, { w: Weights; deck: Performer[]; gains: Map<Performer, number>; lives: Map<number, number> }>();
+  const luckBase = (memberDeck: readonly Performer[], chained: readonly Performer[]) => {
+    const key = contextKey([...memberDeck, ...chained]);
+    let value = luckBases.get(key);
+    if (!value) {
+      const deck = [...memberDeck, ...chained];
+      luckBases.set(key, (value = { w: weights(contextOf(deck)), deck, gains: new Map(), lives: new Map() }));
+    }
+    return value;
+  };
+  /** The lottery-fixed value of one slot: a non-chain support's gain and the slot's live weight. */
+  const luckSlot = (base: NonNullable<ReturnType<typeof luckBase>>, member: number, snap: number, pick: "mean" | "best" | "worst") => {
+    const index = (member * (snaps.length + 1) + snap + 1) * 3 + (pick === "mean" ? 0 : pick === "best" ? 1 : 2);
+    let value = base.lives.get(index);
+    if (value === undefined) {
+      value = liveWeight(slotSkill(member, snap), base.w, pick);
+      const p = snap >= 0 ? supportPerformer(member, snap) : null;
+      if (p && !luckChain(p)) {
+        let support = base.gains.get(p);
+        if (support === undefined) {
+          const factor = rushFactorOf(p);
+          base.gains.set(p, (support = factor === null ? gain([p], base.deck) : factor * base.w.rush));
+        }
+        value += support;
+      }
+      base.lives.set(index, value);
+    }
+    return value;
+  };
   const deckOf = (team: Team) =>
     team.members.map((member, slot) => {
       const support = supportPerformer(member, team.snaps[slot]!);
@@ -427,7 +555,10 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       const p = supports[slot];
       if (p && !(chart.luck && luckChain(p))) {
         let value = base.gains.get(p);
-        if (value === undefined) base.gains.set(p, (value = gain([p], base.deck)));
+        if (value === undefined) {
+          const factor = chart.luck ? rushFactorOf(p) : null;
+          base.gains.set(p, (value = factor === null ? gain([p], base.deck) : factor * base.w.rush));
+        }
         total += value;
       }
       const index = member * (snaps.length + 1) + snap + 1;
@@ -457,7 +588,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   const hits = new Map<string, SearchHit<GekisoDetail>>();
   const setKey = (team: Team) => team.members.map((i) => members[i]!.key).sort().join("|");
   const stats = { leaders: 0, memberNodes: 0, snapNodes: 0, candidates: 0, exact: 0, elapsedMs: 0 };
-  let proven = !chart.luck;
+  let proven = true;
   let bound: number | null = null;
   const finish = () => ({
     hits: [...hits.values()].sort((a, b) => b.key - a.key).slice(0, input.k),
@@ -555,6 +686,75 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
           }
         : {}),
       productBase: data.weights.base,
+      // Luck charts: the lottery depends only on the members' Luck skills and the lottery-changing supports. For each
+      // such set the other supports and live skills add given its lottery, so a member set's completions are bounded
+      // by the best set its assigned snaps still allow, not by the luckiest deck of the whole pool.
+      ...(chart.luck && !surrogate
+        ? {
+            // The lottery of a partial set: its members' Luck skills, the strongest Luck skills for the open slots
+            // and every lottery-changing support. More or stronger Luck skills never lower a rush's odds.
+            memberBound: (chosen: readonly number[], totals: Totals, left: number) => {
+              if (!readAll.every((field) => field === "bandId")) return Infinity;
+              const deck = chosen.map((i) => gkMember[i]!);
+              const key = deck.map(shapeOf).sort().join("+") + "|" + left;
+              let base = memberBases.get(key);
+              if (base === undefined) {
+                // Every Luck skill an open slot could bring, as many times as the open slots allow.
+                const copies = new Map<string, Performer[]>();
+                for (const p of luckMembers) {
+                  const list = copies.get(shapeOf(p)) ?? [];
+                  if (list.length < left) list.push(p);
+                  copies.set(shapeOf(p), list);
+                }
+                const extra = [...copies.values()].flat();
+                memberBases.set(key, (base = weights(contextOf([...deck, ...extra, ...luckSupports])).base));
+              }
+              return ((totals.power * (base + totals.skill)) / count) * (1 + relative) + absolute;
+            },
+            assignmentBound: (team: readonly number[], options: readonly (readonly number[])[]) => {
+              const memberDeck = team.map((i) => gkMember[i]!);
+              const chainOf = (slot: number, snap: number) => {
+                const p = snap >= 0 ? supportPerformer(team[slot]!, snap) : null;
+                return p && luckChain(p) ? p : null;
+              };
+              const chainSnaps = [...new Set(options.flatMap((row, slot) => row.filter((snap) => chainOf(slot, snap))))];
+              const pick = criterion === "max" ? "best" : "mean";
+              const value = (chained: readonly Performer[], totals: Totals, assigned: readonly number[], from: number) => {
+                const taken = assigned.slice(0, from);
+                const base = luckBase(memberDeck, chained);
+                let value = base.w.base;
+                for (let slot = 0; slot < from; slot++) value += luckSlot(base, team[slot]!, assigned[slot]!, pick);
+                for (let slot = from; slot < 5; slot++) {
+                  let top = -Infinity;
+                  for (const snap of options[slot]!) {
+                    if (snap >= 0 && taken.includes(snap)) continue;
+                    top = Math.max(top, chainOf(slot, snap) ? luckSlot(base, team[slot]!, -1, pick) : luckSlot(base, team[slot]!, snap, pick));
+                  }
+                  value += top;
+                }
+                return ((totals.power * value) / count) * (1 + REFINE_SLACK) + absolute;
+              };
+              return (totals: Totals, assigned: readonly number[], from: number) => {
+                const taken = assigned.slice(0, from);
+                // A taken support joins with its own slot's variant; an open one with every variant the open slots
+                // offer (a support's band-dependent rows make the slots differ).
+                const chained: Performer[] = [];
+                for (const snap of chainSnaps) {
+                  const at = taken.indexOf(snap);
+                  if (at >= 0) {
+                    const p = chainOf(at, snap);
+                    if (p) chained.push(p);
+                    continue;
+                  }
+                  const variants = new Set<Performer>();
+                  for (let slot = from; slot < 5; slot++) if (options[slot]!.includes(snap)) variants.add(chainOf(slot, snap)!);
+                  chained.push(...strongest(variants));
+                }
+                return value(chained, totals, assigned, from);
+              };
+            },
+          }
+        : {}),
       interval: (team, totals) => {
         if (surrogate) return [high(totals), high(totals)];
         // The additive estimate is within a few 1e-5 of the whole-live mean; conversions of Great notes add a little.
@@ -575,7 +775,6 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
   const seedKey = JSON.stringify([members.map((m) => m.key), snaps.map((x) => x.key), criterion, input.k, input.constraints, input.seeds]);
   let seedCache = seededByChart.get(chart);
   if (!seedCache) seededByChart.set(chart, (seedCache = new Map()));
-  // Luck charts are ranked by the whole-pool estimate below, which ignores leader shards: one shard does it.
   const publish = () => input.onCandidate?.([...hits.values()].sort((a, b) => b.key - a.key).slice(0, input.k));
   for (const team of input.initialTeams ?? []) {
     if (performance.now() > deadline) break;
@@ -616,7 +815,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     proven = false;
     return finish();
   }
-  const seeded = seedCache.get(seedKey);
+  const seeded = input.seeded ? [] : seedCache.get(seedKey);
   if (seeded) for (const hit of seeded) {
     const key = setKey(hit.team);
     if (!hits.has(key) || hits.get(key)!.key < hit.key) hits.set(key, hit);
@@ -680,11 +879,15 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
       seedCache.set(seedKey, [...hits.values()]);
     }
   }
+  if (input.seedOnly) {
+    proven = false;
+    return finish();
+  }
 
   // Luck ranges: the lottery expectation has no bound the snap search could prune on (optimistic support gains
   // against the strongest luck deck never meet the chained-lottery leaves), so the exact rescoring of the
   // estimate's best teams above is the result.
-  for (const [index, level] of (chart.luck ? [] : levels).entries()) {
+  for (const [index, level] of levels.entries()) {
     input.progress?.(index, levels.length);
     if (performance.now() > deadline) {
       proven = false;

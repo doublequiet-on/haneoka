@@ -346,6 +346,21 @@ function expectedContext(master: EngineMaster, chart: GekisoChart, deck: readonl
   return { judgement, gk, up, luck, seeds: 0, nominal: { probabilities, noteUp, rushUp: rush, rushFactor: f(1 + bonus), rankRemainder } };
 }
 
+/** A support whose only Luck-mission effects are score-ups read while rush is on: it never changes the lottery or the
+ * recorded live, so given any deck's lottery it adds `rush × (P(skill) + bonus × P(both))` per note. Returns its
+ * rush factor, or null when it does anything else. */
+export function rushOnlyFactor(master: EngineMaster, p: Performer): number | null {
+  let only = true;
+  for (const [id, level] of p.gekisouSupportSkills) {
+    const skill = master.gekisoSupportSkills.get(id);
+    if (!skill || (skill.missionType !== M_LUCK && skill.missionType !== 4)) continue;
+    for (const row of skill.effects) if (row.level === level && row.type !== 2000) only = false;
+  }
+  if (!only) return null;
+  const { rush, misses } = luckReaders(master, [{ ...p, missionOnly: p.missionOnly || 1 }]);
+  return misses.length ? null : rush;
+}
+
 /** How far an unsettled score can lie above the settled one: one point for each Luck range's rank remainder. */
 export const settleSlack = (chart: GekisoChart) =>
   chart.rangePercent.filter((_, r) => chart.setup.missions[r] === M_LUCK).length;

@@ -208,7 +208,7 @@ interface GekisouLive {
 
 export class LiveModel {
   private readonly notes = new Map<number, LiveNote>();
-  private readonly fired: boolean[];
+  private readonly byTime: number[];
   private readonly random: LiveRandom;
   readonly life: LifeController;
   private readonly combo: ComboCounter;
@@ -248,7 +248,7 @@ export class LiveModel {
     private readonly record: LuckRecord | null = null,
   ) {
     for (const n of notes) this.notes.set(n.id, n);
-    this.fired = events.map(() => false);
+    this.byTime = events.map((_, i) => i).sort((a, b) => events[a]![1] - events[b]![1] || a - b);
     this.random = new LiveRandom(seed);
     const live = master.live;
     if (setup) {
@@ -424,15 +424,13 @@ export class LiveModel {
         });
     }
     this.frameEvents.length = 0;
-    if (this.firedCount < this.events.length)
-      for (let i = 0; i < this.events.length; i++) {
-        const [index, evT] = this.events[i]!;
-        if (!this.fired[i] && evT <= t) {
-          this.fired[i] = true;
-          this.firedCount++;
-          this.frameEvents.push([index, evT]);
-        }
-      }
+    // Events due by now, in event order: a pointer over the events sorted by time.
+    if (this.firedCount < this.events.length && this.events[this.byTime[this.firedCount]!]![1] <= t) {
+      const due: number[] = [];
+      while (this.firedCount < this.events.length && this.events[this.byTime[this.firedCount]!]![1] <= t) due.push(this.byTime[this.firedCount++]!);
+      if (due.length > 1) due.sort((a, b) => a - b);
+      for (const i of due) this.frameEvents.push([this.events[i]![0], this.events[i]![1]]);
+    }
     this.judged.length = 0;
     const results = this.results;
     results.length = 0;

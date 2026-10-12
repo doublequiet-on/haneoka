@@ -122,6 +122,9 @@ export interface EngineRequest {
   shard?: { index: number; count: number };
   /** Disables the aspiration floor (the rerun after a sharded aspiration fell short). */
   noFloor?: boolean;
+  /** Gekiso: only the shard-independent seeding, whose teams then seed every shard (`seeded`). */
+  seedOnly?: boolean;
+  seeded?: boolean;
   /** Known lower bounds on each song's k-th key (`songId:difficulty`), from teams other shards already found. */
   floors?: Record<string, number>;
   /** Other songs' Top-K key. Only a pt-only k=1 request may prove this song strictly below the cutoff. */
@@ -509,9 +512,10 @@ export async function runEngine(master: EngineMaster, charts: ChartCache, reques
       const gekiso = await charts.gekiso(song!, goal.accuracy, goal.rank);
       // The search ranks on the closed form, within a few 1e-5 of the game's own scores. Every team that could still
       // reach the top k after that difference is scored on the whole-live simulation, which decides the ranking.
-      const exactRanking = !gekiso.luck && goal.seeds <= 1;
+      const exactRanking = !gekiso.luck && goal.seeds <= 1 && !request.seedOnly;
       const margin = (key: number) => Math.max(1, Math.abs(key)) * GEKISO_CLOSED_FORM_MARGIN;
       let extra = exactRanking ? 4 : 0;
+      const known = song ? request.floors?.[`${song.songId}:${song.difficulty}`] : undefined;
       const search = () => gekisoSearch({
         onCandidate: publish,
         initialTeams: savedSeeds,
@@ -528,7 +532,10 @@ export async function runEngine(master: EngineMaster, charts: ChartCache, reques
         k: request.k + extra,
         timeLimitMs: songBudget(),
         shard: request.shard,
-        floor: song ? request.floors?.[`${song.songId}:${song.difficulty}`] : undefined,
+        // Other shards' keys are whole-live scores: closed-form keys within the margin below may still pass them.
+        floor: known === undefined ? undefined : exactRanking ? known - 2 * margin(known) : known,
+        seedOnly: request.seedOnly,
+        seeded: request.seeded,
       });
       let out = search();
       if (exactRanking) {

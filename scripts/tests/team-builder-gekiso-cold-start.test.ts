@@ -215,21 +215,21 @@ test("Luck continuation publishes the existing settled team before pool calibrat
   assert.ok(result.hits[0]!.team.snaps.every((i) => i === -1));
 });
 
-test("unused Luck shards do no calibration or candidate evaluation", () => {
+test("a seeded Luck shard starts from the seeding's teams instead of seeding again", () => {
+  const seeding = fixture();
+  seeding.seedOnly = true;
+  const seeded = gekisoSearch(seeding);
+  assert.ok(seeded.hits.length > 0);
+  assert.equal(seeded.proven, false);
   const input = fixture();
   input.shard = { index: 1, count: 8 };
+  input.seeded = true;
+  input.initialTeams = seeded.hits.map((hit) => hit.team);
+  const snapshots: SearchHit<GekisoDetail>[][] = [];
+  input.onCandidate = (hits) => snapshots.push([...hits]);
   const result = gekisoSearch(input);
-  assert.deepEqual(result.hits, []);
-  assert.equal(result.stats.exact, 0);
-  assert.equal(result.proven, false);
-  assert.deepEqual(result.stats, {
-    leaders: 0,
-    memberNodes: 0,
-    snapNodes: 0,
-    candidates: 0,
-    exact: 0,
-    elapsedMs: result.stats.elapsedMs,
-  });
+  assert.deepEqual(snapshots[0]![0]!.team, seeded.hits[0]!.team);
+  assert.ok(result.hits[0]!.key >= seeded.hits[0]!.key);
 });
 
 test("an expired Luck request does not start candidate scoring", () => {

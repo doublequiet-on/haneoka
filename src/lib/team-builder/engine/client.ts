@@ -259,7 +259,13 @@ export class EngineClient {
         return merged();
       }
       let seeds = request.seeds ?? [];
-      if (!request.noFloor && request.goal.kind !== "gekiso") {
+      const gekiso = request.goal.kind === "gekiso";
+      if (gekiso) {
+        // One Worker seeds; every shard starts from its teams instead of seeding again.
+        const seeding = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seedOnly: true } }, progress, accept);
+        publish(seeding);
+        seeds = seeding.results.flatMap(result => result.hits);
+      } else if (!request.noFloor) {
         const quick = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, deadline: Math.min(deadline, clock() + QUICK_MS) } }, progress, accept);
         publish(quick);
         if (completeResponse(quick)) return quick;
@@ -276,7 +282,7 @@ export class EngineClient {
           const index = next++;
           const current = merge();
           const floors = Object.fromEntries(current.results.filter(result => result.song && result.hits.length >= request.k).map(result => [`${result.song!.songId}:${result.song!.difficulty}`, result.hits[request.k - 1]!.key]));
-          const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds, shard: { index, count }, floors } }, undefined, value => {
+          const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds, ...(gekiso ? { seeded: true } : {}), shard: { index, count }, floors } }, undefined, value => {
             if (stopped || value.contextKey !== request.contextKey || value.requestId !== request.requestId) return;
             responses[index] = value.response;
             publish(merge());
