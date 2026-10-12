@@ -58,9 +58,23 @@ export interface LuckRecord {
   /** Range-start luck actions as they execute: 11003 gauge add (value) or 11005 guarantee (value, limit). */
   actions: { frame: number; range: number; type: number; value: number; limit: number; chance: number }[];
   /** Per frame: each range's state after the before-update, the ranges that changed, the playing range. */
-  frames: { states: number[]; updates: number[]; playing: number }[];
+  frames: { states: number[]; updates: number[]; playing: number; /** Distinct within a Worker. */ id: number }[];
   /** Judged range-target notes of luck ranges: frame, range, note type, converted judgement, time, gauge speed, lot buff. */
   notes: { frame: number; range: number; op: number; judgement: number; timeMs: number; speed: number; buff: number }[];
+}
+type RecordedFrame = LuckRecord["frames"][number];
+/** Recorded frames repeat across frames and decks: each distinct one is kept once, so a Worker holding hundreds of
+ * recordings holds a few hundred frames, not millions. */
+const recordedFrames = new Map<string, RecordedFrame>();
+let nextFrame = 0;
+function recordedFrame(states: number[], updates: readonly number[], playing: number): RecordedFrame {
+  const key = `${states.join(",")}/${updates.join(",")}/${playing}`;
+  let frame = recordedFrames.get(key);
+  if (!frame) {
+    if (recordedFrames.size >= 4096) recordedFrames.clear();
+    recordedFrames.set(key, (frame = { states, updates: [...updates], playing, id: nextFrame++ }));
+  }
+  return frame;
 }
 export interface GekisouSetup {
   fevers: readonly (readonly [number, number])[];
@@ -417,11 +431,7 @@ export class LiveModel {
       this.gk.feverUpdates = this.gk.fever.update(t);
       this.gk.ctrl.beforeUpdate(dt, t, this.gk.feverUpdates, this.score.score, this.env());
       if (this.record)
-        this.record.frames.push({
-          states: this.gk.ctrl.states.map((s) => s.state),
-          updates: [...this.gk.ctrl.stateUpdates],
-          playing: this.gk.ctrl.currentPlayingIndex,
-        });
+        this.record.frames.push(recordedFrame(this.gk.ctrl.states.map((s) => s.state), this.gk.ctrl.stateUpdates, this.gk.ctrl.currentPlayingIndex));
     }
     this.frameEvents.length = 0;
     // Events due by now, in event order: a pointer over the events sorted by time.

@@ -246,6 +246,7 @@ interface RecordedLuck {
   misses: MissRule[];
 }
 const luckCurves = new WeakMap<GekisoChart, Map<string, RecordedLuck>>();
+const simulatedFrames = new WeakMap<GekisoChart, LivePlay["frames"]>();
 /** The exact nominal luck expectation: one lottery-free run records the live, the luck DP propagates the lottery. */
 function expectedContext(master: EngineMaster, chart: GekisoChart, deck: readonly Performer[]): GekisoContext {
   const n = chart.notes.length;
@@ -274,7 +275,8 @@ function expectedContext(master: EngineMaster, chart: GekisoChart, deck: readonl
   };
   const { frames, dt } = chart.play;
   // The record is indexed from the first simulated frame.
-  const simulated = frames.slice(chart.span[0], chart.span[1]);
+  let simulated = simulatedFrames.get(chart);
+  if (!simulated) simulatedFrames.set(chart, (simulated = frames.slice(chart.span[0], chart.span[1])));
   for (let k = 0; k < simulated.length; k++) model.frame(simulated[k]!.timeMs, simulated[k]!.judged, dt[chart.span[0] + k]!);
   const { rush, misses } = luckReaders(master, reduced);
   const luckRanges = chart.setup.missions.slice(0, Math.min(3, chart.full.fevers.length)).flatMap((m, r) => (m === M_LUCK ? [r] : []));
@@ -283,11 +285,12 @@ function expectedContext(master: EngineMaster, chart: GekisoChart, deck: readonl
     record.actions,
     misses,
     record.notes.map((n) => [n.frame, n.judgement, n.speed, n.buff]),
-    record.frames.map((frame) => frame.states.join("") + frame.playing),
+    record.frames.map((frame) => frame.id),
   ]);
   let curves = luckCurves.get(chart);
   if (!curves) luckCurves.set(chart, (curves = new Map()));
   let recorded = curves.get(signature);
+  if (!recorded && curves.size >= 1024) curves.clear();
   if (!recorded) curves.set(signature, (recorded = {
     curve: luckCurve(master.live.gekiso, record, simulated, luckRanges, misses), record, frames: simulated, misses,
   }));
