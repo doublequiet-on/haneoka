@@ -119,6 +119,9 @@ export interface SearchInput<Detail> {
   /** Parallel search: this worker takes every `count`-th leader from `index`. Each team has one leader, so the
    * union of the shards' top-k lists (deduplicated by member set) is the exact top k. */
   shard?: { index: number; count: number };
+  /** Parallel search by member set: every shard walks every leader but assigns snaps only to the sets it owns (a
+   * set's teams all go to one shard, whichever member leads). */
+  owns?: (members: readonly number[]) => boolean;
   /** Aspiration: teams below this key are pruned. The result is exact when it still holds k teams at or above the
    * floor; otherwise the caller searches again with a lower floor. */
   floor?: number;
@@ -661,7 +664,7 @@ export function searchTeams<Detail>(input: SearchInput<Detail>): SearchOutput<De
       stats.memberNodes++;
       const left = 4 - chosen.length;
       if (left === 0) {
-        assignSnaps(leader, [...chosen]);
+        if (!input.owns || input.owns([leader, ...chosen])) assignSnaps(leader, [...chosen]);
         return;
       }
       if (characters.length - index < left) return;

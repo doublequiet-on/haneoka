@@ -240,6 +240,18 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     }
     return id;
   };
+  /** Luck charts shard by member set: a set's lottery contexts dominate its cost, and sets that simulate alike (the
+   * same fields, whichever members) go to one shard, so no two Workers build the same contexts. */
+  const luckSets = (() => {
+    if (!chart.luck || !input.shard || input.shard.count < 2) return null;
+    const { index, count } = input.shard;
+    return (team: readonly number[]) => {
+      const key = team.map((i) => performerJson[performerKey(gkMember[i]!)]!).sort().join("|");
+      let hash = 0x811c9dc5;
+      for (let c = 0; c < key.length; c++) hash = Math.imul(hash ^ key.charCodeAt(c), 0x01000193);
+      return (hash >>> 0) % count === index;
+    };
+  })();
   // Simulated decks are ordered by the performers' fields, whichever order the search met them in.
   const byFields = (a: number, b: number) => (performerJson[a]! < performerJson[b]! ? -1 : performerJson[a]! > performerJson[b]! ? 1 : 0);
   /** Decks with the same key simulate alike. */
@@ -904,7 +916,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     // Seeds rarely hold this level's bonus: the k-th best of every level so far is the floor any team must beat.
     const floor = Math.max(input.floor ?? -Infinity, best.length >= input.k ? best[input.k - 1]!.key : -Infinity);
     const out = searchTeams({
-      shard: input.shard,
+      ...(luckSets ? { owns: luckSets } : { shard: input.shard }),
       master,
       player: input.player,
       members,
