@@ -192,6 +192,7 @@ function levelMaster(master: EngineMaster, template: SkillEffectRow, level: numb
  * holds four note-sized arrays and a search simulates thousands of decks, so only the current chart's are kept and
  * the oldest are dropped past a fixed budget; a dropped context is simulated again when asked for. */
 const CONTEXT_BYTES = 16 * 1024 * 1024;
+const BASES = 2048;
 const contexts = { chart: null as GekisoChart | null, byTag: new Map<string, Map<string, GekisoContext>>(), bytes: 0 };
 const contextBytes = (key: string, value: GekisoContext) =>
   key.length * 2 + 128 + value.judgement.byteLength + value.gk.byteLength + value.up.byteLength + value.luck.byteLength;
@@ -485,6 +486,8 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     let value = luckBases.get(key);
     if (!value) {
       const deck = [...memberDeck, ...chained];
+      // Each holds a deck's note weights: a Worker on a phone keeps at most a few thousand.
+      if (luckBases.size >= BASES) luckBases.clear();
       luckBases.set(key, (value = { w: weights(contextOf(deck)), deck, gains: new Map(), lives: new Map() }));
     }
     return value;
@@ -547,6 +550,7 @@ export function gekisoSearch(input: GekisoSearchInput): SearchOutput<GekisoDetai
     let base = refineBases.get(key);
     if (!base) {
       const deck = [...team.members.map((i) => gkMember[i]!), ...chained];
+      if (refineBases.size >= BASES) refineBases.clear();
       refineBases.set(key, (base = { w: weights(contextOf(deck)), deck, gains: new Map(), lives: new Map() }));
     }
     let total = base.w.base;
