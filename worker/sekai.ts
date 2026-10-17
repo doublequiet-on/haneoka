@@ -29,7 +29,7 @@ const ASSET_ORIGIN = "https://storage.sekai.best";
 export const SEKAI_API_PREFIX = "/api/v1/sekai";
 export { songRecords as projectSekaiSongs, unitRecords as projectSekaiBands, storyList as projectSekaiEventStories, unitStoryList as projectSekaiUnitStories, characterStoryList as projectSekaiCharacterStories, cardStoryList as projectSekaiCardStories, areaTalkList as projectSekaiAreaStories, specialStoryList as projectSekaiSpecialStories, mysekaiTalkList as projectSekaiMySekaiStories, virtualLiveList as projectSekaiLiveStories, storyDetail as projectSekaiStory };
 /** Bump when a projection changes so cached responses are not reused. */
-const RESPONSE_VERSION = "5";
+const RESPONSE_VERSION = "6";
 const JSON_CACHE_CONTROL = bestdoriCacheControl(BESTDORI_CACHE_POLICY.catalog);
 const MEDIA_CACHE_CONTROL = bestdoriCacheControl(BESTDORI_CACHE_POLICY.media);
 const CORS: Readonly<Record<string, string>> = {
@@ -553,6 +553,11 @@ const otherSource = async (storyId: string): Promise<ScenarioSource | undefined>
     const episode = (story?.episodes as Obj[] | undefined)?.find((entry) => entry.episodeNo === Number(match![2]));
     if (!story || !episode) return undefined;
     const id = String(episode.scenarioId);
+    // The opening's area conversation is stored with its action set.
+    if (id.startsWith("op")) {
+      const set = (await master("jp", "actionSets")).find((entry) => entry.scenarioId === id);
+      if (set) return adv(id, `scenario/actionset/group${Math.floor(Number(set.id) / 100)}/${id}.asset`, "sound/actionset/voice");
+    }
     const bundle = id.startsWith("op") ? story.assetbundleName : episode.assetbundleName;
     return adv(id, `scenario/special/${String(bundle)}/${id}.asset`, "sound/scenario/voice");
   }
