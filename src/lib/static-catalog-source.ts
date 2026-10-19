@@ -32,6 +32,7 @@ const RETRYABLE = new Set([403, 429, 500, 502, 503, 504]);
 const RELEASE_ID_PATTERN = /^r-[a-f0-9]{20}$/u;
 const SOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_ATTEMPTS = 3;
 const ERROR_BODY_BYTES = 4096;
 const ERROR_BODY_TIMEOUT_MS = 1000;
 
@@ -245,19 +246,20 @@ async function fetchResponse(
   sourceId?: string,
   absoluteUrl?: string,
 ): Promise<Response> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < REQUEST_ATTEMPTS; attempt += 1) {
+    const retry = attempt + 1 < REQUEST_ATTEMPTS;
     let response: Response;
     try {
       response = await fetch(absoluteUrl || staticCatalogUrl(path, server, releaseId), {
         headers: headers(),
         method,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS * (attempt === 0 ? 1 : 2)),
       });
     } catch (error) {
-      if (attempt > 0) {
+      if (!retry) {
         throw new Error(`Static catalog request failed for ${server}/${path.split("?")[0]}`, { cause: error });
       }
-      await wait(1500);
+      await wait(1500 * (attempt + 1));
       continue;
     }
     if (response.ok) return response;
@@ -272,14 +274,14 @@ async function fetchResponse(
           );
         }
         diagnostics = errorBodyFields(body);
-      } else if (attempt > 0 || !RETRYABLE.has(response.status)) {
+      } else if (!retry || !RETRYABLE.has(response.status)) {
         diagnostics = await boundedErrorBody(response).catch(() => ({ errorBody: "unreadable" }));
       }
     } finally {
       await releaseResponseBody(response);
     }
-    if (attempt === 0 && RETRYABLE.has(response.status)) {
-      await wait(1500);
+    if (retry && RETRYABLE.has(response.status)) {
+      await wait(1500 * (attempt + 1));
       continue;
     }
     throw new StaticCatalogHttpError(response.status, path, server, {
