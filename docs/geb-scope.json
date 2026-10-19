@@ -169,7 +169,8 @@
     "src/lit/shared/gacha-history-chart.ts",
     "src/lib/team-builder/song-comparison.ts",
     "src/lit/team-builder/song-comparison.ts",
-    "src/lit/team-builder/song-comparison-view.ts"
+    "src/lit/team-builder/song-comparison-view.ts",
+    "scripts/build/build-performance.mjs"
   ],
   "entry_documents": [
     "AGENTS.md",
