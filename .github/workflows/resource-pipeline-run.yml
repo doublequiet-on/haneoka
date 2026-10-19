@@ -595,6 +595,7 @@ jobs:
     strategy:
       # Delta runs only materialize shards that hold pending bundles; every
       # other shard's outputs are composed from the base release.
+      fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.prepare.outputs.unity_matrix) }}
     steps:
@@ -679,15 +680,28 @@ jobs:
             --shard-count "${{ needs.prepare.outputs.shard_count }}" \
             "${extra[@]}"
       - name: Preserve deterministic shard in private R2
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: "8"
         run: |
           build_root="data/servers/$RESOURCE_SERVER/builds/${{ needs.prepare.outputs.build_id }}"
           archive="$RUNNER_TEMP/unity-shard-${{ matrix.shard }}.tar.gz"
           tar --create --gzip --file "$archive" --directory "$build_root" shards
-          aws s3 cp "$archive" \
-            "s3://$PIPELINE_STAGE_BUCKET/$PIPELINE_STAGE_PREFIX/unity-shard-${{ matrix.shard }}.tar.gz" \
-            --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
-            --region auto \
-            --no-progress
+          upload_error="$RUNNER_TEMP/unity-stage-upload.err"
+          for attempt in 1 2 3; do
+            if aws s3 cp "$archive" \
+                "s3://$PIPELINE_STAGE_BUCKET/$PIPELINE_STAGE_PREFIX/unity-shard-${{ matrix.shard }}.tar.gz" \
+                --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
+                --region auto \
+                --no-progress 2> "$upload_error"; then
+              cat "$upload_error" >&2
+              break
+            fi
+            cat "$upload_error" >&2
+            if [[ "$attempt" == 3 ]] || ! grep -Eiq '\((InvalidPart|InternalError|ServiceUnavailable|SlowDown|RequestTimeout|Throttling)\)|Connection (was closed|reset)|[Rr]ead timeout|[Cc]onnect timeout|Could not connect to the endpoint URL' "$upload_error"; then exit 1; fi
+            echo "Transient stage upload failure; retrying attempt $((attempt + 1))/3" >&2
+            sleep "$((attempt * 5))"
+          done
 
   release:
     name: Assemble and publish release
