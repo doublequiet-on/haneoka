@@ -40,12 +40,13 @@ const buildId = String(
 const webBuildId = webBuildIdentity(root, buildId);
 const proxyTarget = String(process.env.LOCAL_WORKER_ORIGIN || process.env.LOCAL_RELEASE_ORIGIN || "").trim();
 const providerTarget = String(process.env.BESTDORI_PROVIDER_ORIGIN || process.env.LOCAL_WORKER_ORIGIN || "").trim();
-const publicResourceProxy = {
+const localWorkerTarget = proxyTarget && ["127.0.0.1", "localhost", "[::1]"].includes(new URL(proxyTarget).hostname);
+const resourceProxy = {
   target: proxyTarget,
   changeOrigin: true,
   configure(proxy) {
     proxy.on("proxyReq", (request) => {
-      const allowed = new Set(["host", "accept", "if-none-match", "if-range", "range"]);
+      const allowed = new Set(["host", "accept", "if-none-match", "if-range", "range", "cookie", "authorization"]);
       for (const name of Object.keys(request.getHeaders())) {
         if (!allowed.has(name.toLowerCase())) request.removeHeader(name);
       }
@@ -163,11 +164,11 @@ export default defineConfig({
                 : {}),
               ...(proxyTarget
                 ? {
-                    "^/api/v1/(?:servers(?:/|$)|announcements/media/)": publicResourceProxy,
-                    "/api": { target: proxyTarget, changeOrigin: true },
-                    "/assets": publicResourceProxy,
-                    "/objects": publicResourceProxy,
-                    "/runtime": publicResourceProxy,
+                    "^/api/v1/(?:servers(?:/|$)|announcements/media/)": resourceProxy,
+                    "/api": { target: proxyTarget, changeOrigin: !localWorkerTarget },
+                    "/assets": resourceProxy,
+                    "/objects": resourceProxy,
+                    "/runtime": resourceProxy,
                     "/sonolus": { target: proxyTarget, changeOrigin: true },
                   }
                 : {}),

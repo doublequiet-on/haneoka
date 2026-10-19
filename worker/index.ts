@@ -3,6 +3,9 @@
 // Output: 静态／API 响应、后台任务及队列处理。
 // Pos: [Map](L2.md)；Cloudflare 生产请求和任务组合根。
 // Effects/Dependencies: HTML 更新基准与 ASSETS 发布绑定；连接 D1、R2、缓存、认证、外部服务与队列／容器。
+import { semanticOwnersConflict } from "../src/lib/cross-server/content";
+import { handleContentAccessRequest } from "./content-access";
+import { publicStampManifest } from "../src/lib/stamp-maker/public-manifest";
 import { projectUiMarks, withUiMarksProjection } from "../src/lib/ui-marks.ts";
 import { handlePageData, type PageDataBindings } from "./catalog-page-data";
 import { PageDataError, type PageSource } from "../src/lib/catalog-page-contract";
@@ -15,7 +18,7 @@ import { version } from "@sonolus/core";
 import { sonolusShareRedirectTarget } from "./sonolus-share";
 export { CommunityMediaContainer } from "./community-media-container";
 import { handleAdminRequest } from "./admin";
-import { applySiteSettings, readSiteSettings, testContentAllowed } from "./site-settings";
+import { applySiteSettings, readSiteSettings, testContentAllowed, isPublicResourceServer, restrictedResourceRequest, privateResourceResponse } from "./site-settings";
 import { serveStaticDocument, staticDocumentRedirect, staticPublicationContext } from "./static-documents";
 import { staticDocumentLookupPath, acceptsGzip } from "../src/lib/static-documents";
 import { legacyProviderRedirectTarget, providerEntityFromUrl } from "../src/lib/provider-entity-routing";
@@ -131,6 +134,7 @@ interface ReleaseCacheEntry {
 }
 
 interface ResourceServerRoute {
+  baseServer?: "jp" | "intl";
   resourcePrefix: string;
   slug: string;
 }
@@ -429,9 +433,9 @@ function cleanRelativePath(value: string): string | null {
   return output.join("/");
 }
 
-function isServerFirstDocumentPath(pathname: string): boolean {
+function isServerFirstDocumentPath(pathname: string, sources?: readonly string[]): boolean {
   const parts = pathname.split("/").filter(Boolean);
-  return parts.length >= 2 && isReleaseServer(parts[0]) && SERVER_FIRST_LOCALES.has(parts[1] || "");
+  return parts.length >= 2 && isReleaseServer(parts[0], sources) && SERVER_FIRST_LOCALES.has(parts[1] || "");
 }
 
 const DOCUMENT_RESOURCE_NAMES: Readonly<Partial<Record<ResourceKind, string>>> = {
@@ -575,19 +579,24 @@ async function activeResourceServer(env: Env, slug: string): Promise<ResourceSer
   const cached = resourceServerRouteCache.get(slug);
   if (cached && cached.expiresAt > now) return cached.value;
   const row = await env.DB.prepare(
-    `SELECT slug, resource_prefix AS resourcePrefix
+    `SELECT slug, region, resource_prefix AS resourcePrefix
      FROM resource_server
      WHERE slug = ? AND status = 'active'
      LIMIT 1`,
   )
     .bind(slug)
-    .first<{ resourcePrefix: string; slug: string }>();
+    .first<{ resourcePrefix: string; slug: string; region: string }>();
   const value =
     row?.slug === slug && validResourcePrefix(row.resourcePrefix)
-      ? { resourcePrefix: row.resourcePrefix, slug: row.slug }
+      ? { resourcePrefix: row.resourcePrefix, slug: row.slug, baseServer: row.region === "jp" ? "jp" as const : "intl" as const }
       : null;
   cacheResourceServerRoute(slug, { expiresAt: now + RESOURCE_SERVER_CACHE_TTL_MS, value }, now);
   return value;
+}
+
+async function accessibleResourceServer(env: Env, request: Request, slug: string): Promise<ResourceServerRoute | null> {
+  if (!isPublicResourceServer(slug) && !(await testContentAllowed(request, env))) return null;
+  return activeResourceServer(env, slug);
 }
 
 async function activeResourceServers(env: Env): Promise<readonly ResourceServerRoute[]> {
@@ -596,11 +605,11 @@ async function activeResourceServers(env: Env): Promise<readonly ResourceServerR
     return resourceServerRouteListCache.value;
   }
   const result = await env.DB.prepare(
-    `SELECT slug, resource_prefix AS resourcePrefix
+    `SELECT slug, region, resource_prefix AS resourcePrefix
      FROM resource_server
      WHERE status = 'active'
      ORDER BY slug`,
-  ).all<{ resourcePrefix: string; slug: string }>();
+  ).all<{ resourcePrefix: string; slug: string; region: string }>();
   const routes = result.results.map((row) => {
     if (
       typeof row.slug !== "string" ||
@@ -610,7 +619,7 @@ async function activeResourceServers(env: Env): Promise<readonly ResourceServerR
     ) {
       throw new Error("invalid active resource server route");
     }
-    return { resourcePrefix: row.resourcePrefix, slug: row.slug };
+    return { resourcePrefix: row.resourcePrefix, slug: row.slug, baseServer: row.region === "jp" ? "jp" as const : "intl" as const };
   });
   if (new Set(routes.map((route) => route.slug)).size !== routes.length) {
     throw new Error("duplicate active resource server route");
@@ -931,6 +940,7 @@ async function edgeCached(
   producer: () => Promise<Response>,
   cacheControl?: string,
 ): Promise<Response> {
+  if (restrictedResourceRequest(request)) return privateResourceResponse(await producer());
   if (request.method !== "GET" && request.method !== "HEAD") return producer();
   const headers = new Headers(request.headers);
   if (request.method === "HEAD") headers.delete("Range");
@@ -1805,7 +1815,7 @@ async function handleGameClient(env: Env, ctx: ExecutionContext, request: Reques
   if (!serverSlug || !RESOURCE_SERVER_SLUG_PATTERN.test(serverSlug) || !route) {
     return gameClientError(request, 404, "not found");
   }
-  const server = await activeResourceServer(env, serverSlug);
+  const server = await accessibleResourceServer(env, request, serverSlug);
   if (!server) return gameClientError(request, 404, "not found");
   const release = await currentRelease(env, server);
   if (!release) return gameClientError(request, 503, "release unavailable");
@@ -2325,7 +2335,7 @@ async function handleCatalogApiRequest(
   const serverSlug = decodePathPart(rawServer);
   if (!serverSlug || !RESOURCE_SERVER_SLUG_PATTERN.test(serverSlug))
     return errorResponse(request, 404, "server_not_found", "Server not found");
-  const server = await activeResourceServer(env, serverSlug);
+  const server = await accessibleResourceServer(env, request, serverSlug);
   if (!server) return errorResponse(request, 404, "server_not_found", "Server not found");
   const releaseValues = new URL(request.url).searchParams.getAll("release");
   if (releaseValues.length > 1 || (releaseValues[0] !== undefined && !RELEASE_ID_PATTERN.test(releaseValues[0]))) {
@@ -2472,6 +2482,39 @@ async function handleCatalogApiRequest(
       release,
     );
   }
+  if (tail === "stamps/textless") {
+    const cacheUrl = new URL(request.url);
+    cacheUrl.searchParams.set("__stamp_projection", "public-v1");
+    return releaseResponseHeaders(
+      await edgeCached(
+        releaseCacheRequest(new Request(cacheUrl, request), release.releaseId),
+        ctx,
+        API_CACHE_TTL,
+        async () => {
+          const stamps = storage.resources.stamps;
+          if (!stamps) return errorResponse(request, 404, "resource_not_found", "Catalog resource not found");
+          const [input, catalog] = await Promise.all([
+            readReleaseJson(env, release, "runtime/stamp-maker/manifest.json"),
+            readReleaseJson(env, release, stamps.index),
+          ]);
+          if (input === null) return errorResponse(request, 404, "resource_not_found", "Catalog resource not found");
+          if (!isJsonObject(catalog)) return errorResponse(request, 502, "catalog_missing", "Catalog index is missing");
+          const body = JSON.stringify(publicStampManifest(input, {
+            server: release.server,
+            sourceId: release.sourceId,
+            stampIds: new Set(Object.keys(catalog)),
+          }));
+          const etag = await jsonDocumentEtag(body);
+          return new Response(request.method === "HEAD" || etagMatches(request.headers.get("If-None-Match"), etag) ? null : body, {
+            status: etagMatches(request.headers.get("If-None-Match"), etag) ? 304 : 200,
+            headers: { ...CORS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": CATALOG_API_CACHE_CONTROL, ETag: etag },
+          });
+        },
+        CATALOG_API_CACHE_CONTROL,
+      ),
+      release,
+    );
+  }
   return handleCatalogStorageApi(env, ctx, request, release, storage, tail);
 }
 
@@ -2503,7 +2546,7 @@ async function handleMetaReferenceApi(env: Env, request: Request): Promise<Respo
   ) {
     return errorResponse(request, 404, "meta_reference_not_found", "Meta reference not found");
   }
-  const server = await activeResourceServer(env, serverSlug);
+  const server = await accessibleResourceServer(env, request, serverSlug);
   if (!server) return errorResponse(request, 404, "server_not_found", "Server not found");
   if (server.resourcePrefix !== `servers/${serverSlug}`) {
     return errorResponse(request, 502, "meta_reference_prefix_invalid", "Meta reference server prefix is invalid");
@@ -2563,6 +2606,7 @@ async function handleMetaReferenceApi(env: Env, request: Request): Promise<Respo
 const recognitionReferenceProvider = createRecognitionReferenceProvider({
   resolveRelease: async (env, context) => {
     if (
+      !isPublicResourceServer(context.server) ||
       !RESOURCE_SERVER_SLUG_PATTERN.test(context.server) ||
       !RELEASE_ID_PATTERN.test(context.releaseId) ||
       !SOURCE_ID_PATTERN.test(context.sourceId)
@@ -2611,7 +2655,7 @@ async function handleTeamBuilderDataApi(env: Env, ctx: ExecutionContext, request
       const pin = /^\/api\/v1\/servers\/([^/]+)\/release$/u.exec(catalogUrl.pathname);
       if (pin?.[1] && response?.ok && catalogUrl.searchParams.get("projection") === "identity") {
         const slug = decodePathPart(pin[1]);
-        const server = slug ? await activeResourceServer(env, slug) : null;
+        const server = slug ? await accessibleResourceServer(env, request, slug) : null;
         const releaseId = response.headers.get("X-Haneoka-Release-Id") || "";
         const sourceId = response.headers.get("X-Haneoka-Source-Id") || "";
         if (!server || !RELEASE_ID_PATTERN.test(releaseId) || !SOURCE_ID_PATTERN.test(sourceId)) {
@@ -2684,9 +2728,9 @@ async function handleChartImageApi(env: Env, request: Request): Promise<Response
   const response = await handleChartImageRequest({
     request: scopedRequest,
     sources: {
-      hasServer: async (slug) => (await activeResourceServer(env, slug)) !== null,
+      hasServer: async (slug) => (await accessibleResourceServer(env, request, slug)) !== null,
       currentRelease: async (slug) => {
-        const server = await activeResourceServer(env, slug);
+        const server = await accessibleResourceServer(env, request, slug);
         resolved = server ? await currentRelease(env, server) : null;
         return resolved;
       },
@@ -2789,8 +2833,9 @@ async function handleReleaseMedia(
   const relative = cleanRelativePath(rawPath);
   if (!serverSlug || !RESOURCE_SERVER_SLUG_PATTERN.test(serverSlug) || !relative)
     return new Response("not found", { status: 404, headers: CORS });
-  const server = await activeResourceServer(env, serverSlug);
+  const server = await accessibleResourceServer(env, request, serverSlug);
   if (!server) return new Response("not found", { status: 404, headers: CORS });
+  const stampDiagnostics = tree === "runtime" && relative === "stamp-maker/manifest.json";
   if (tree === "assets" && !relative.startsWith("Assets/") && !relative.startsWith("Packages/")) {
     return new Response("not found", { status: 404, headers: CORS });
   }
@@ -2815,10 +2860,18 @@ async function handleReleaseMedia(
       ? errorResponse(request, 404, "release_not_found", "Requested release is not available")
       : new Response("not found", { status: 404, headers: CORS });
   }
+  if (stampDiagnostics && !(await testContentAllowed(request, env))) {
+    const target = new URL(`/api/v1/servers/${server.slug}/stamps/textless`, request.url);
+    target.searchParams.set("release", release.releaseId);
+    return new Response(null, {
+      status: 302,
+      headers: { ...CORS, Location: target.pathname + target.search, "Cache-Control": "no-store" },
+    });
+  }
   // A `?release=` URL names one immutable release: its bytes can never
   // change, so browsers keep it for a year instead of revalidating every
   // jacket on every visit. Unpinned URLs follow the moving current pointer.
-  const cacheControl = requested ? PINNED_MEDIA_CACHE_CONTROL : CATALOG_API_CACHE_CONTROL;
+  const cacheControl = stampDiagnostics ? "private, no-store" : requested ? PINNED_MEDIA_CACHE_CONTROL : CATALOG_API_CACHE_CONTROL;
   const moc = tree === "runtime" && relative.endsWith(".moc3");
   const clientEncoding = request.cf?.clientAcceptEncoding;
   const gzip =
@@ -2851,7 +2904,9 @@ async function handleReleaseMedia(
   };
   // Cache API hits expose decoded streams while retaining Content-Encoding.
   // Keep the precompressed MOC response on the direct R2 path.
-  const response = gzip
+  const response = stampDiagnostics
+    ? privateResourceResponse(await produce())
+    : gzip
     ? await produce()
     : await edgeCached(cacheRequest, ctx, MEDIA_CACHE_TTL, produce, cacheControl);
   return releaseResponseHeaders(response, release);
@@ -2884,7 +2939,7 @@ async function handleArtifact(
   ) {
     return new Response("not found", { status: 404, headers: CORS });
   }
-  const server = await activeResourceServer(env, serverSlug);
+  const server = await accessibleResourceServer(env, request, serverSlug);
   if (!server) return new Response("not found", { status: 404, headers: CORS });
   const source = await readR2Json(env, `${server.resourcePrefix}/sources/${sourceId}/source.json`);
   if (!isJsonObject(source)) return new Response("not found", { status: 404, headers: CORS });
@@ -2923,7 +2978,7 @@ function sonolusReleaseKey(release: Pick<Release, "releaseId" | "server">): stri
 }
 
 async function activeSonolusReleases(env: Env): Promise<readonly Release[]> {
-  const servers = await activeResourceServers(env);
+  const servers = (await activeResourceServers(env)).filter(server => isPublicResourceServer(server.slug));
   const releases = (await Promise.all(servers.map((server) => currentRelease(env, server)))).filter(
     (release): release is Release => release !== null,
   );
@@ -3120,7 +3175,7 @@ function sonolusDocumentSourceRequest(request: Request): Request {
   return new Request(request, { method: "GET", headers });
 }
 
-async function sonolusDocumentEtag(body: string): Promise<string> {
+async function jsonDocumentEtag(body: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
   return `"${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}"`;
 }
@@ -3137,7 +3192,7 @@ async function localizeStaticSonolusDocument(
   const headers = new Headers(response.headers);
   headers.delete("Content-Range");
   headers.set("Content-Length", String(new TextEncoder().encode(body).byteLength));
-  headers.set("ETag", await sonolusDocumentEtag(body));
+  headers.set("ETag", await jsonDocumentEtag(body));
   const etag = headers.get("ETag");
   if (etagMatches(request.headers.get("If-None-Match"), etag)) {
     return new Response(null, { status: 304, statusText: response.statusText, headers });
@@ -3437,40 +3492,43 @@ async function documentEntityAvailability(
   return availability;
 }
 
-/** Preview documents are aliases of Intl whenever that page or native entity exists there. */
+/** Additional documents share formal shells, while entity data keeps its source identity. */
 async function previewDocumentRedirect(request: Request, env: Env): Promise<Response | null> {
-  const source = new URL(request.url),
-    parts = source.pathname.split("/").filter(Boolean);
-  if (parts[0] !== "intl-test" || !SERVER_FIRST_LOCALES.has(parts[1] || "")) return null;
+  const source = new URL(request.url), parts = source.pathname.split("/").filter(Boolean);
+  const slug = parts[0];
+  if (!slug || isPublicResourceServer(slug) || !SERVER_FIRST_LOCALES.has(parts[1] || "")) return null;
+  const definition = await accessibleResourceServer(env, request, slug);
+  if (!definition) return new Response("Not found", { status: 404 });
+  const base = definition.baseServer || "intl";
   const target = new URL(source);
-  target.pathname = source.pathname.replace(/^\/intl-test(?=\/)/u, "/intl");
+  target.pathname = `/${base}/${parts.slice(1).join("/")}/`;
   for (const key of ["server", "release", "releaseId", "source", "sourceId"]) target.searchParams.delete(key);
   const returnTo = target.searchParams.get("return");
-  if (returnTo?.startsWith("/intl-test/"))
-    target.searchParams.set("return", returnTo.replace(/^\/intl-test\//u, "/intl/"));
-  const redirect = () =>
-    new Response(null, {
-      status: 302,
-      headers: { Location: target.pathname + target.search, "Cache-Control": "no-store" },
-    });
-  const route = parseResourceRoute(source.pathname);
+  if (returnTo?.startsWith(`/${slug}/`)) target.searchParams.set("return", `/${base}/${returnTo.slice(slug.length + 2)}`);
+  const redirect = () => new Response(null, { status: 302, headers: { Location: target.pathname + target.search, "Cache-Control": "no-store" } });
+  const route = parseResourceRoute(source.pathname, [slug]);
   const collection = route && (!route.id || (route.kind === "stories" && STORY_MODES.has(route.id)));
   if (collection || parts[2] === "assets" || (parts[2] === "events" && parts[3] === "tracker")) {
-    if (route?.kind === "circle" || route?.kind === "challenge") target.pathname = `/intl/${parts[1]}/catalog/`;
+    if (route?.kind === "circle" || route?.kind === "challenge") target.pathname = `/${base}/${parts[1]}/catalog/`;
     return redirect();
   }
   if (route?.id) {
-    const formal = await documentEntityAvailability(env, { ...route, server: "intl", id: route.id });
-    return formal ? redirect() : null;
+    const own = await documentEntityAvailability(env, route as ResourceRoute & { id: string });
+    for (const formalSource of [base, base === "jp" ? "intl" : "jp"]) {
+      const formal = await documentEntityAvailability(env, { ...route, server: formalSource, id: route.id });
+      if (formal && (!own || !semanticOwnersConflict(own.entity, formal.entity, DOCUMENT_RESOURCE_NAMES[route.kind] || route.kind))) {
+        target.pathname = resourcePath({ ...route, server: formalSource });
+        return redirect();
+      }
+    }
+    return null;
   }
   const headers = new Headers(request.headers);
-  headers.delete("If-None-Match");
-  headers.delete("If-Modified-Since");
+  headers.delete("If-None-Match"); headers.delete("If-Modified-Since");
   const sibling = await env.ASSETS.fetch(new Request(target, { method: "HEAD", headers }));
   if (sibling.status < 400) return redirect();
-  // Settings and shared tools use a locale-only address rather than a server prefix.
   target.pathname = `/${parts.slice(1).join("/")}/`;
-  target.searchParams.set("server", "intl");
+  target.searchParams.set("server", base);
   const shared = await env.ASSETS.fetch(new Request(target, { method: "HEAD", headers }));
   return shared.status < 400 ? redirect() : null;
 }
@@ -3487,7 +3545,7 @@ function previewDetailShell(request: Request, shell: Response, route: ResourceRo
         const config = JSON.parse(element.getAttribute("config") || "{}");
         element.setAttribute(
           "config",
-          JSON.stringify({ ...config, server: route.server, entityKind: route.kind, entityId: route.id, entityContext: true }),
+          JSON.stringify({ ...config, server: route.server, entityKind: route.kind, entityId: route.id, entityContext: true, chartPage: route.view === "chart" }),
         );
       }
       element.setInnerContent("");
@@ -3549,7 +3607,9 @@ async function serveCanonicalResourceDocument(
     requestedUrl.pathname = `/${segments[0]}/${segments[1]}/assets/`;
     return env.ASSETS.fetch(new Request(requestedUrl, request));
   }
-  const route = parseResourceRoute(requestedUrl.pathname);
+  const sourceId = requestedUrl.pathname.split("/")[1] || "";
+  const allowedSource = await accessibleResourceServer(env, request, sourceId);
+  const route = allowedSource ? parseResourceRoute(requestedUrl.pathname, [sourceId]) : undefined;
   if (!route || (request.method !== "GET" && request.method !== "HEAD")) return null;
 
   if (!route.id) {
@@ -3570,15 +3630,16 @@ async function serveCanonicalResourceDocument(
   if (!availability) return new Response("Not found", { status: 404 });
 
   const url = new URL(request.url);
+  const shellServer = isPublicResourceServer(route.server) ? route.server : allowedSource?.baseServer || "intl";
   url.pathname =
     route.kind === "stories" && availability.storyMode
-      ? storyCollectionPath({ server: route.server, locale: route.locale, mode: availability.storyMode })
-      : resourcePath({ server: route.server, locale: route.locale, kind: route.kind });
+      ? storyCollectionPath({ server: shellServer, locale: route.locale, mode: availability.storyMode })
+      : resourcePath({ server: shellServer, locale: route.locale, kind: route.kind });
   const shellRequest = new Request(url, request);
   const lookup = staticDocumentLookupPath(url.pathname);
   const document = lookup ? await serveStaticDocument(shellRequest, env, ctx, lookup, publicationId) : null;
   const shell = document || (await env.ASSETS.fetch(shellRequest));
-  if ((route.server === "intl-test" || pageReady) && shell.ok)
+  if ((!isPublicResourceServer(route.server) || pageReady) && shell.ok)
     return previewDetailShell(request, shell, route as ResourceRoute & { id: string });
   return shell.status === 404 ? new Response("Not found", { status: 404 }) : shell;
 }
@@ -3611,8 +3672,19 @@ const WORKER_FIRST_PREFIXES = [
 ];
 
 async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const restricted = restrictedResourceRequest(request);
+  if (restricted && !(await testContentAllowed(request, env)))
+    return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+  const response = await handleScopedRequest(request, env, ctx);
+  return restricted ? privateResourceResponse(response) : response;
+}
+
+async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter(Boolean);
+  const documentSource = SERVER_FIRST_LOCALES.has(segments[1] || "") && segments[0] && !isPublicResourceServer(segments[0])
+    ? await accessibleResourceServer(env, request, segments[0]) : null;
+  const documentSources = documentSource ? [documentSource.slug] : undefined;
   if (request.method === "GET" || request.method === "HEAD") {
     const documentPath =
       url.pathname === "/" || /^\/(?:jp|intl|jp-cbt|intl-cbt|gl-cbt|ja|en|zh-TW|zh-CN|ko)(?:\/|$)/u.test(url.pathname);
@@ -3637,7 +3709,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   }
   const stampFonts = await handleStampFontsRequest(request, env, ctx);
   if (stampFonts) return stampFonts;
-  if (isReleaseServer(segments[0]) && (request.method === "GET" || request.method === "HEAD")) {
+  if (isReleaseServer(segments[0], documentSources) && (request.method === "GET" || request.method === "HEAD")) {
     if (segments.length === 1) {
       url.pathname = `/${segments[0]}/${negotiateLocale(request)}/`;
       return new Response(null, {
@@ -3663,7 +3735,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     });
   }
   const hasLocalePrefix = /^\/(?:ja|en|zh-TW|zh-CN|ko)(?:\/|$)/u.test(url.pathname);
-  const serverFirstDocument = isServerFirstDocumentPath(url.pathname);
+  const serverFirstDocument = isServerFirstDocumentPath(url.pathname, documentSources);
   const lastSegment = url.pathname.split("/").pop() || "";
   // The asset explorer's SPA sub-routes are the one worker-first prefix whose
   // unprefixed document addresses still negotiate: no unprefixed page is
@@ -3700,6 +3772,8 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     if (registration) return registration;
     const auth = await handleAuthRequest(request, env);
     if (auth) return auth;
+    const contentAccess = await handleContentAccessRequest(request, env);
+    if (contentAccess) return contentAccess;
     const appAccount = await handleAppAccountRequest(request, env);
     if (appAccount) return appAccount;
     const resolveCommunityEntity = createCommunityEntityResolver((catalogEnv, catalogRequest) =>
@@ -3766,7 +3840,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     return (await serveStaticDocument(request, env, ctx, staticPath)) || new Response("Not found", { status: 404 });
   }
   const announcements = await handleAnnouncementsRequest(request, env, (serverSlug) =>
-    activeResourceServer(env, serverSlug),
+    accessibleResourceServer(env, request, serverSlug),
   );
   if (announcements) return announcements;
   const gameClient = await handleGameClient(env, ctx, request, url);
@@ -3800,14 +3874,16 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   if (url.pathname.startsWith("/api/")) return errorResponse(request, 404, "route_not_found", "API route not found");
   const documentRequest =
     url.pathname.endsWith("/") || url.pathname.endsWith(".html") || !/\.[^/]+$/u.test(url.pathname);
-  if (!documentRequest) return serveStaticAsset(request, env);
-  const previewRequest = url.pathname.split("/")[1]?.includes("-test");
+  if (!documentRequest) return restrictedResourceRequest(request)
+    ? new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } })
+    : serveStaticAsset(request, env);
+  const previewRequest = restrictedResourceRequest(request);
   if (previewRequest) {
     const redirect = await previewDocumentRedirect(request, env);
     if (redirect) return redirect;
   }
   const previewSettings = previewRequest ? await readSiteSettings(env) : undefined;
-  if (previewSettings && !testContentAllowed(request, previewSettings))
+  if (previewSettings && !(await testContentAllowed(request, env, previewSettings)))
     return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   const headers = new Headers(request.headers);
   headers.delete("If-None-Match");
@@ -3846,9 +3922,9 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         (await serveCanonicalResourceDocument(assetRequest, env, ctx, publicationId, pageReady)) || serveStaticAsset(assetRequest, env)
       );
     })(),
-    previewSettings ? Promise.resolve(previewSettings) : readSiteSettings(env),
+    Promise.resolve(previewSettings),
   ]);
-  const result = await applySiteSettings(request, response, settings, webBuildId);
+  const result = await applySiteSettings(request, response, settings, webBuildId, env);
   if (
     (result.body || request.method === "HEAD" || result.status === 304) &&
     result.headers.get("Content-Type")?.includes("text/html") &&

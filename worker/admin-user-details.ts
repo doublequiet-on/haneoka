@@ -1,12 +1,13 @@
 import { avatarUrlSelect } from "./avatar-url";
 import { readIpDetails } from "./ip-address";
+import { effectiveUserRoleSql } from "./user-roles";
 type Row = Record<string, string | number | null>;
 export async function readAdminUser(request: Request, env: Env, id: string): Promise<Response> {
   const user = await env.DB.prepare(
     `SELECT u.id, identity.uid AS publicUid, u.name AS accountName,u.email,
     u.emailVerified,u.createdAt,u.updatedAt,${avatarUrlSelect("u")} AS image,
     p.display_name AS publicDisplayName,p.pending_display_name AS candidateDisplayName,
-    p.display_name_status AS displayNameStatus,p.handle,p.bio,p.role,p.status,p.version,
+    p.display_name_status AS displayNameStatus,p.handle,p.bio,${effectiveUserRoleSql("p")} AS role,p.status,p.version,
     p.created_at AS profileCreatedAt,p.updated_at AS profileUpdatedAt,p.deleted_at AS profileDeletedAt
     FROM "user" AS u LEFT JOIN community_profile AS p ON p.user_id=u.id
     LEFT JOIN community_identity AS identity ON identity.user_id=u.id WHERE u.id=?`,

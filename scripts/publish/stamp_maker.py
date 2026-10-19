@@ -5,12 +5,11 @@ import hashlib
 import shutil
 import sys
 import tempfile
-from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build.stamp_id_cache import StampIdCache
-from build.stamp_pipeline import build_textless_stamps, MANIFEST, OBJECT_PREFIX, SERVERS
+from build.stamp_pipeline import build_textless_stamps, unchanged_source_records, MANIFEST, OBJECT_PREFIX, SERVERS
 from core.config import load_server_config
 from core.manifests import read_json, write_json, stable_json
 from core.paths import build_layout, validate_release_path
@@ -39,21 +38,22 @@ def refresh(store, config, output):
     write_json(layout.api / "stamps.json", stamps)
     with StampIdCache(store) as cache:
         previous = []
-        for peer in SERVERS:
-            snapshot = current_release_document(store, replace(config, id=peer), MANIFEST)
-            if snapshot:
-                previous.append(snapshot["document"])
-        existing_ids = set(cache.records) | {str(record["stampId"]) for value in previous for record in value["records"] if record.get("publishable")}
-        unknown = {key: row for key, row in stamps.items() if key not in existing_ids and row.get("image")}
+        snapshot = current_release_document(store, config, MANIFEST)
+        if snapshot:
+            previous.append(snapshot["document"])
+        retained = unchanged_source_records(previous[0] if previous else None, config.id, pointer['sourceId'], stamps)
+        current = {key: row for key, row in stamps.items() if row.get("image") and key not in retained}
+        original_paths = set()
         selected_sources = {}
         source_manifest = read("metadata/source-index/manifest.json")
         parts = source_manifest["sources"]
         reports = set()
-        for row in unknown.values():
+        for row in current.values():
             image = row["image"]
             variants = set([image, *row.get("imageVariants", {}).get(image, {}).values()])
             for value in variants:
                 logical = validate_release_path(value.removeprefix(f"/assets/{config.id}/"))
+                original_paths.add('assets/' + logical)
                 shard = fnv1a32_shard(logical)
                 source = read(parts["prefix"] + shard + ".json").get(logical)
                 if source is None:
@@ -69,6 +69,8 @@ def refresh(store, config, output):
             entry = entries[path]
             store.download_file(cas_key(entry["sha256"]), layout.root / path,
                                 expected_bytes=entry["bytes"], expected_sha256=entry["sha256"])
+        for path in sorted(original_paths):
+            restore(path)
         for digest in sorted(reports):
             report_path = f"metadata/bundles/{digest}.json"
             report = read(report_path)
@@ -82,7 +84,9 @@ def refresh(store, config, output):
                         restore(item["path"])
         write_json(layout.metadata / "source-index.json", {"server": config.id, "sourceId": pointer["sourceId"], "sources": selected_sources})
         result = build_textless_stamps(config.id, pointer["sourceId"], layout.root.name,
-                                       id_cache=cache, previous_manifests=previous)
+                                       id_cache=cache, previous_manifests=previous, restore_output=lambda path, target:
+                                       store.download_file(cas_key(entries[path]['sha256']), target,
+                                                           expected_bytes=entries[path]['bytes'], expected_sha256=entries[path]['sha256']))
     with tempfile.TemporaryDirectory(prefix="stamp-publication-") as folder:
         staging = Path(folder)
         manifest = read_json(layout.root / MANIFEST)

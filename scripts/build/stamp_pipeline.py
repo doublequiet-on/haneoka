@@ -138,7 +138,7 @@ def restore_stamp_inputs(root: Path, index: dict, delta) -> None:
 
 
 def stage_records(root: Path, server: str, source_id: str, rows: list[dict], records: list[dict], recipe: str,
-                  production_recipe: dict | None = None) -> dict:
+                  production_recipe: dict | None = None, *, unchanged_source_ids: frozenset[str] = frozenset()) -> dict:
     import numpy as np
     from PIL import Image
 
@@ -148,8 +148,8 @@ def stage_records(root: Path, server: str, source_id: str, rows: list[dict], rec
     objects = {}; public = []
     for record in records:
         row = expected[str(record["stampId"])]
-        frozen = record.get("reusedByStampId") is True
-        if not frozen and input_fingerprint(record["sources"]) != input_fingerprint(row["variants"]):
+        fingerprint = record.get("inputFingerprint") or input_fingerprint(record["sources"])
+        if str(record['stampId']) not in unchanged_source_ids and fingerprint != input_fingerprint(row["variants"]):
             raise ValueError("stamp derivative input evidence changed")
         asset = record["artifacts"]["sourceImage"]
         file = Path(asset["path"])
@@ -166,7 +166,7 @@ def stage_records(root: Path, server: str, source_id: str, rows: list[dict], rec
             raise ValueError("stamp derivative resamples or exceeds its native frame")
         if not record["hasArtwork"] and pixels[..., 3].any():
             raise ValueError("text-only derivative must have an empty alpha channel")
-        if not frozen and (set(record["languageWeights"]) != {s["language"] for s in row["variants"]} or any(v != 1 for v in record["languageWeights"].values())):
+        if str(record['stampId']) not in unchanged_source_ids and (set(record["languageWeights"]) != {s["language"] for s in row["variants"]} or any(v != 1 for v in record["languageWeights"].values())):
             raise ValueError("stamp language evidence must have equal weights")
         pixels[pixels[..., 3] == 0, :3] = 0
         pixel_hash = hashlib.sha256(width.to_bytes(4, "big") + height.to_bytes(4, "big") + pixels.tobytes()).hexdigest()
@@ -185,17 +185,12 @@ def stage_records(root: Path, server: str, source_id: str, rows: list[dict], rec
         public_record = {"id": row["id"], "stampId": str(row["stampId"]), "sourceServer": server,
                        "publishable": True, "hasArtwork": record["hasArtwork"], "quality": record["quality"],
                        "effectiveSourceSize": [width, height], "effectiveOriginalSize": record["effectiveOriginalSize"],
-                       "inputFingerprint": record.get("inputFingerprint") if frozen else input_fingerprint(row["variants"]),
+                       "inputFingerprint": fingerprint,
                        "recipeFingerprint": record.get("recipeFingerprint", recipe),
                        "pixelSha256": pixel_hash, "algorithmVersion": record["algorithmVersion"],
                        "sourceHash": record["sourceHash"], "languageWeights": record["languageWeights"],
                        "exportPolicy": record["exportPolicy"],
                        "artifacts": {"sourceImage": obj, "exportCandidate": obj}}
-        for field in ("seedOrigin", "localGeneratedRepair", "localRepairCacheApplied", "localRepair",
-                      "repairSourceIdentity", "repairInputSourceHash", "originSourceIdentity"):
-            if field in record:
-                public_record[field] = record[field]
-        public_record.setdefault("originSourceIdentity", {"server": server, "sourceId": source_id})
         public.append(public_record)
     document = {"schema": "haneoka-textless-stamps-v1", "server": server,
                 "sourceIdentity": {"server": server, "sourceId": source_id}, "records": public}
@@ -203,6 +198,30 @@ def stage_records(root: Path, server: str, source_id: str, rows: list[dict], rec
         document["productionRecipe"] = production_recipe
     write_json(root / MANIFEST, document)
     return {"server": server, "sourceId": source_id, "records": len(public), "objects": len(objects), "manifest": MANIFEST}
+
+
+def unchanged_source_records(manifest: dict | None, server: str, source_id: str, entities: dict) -> dict:
+    """An own immutable source can retain already published, non-foreign derivatives."""
+    from build.textless_stamps import catalog_image_variants
+    if (server not in {'jp', 'intl'} or manifest is None
+            or manifest.get('schema') != 'haneoka-textless-stamps-v1' or manifest.get('server') != server
+            or manifest.get('sourceIdentity') != {'server': server, 'sourceId': source_id}):
+        return {}
+    result = {}
+    for record in manifest['records']:
+        stamp_id = str(record.get('stampId', ''))
+        entry = entities.get(stamp_id)
+        if not entry or not entry.get('image') or record.get('publishable') is not True:
+            continue
+        origins = [record.get('originSourceIdentity'), record.get('repairSourceIdentity'),
+                   record.get('seedOrigin', {}).get('sourceIdentity')]
+        if any(isinstance(origin, dict) and origin.get('server') not in (None, server) for origin in origins):
+            continue
+        if (record.get('id') != Path(entry['image']).stem or not record.get('inputFingerprint')
+                or record.get('languageWeights') != {language: 1 for language in catalog_image_variants(entry, server)}):
+            continue
+        result[stamp_id] = record
+    return result
 
 
 def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: Path | None = None,
@@ -221,7 +240,7 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
     if delta is not None and delta.source_id != source_id:
         raise ValueError("stamp delta source identity mismatch")
     entities = read_json(layout.api / "stamps.json")
-    pool = dict(id_cache.records) if id_cache is not None else {}
+    candidates = {key: [value] for key, value in id_cache.records.items()} if id_cache is not None else {}
     documents = list(previous_manifests or [])
     own = delta.base_document(MANIFEST) if delta is not None and delta.entry(MANIFEST) else reuse_manifest
     if own is None:
@@ -236,9 +255,7 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
         for old in document.get("records", []):
             if old.get("publishable") is True and str(old.get("stampId", "")).isdecimal():
                 record = {**old, "originSourceIdentity": old.get("originSourceIdentity", document.get("sourceIdentity"))}
-                pool.setdefault(str(old["stampId"]), record)
-                if id_cache is not None:
-                    id_cache.remember(record)
+                candidates.setdefault(str(old["stampId"]), []).append(record)
     seeds = {}
     cache_inputs, provenance = seed_cache_inputs(seed_manifest, seed_provenance, repair_cache_manifest)
     if seed_manifest:
@@ -247,7 +264,7 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
             raise ValueError("stamp seed belongs to an unsupported server")
         for record in seed["records"]:
             stamp_id = str(record.get("stampId", ""))
-            if record.get("publishable") is True and stamp_id.isdecimal() and stamp_id not in pool:
+            if record.get("publishable") is True and stamp_id.isdecimal():
                 asset = record["artifacts"]["sourceImage"]
                 file = Path(asset["path"])
                 if not file.is_absolute():
@@ -255,19 +272,40 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
                 seeds[stamp_id] = {**reviewed_seed_record(record, seed, cache_inputs, provenance),
                                     "originSourceIdentity": seed.get("sourceIdentity"),
                                     "artifacts": {"sourceImage": {**asset, "path": str(file)}}}
-    pending = set(entities) - set(pool) - set(seeds)
-    unavailable = sorted(stamp_id for stamp_id in pending if not entities[stamp_id].get("image"))
-    pending.difference_update(unavailable)
+    unavailable = [{'stampId': key, 'reason': 'missing-original-image'} for key, row in entities.items() if not row.get('image')]
+    available = set(entities) - {row['stampId'] for row in unavailable}
+    retained = unchanged_source_records(own, server, source_id, entities)
+    native_ids = available - set(retained)
+    restore_stamp_inputs(layout.root, index, delta)
+    inventory = (producer.catalog_inventory(layout.api / "stamps.json", layout.root, layout.assets, server,
+                                           stamp_ids=native_ids, allow_unavailable=True)
+                 if native_ids else {'records': [], 'unavailable': []})
+    unavailable.extend(inventory['unavailable'])
+    current = {str(row["stampId"]): row for row in inventory["records"]}
+    if set(current) | {row['stampId'] for row in inventory['unavailable']} != native_ids:
+        raise ValueError("stamp inventory differs from the current catalog")
+    pool = dict(retained)
+    for stamp_id, row in current.items():
+        fingerprint = input_fingerprint(row["variants"])
+        weights = {source["language"]: 1 for source in row["variants"]}
+        for record in candidates.get(stamp_id, []):
+            if record.get("inputFingerprint") == fingerprint and record.get("languageWeights") == weights:
+                pool[stamp_id] = record
+                break
+        seed = seeds.get(stamp_id)
+        if seed is not None and (input_fingerprint(seed["sources"]) != fingerprint or seed.get("languageWeights") != weights):
+            del seeds[stamp_id]
+    seeds = {key: record for key, record in seeds.items() if key in current}
+    pending = set(current) - set(pool) - set(seeds)
+    current.update({key: {'stampId': key, 'id': record['id'], 'variants': []} for key, record in retained.items()})
     base_recipe = {"producer": sha256_file(Path(producer.__file__)), "pipeline": sha256_file(Path(__file__))}
     if pending:
-        restore_stamp_inputs(layout.root, index, delta)
         model_path = detector_model(model, allow_download=allow_model_download)
         producer._DETECTOR_MODEL = str(model_path.resolve())
         producer._DETECTOR_NET = None
         producer._TOOLCHAIN = None
         base_recipe["toolchain"] = producer.toolchain_fingerprint()
-        inventory = producer.catalog_inventory(layout.api / "stamps.json", layout.root, layout.assets, server, stamp_ids=pending)
-        fresh = {str(row["stampId"]): row for row in inventory["records"]}
+        fresh = {key: current[key] for key in pending}
     else:
         fresh = {}
     if not pending and own is not None and isinstance(own.get("productionRecipe"), dict):
@@ -298,6 +336,8 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
                     delta.fetch_release_path(relative, target)
                 elif restore_output is not None:
                     restore_output(relative, target)
+                elif (layout.root / relative).is_file():
+                    shutil.copyfile(layout.root / relative, target)
                 else:
                     raise ValueError("stamp ID cache requires an object restorer")
             else:
@@ -312,7 +352,7 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
                 renew_cache()
                 list(executor.map(restore_cached, cached_images[offset:offset + 16]))
         renew_cache()
-        all_ids = set(pool) | set(seeds) | set(fresh)
+        all_ids = set(current)
         for stamp_id in sorted(all_ids, key=int):
             renew_cache()
             record = pool.get(stamp_id)
@@ -320,12 +360,12 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
                 asset = record["artifacts"]["sourceImage"]
                 target = working / (asset["sha256"] + ".png")
                 record = {**record, "reusedByStampId": True, "artifacts": {"sourceImage": {**asset, "path": str(target)}}}
-                row = {"stampId": stamp_id, "id": record["id"], "variants": []}
+                row = current[stamp_id]
                 reused += 1
             elif stamp_id in seeds:
                 record = seeds[stamp_id]
                 record = {**record, "reusedByStampId": True, "inputFingerprint": input_fingerprint(record["sources"])}
-                row = {"stampId": stamp_id, "id": record["id"], "variants": []}
+                row = current[stamp_id]
                 reused += 1
             else:
                 row = fresh[stamp_id]
@@ -337,7 +377,8 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
                 record["quality"] = "validated-native-fusion"
                 generated += 1
             rows.append(row); records.append(record)
-        result = stage_records(layout.root, server, source_id, rows, records, recipe, production_recipe)
+        result = stage_records(layout.root, server, source_id, rows, records, recipe, production_recipe,
+                               unchanged_source_ids=frozenset(retained))
         if id_cache is not None:
             public = read_json(layout.root / MANIFEST)
             for record in public["records"]:
@@ -345,7 +386,8 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
                 relative = "assets/" + asset["path"].removeprefix(f"/assets/{server}/")
                 id_cache.preserve_image(record, layout.root / validate_release_path(relative))
             id_cache.save()
-    result.update(reused=reused, generated=generated, unavailableStampIds=unavailable)
+    result.update(reused=reused, generated=generated, unavailableStampIds=[row['stampId'] for row in unavailable],
+                  unavailable=unavailable)
     result["recipeFingerprint"] = recipe
     write_json(layout.reports / "textless-stamps.json", result)
     return result

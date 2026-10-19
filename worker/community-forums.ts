@@ -2,6 +2,7 @@ import { communitySearchCondition } from "./community-search-query";
 import { getAuthSession, type AuthSession } from "./auth";
 import { entityThreadSql } from "./community-entity-guard";
 import { communityAccessState } from "./access";
+import { hasUserCapability, type UserRole } from "../src/lib/user-roles";
 import { postAttachmentsAllowedSql } from "./moderation";
 import {
   privateTeamJson as json,
@@ -35,7 +36,7 @@ type Action = "read" | "post" | "reply" | "manage";
 type Actor = {
   userId: string;
   token: string;
-  role: "admin" | "moderator" | "member";
+  role: UserRole;
   session: NonNullable<AuthSession>;
 };
 interface ForumRow {
@@ -323,7 +324,7 @@ async function requireActor(request: Request, env: Env, role: "admin" | "staff")
   );
   if (!state || state.status !== "active" || state.restriction || !session.user.emailVerified)
     return error(request, 403, "account_restricted", "This account cannot manage forums");
-  if (state.role !== "admin" && !(role === "staff" && state.role === "moderator"))
+  if (!hasUserCapability(state.role, role === "staff" ? "community.moderate" : "site.admin"))
     return error(request, 403, "admin_required", "Forum administration access required");
   return { userId: session.user.id, token: session.session.token, role: state.role, session };
 }

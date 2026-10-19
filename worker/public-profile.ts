@@ -2,6 +2,7 @@ import { entityThreadSql } from "./community-entity-guard";
 import { forumReadSql } from "./community-forums";
 import { getAuthSession } from "./auth";
 import { avatarUrlSelect } from "./avatar-url";
+import { effectiveUserRole, type MemberTier, type StoredUserRole } from "../src/lib/user-roles";
 
 const PUBLIC_PROFILE_PREFIX = "/api/v1/community/users/";
 const POST_LIMIT = 24;
@@ -11,7 +12,6 @@ const GAME_ACCOUNT_LIMIT = 16;
 const POST_EXCERPT_MAX = 500;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
-type CommunityRole = "admin" | "member" | "moderator";
 type WorkKind = "chart" | "story";
 type GameAccountVerificationStatus = "pending" | "revoked" | "unverified" | "verified";
 type JsonPrimitive = boolean | null | number | string;
@@ -28,7 +28,8 @@ interface PublicProfileRow {
   handle: string | null;
   joinedAt: number;
   postCount: number;
-  role: CommunityRole;
+  role: StoredUserRole;
+  memberTier: MemberTier;
   uid: number;
   userId: string;
   workCount: number;
@@ -194,6 +195,7 @@ const readProfile = (env: Env, uid: number): Promise<PublicProfileRow | null> =>
   env.DB.prepare(
     `SELECT identity.uid, identity.user_id AS userId, identity.created_at AS joinedAt,
             profile.display_name AS displayName, profile.handle, profile.bio, profile.role,
+            profile.member_tier AS memberTier,
             ${avatarUrlSelect("account")} AS avatarUrl,
             (
               SELECT COUNT(*)
@@ -524,7 +526,7 @@ const getPublicProfile = async (request: Request, env: Env, uid: number, url: UR
       handle: profile.handle,
       joinedAt: profile.joinedAt,
       owner,
-      role: profile.role,
+      role: effectiveUserRole(profile.role, profile.memberTier),
       stats: {
         followers: profile.followerCount,
         following: profile.followingCount,

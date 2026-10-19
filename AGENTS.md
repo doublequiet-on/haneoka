@@ -31,8 +31,7 @@ outside stable maps. Do not move or split source just to fit a map.
 - D1 migrations in `worker/database/migrations/` are applied by the deploy
   workflow on every push to `main`. Write them additive and idempotent
   (`IF NOT EXISTS`), and append the same DDL to `worker/database/schema.sql`.
-- Only `jp` and `intl` produce static pages. Test servers are data sources,
-  not page builds.
+- Only `jp` and `intl` produce static pages.
 
 ## Copy
 

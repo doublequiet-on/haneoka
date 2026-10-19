@@ -1,6 +1,6 @@
 """Build a provenance-preserving manifest for every extracted Spine model.
 
-The Unity extractor already materializes the real Spine JSON, atlas text, and
+The Unity extractor already materializes the real Spine skeleton bytes, atlas text, and
 page textures.  This stage connects those outputs through the actual Unity
 ``SkeletonDataAsset -> SpineAtlasAsset -> Material -> Texture2D`` pointers.
 It intentionally does *not* invent a portrait from one atlas page: a browser
@@ -26,6 +26,7 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -65,14 +66,15 @@ SCHEMA = "haneoka-spine-build-v3"
 # rendered v4 PNG must not be reused after this transparency-policy change.
 # v6 renders at 2x the publish size and Lanczos-filters the render back down:
 # the supersampled result replaces the aliased v5 edges, so v5 PNGs are not
-# reusable either.
-PREVIEW_SCHEMA = "haneoka-spine-preview-v6"
+# reusable either. v7 frames the actual posed attachments rather than unused
+# vertices in Three's preallocated batch buffers.
+PREVIEW_SCHEMA = "haneoka-spine-preview-v7"
 BROWSER_RUNTIME_PACKAGE = "@esotericsoftware/spine-threejs"
 BROWSER_RUNTIME_VERSION = "4.2.119"
 BROWSER_RUNTIME_SERIES = "4.2"
 DEFAULT_ANON_TOKYO_ANIMATION = "f_idle"
 PREVIEW_UNAVAILABLE_REASON = "headless-webgl-spine-renderer-not-provisioned"
-BROWSER_LOADER = "TextureAtlas + AtlasAttachmentLoader + SkeletonJson (explicit page resolver)"
+BROWSER_LOADER = "TextureAtlas + AtlasAttachmentLoader + SkeletonJson / SkeletonBinary (explicit page resolver)"
 PREVIEW_RENDERER = "headless-chrome-webgl-spine-threejs"
 PREVIEW_WIDTH = 512
 PREVIEW_HEIGHT = 512
@@ -339,6 +341,8 @@ def _anon_tokyo_front_preview_policy(skeleton_json: dict[str, Any] | None) -> di
 
 def _spine_series(value: Any) -> str:
     text = str(value or "").strip()
+    if text == "4.2-from-4.3.23":
+        return "4.2"
     parts = text.split(".")
     if len(parts) >= 2 and all(part.isdigit() for part in parts[:2]):
         return f"{parts[0]}.{parts[1]}"
@@ -665,9 +669,14 @@ async function loadComponent(component) {
   }
   const jsonResponse = await fetch(`/${component.json.path}`, { cache: "no-store" });
   if (!jsonResponse.ok) throw new Error(`skeleton request failed (${jsonResponse.status}): ${component.json.path}`);
-  const parser = new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
+  const binary = component.format === "binary";
+  const parser = binary
+    ? new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas))
+    : new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
   parser.scale = component.scale;
-  const skeletonData = parser.readSkeletonData(JSON.parse(await jsonResponse.text()));
+  const skeletonData = parser.readSkeletonData(binary
+    ? new Uint8Array(await jsonResponse.arrayBuffer())
+    : JSON.parse(await jsonResponse.text()));
   // Match Unity's source material: all slot fragments use ordinary
   // premultiplied-alpha blending, but neither read nor write the depth buffer.
   // `installSpinePainterOrder` below makes the authored slot order, rather
@@ -732,7 +741,17 @@ function disposeComponent(component) {
 
 function cameraFor(group, width, height) {
   group.updateMatrixWorld(true);
-  const bounds = new THREE.Box3().setFromObject(group);
+  const bounds = new THREE.Box3();
+  for (const mesh of group.children) {
+    const posed = mesh.skeleton.getBoundsRect(new spine.SkeletonClipping());
+    if (!(posed.width > 0 && posed.height > 0)
+      || ![posed.x, posed.y, posed.width, posed.height].every(Number.isFinite)) continue;
+    const attached = new THREE.Box3(
+      new THREE.Vector3(posed.x, posed.y, 0),
+      new THREE.Vector3(posed.x + posed.width, posed.y + posed.height, 0),
+    );
+    bounds.union(attached.applyMatrix4(mesh.matrixWorld));
+  }
   if (bounds.isEmpty()) throw new Error("rendered Spine geometry has no bounds");
   const size = bounds.getSize(new THREE.Vector3());
   if (!(size.x > 0) || !(size.y > 0)) throw new Error("rendered Spine geometry has zero bounds");
@@ -845,6 +864,13 @@ class _SpinePreviewRenderer:
         self.cdp: _CdpSocket | None = None
 
     def __enter__(self) -> _SpinePreviewRenderer:
+        try:
+            return self._start()
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def _start(self) -> _SpinePreviewRenderer:
         bundle = self.temp_root / "spine-preview-runtime.js"
         bundled = subprocess.run(
             [
@@ -872,73 +898,109 @@ class _SpinePreviewRenderer:
         self.server_thread.start()
         host, port = self.server.server_address[:2]
         page_url = f"http://{host}:{port}/__haneoka_spine_preview__/index.html"
-        debug_port = self._unused_tcp_port()
-        user_data = self.temp_root / "chrome-profile"
-        self.chrome_process = subprocess.Popen(
-            [
-                str(self.chrome),
-                "--headless=new",
-                "--enable-webgl",
-                "--ignore-gpu-blocklist",
-                "--use-angle=swiftshader",
-                "--remote-debugging-address=127.0.0.1",
-                f"--remote-debugging-port={debug_port}",
-                f"--user-data-dir={user_data}",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--window-size=512,512",
-                page_url,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        endpoint = self._page_endpoint(debug_port, page_url)
-        self.cdp = _CdpSocket(endpoint)
-        for _ in range(100):
-            ready = self.cdp.call(
-                "Runtime.evaluate",
-                {
-                    "expression": "Boolean(window.__haneokaSpinePreviewReady)",
-                    "returnByValue": True,
-                },
-            )
-            result = ready.get("result")
-            if isinstance(result, dict) and result.get("value") is True:
-                return self
-            time.sleep(0.05)
+        self.layout.reports.mkdir(parents=True, exist_ok=True)
+        for attempt in range(1, 3):
+            user_data = self.temp_root / f"chrome-profile-{attempt}"
+            log = self.layout.reports / f"spine-preview-chrome-attempt-{attempt}.log"
+            try:
+                with log.open("wb") as stderr:
+                    self.chrome_process = subprocess.Popen(
+                        [
+                            str(self.chrome),
+                            "--headless=new",
+                            "--enable-webgl",
+                            "--ignore-gpu-blocklist",
+                            "--use-angle=swiftshader",
+                            "--remote-debugging-address=127.0.0.1",
+                            "--remote-debugging-port=0",
+                            f"--user-data-dir={user_data}",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--window-size=512,512",
+                            page_url,
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=stderr,
+                        start_new_session=os.name == "posix",
+                    )
+                self.cdp = _CdpSocket(self._page_endpoint(user_data, page_url), timeout=10)
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    ready = self.cdp.call(
+                        "Runtime.evaluate",
+                        {
+                            "expression": "Boolean(window.__haneokaSpinePreviewReady)",
+                            "returnByValue": True,
+                        },
+                    )
+                    result = ready.get("result")
+                    if isinstance(result, dict) and result.get("value") is True:
+                        self.cdp.socket.settimeout(90)
+                        return self
+                    time.sleep(0.05)
+                raise _PreviewError("headless-preview-page-did-not-initialize")
+            except Exception as error:
+                self._stop_chrome()
+                with log.open("rb") as stderr:
+                    stderr.seek(max(0, log.stat().st_size - 4096))
+                    detail = stderr.read().decode("utf-8", "replace").strip()
+                sys.stderr.write(f"Spine preview Chrome startup attempt {attempt}/2 failed: {error}\n{detail}\n")
+                if attempt == 2:
+                    raise
         raise _PreviewError("headless-preview-page-did-not-initialize")
 
-    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+    def _stop_chrome(self) -> None:
         if self.cdp is not None:
             self.cdp.close()
+            self.cdp = None
         if self.chrome_process is not None:
-            self.chrome_process.terminate()
+            process = self.chrome_process
+            self.chrome_process = None
+            def terminate(force: bool = False) -> None:
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                    elif force:
+                        process.kill()
+                    else:
+                        process.terminate()
+                except ProcessLookupError:
+                    pass
+            terminate()
             try:
-                self.chrome_process.wait(timeout=5)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.chrome_process.kill()
-                self.chrome_process.wait(timeout=5)
+                terminate(force=True)
+                process.wait(timeout=5)
+            finally:
+                if os.name == "posix":
+                    terminate(force=True)
+
+    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+        self._stop_chrome()
         if self.server is not None:
-            self.server.shutdown()
+            if self.server_thread is not None and self.server_thread.is_alive():
+                self.server.shutdown()
             self.server.server_close()
+            self.server = None
         if self.server_thread is not None:
             self.server_thread.join(timeout=5)
         self._temporary.cleanup()
 
-    @staticmethod
-    def _unused_tcp_port() -> int:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as value:
-            value.bind(("127.0.0.1", 0))
-            return int(value.getsockname()[1])
-
-    def _page_endpoint(self, debug_port: int, page_url: str) -> str:
-        endpoint = f"http://127.0.0.1:{debug_port}/json/list"
+    def _page_endpoint(self, user_data: Path, page_url: str) -> str:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        active_port = user_data / "DevToolsActivePort"
         last_error = "Chrome DevTools did not start"
-        for _ in range(160):
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
             if self.chrome_process is not None and self.chrome_process.poll() is not None:
                 raise _PreviewError("headless-chrome-exited-before-devtools-ready")
             try:
-                with urllib.request.urlopen(endpoint, timeout=1) as response:
+                debug_port = int(active_port.read_text("utf-8").splitlines()[0])
+                if not 0 < debug_port < 65536:
+                    raise ValueError("Chrome DevTools port is invalid")
+                endpoint = f"http://127.0.0.1:{debug_port}/json/list"
+                with opener.open(endpoint, timeout=1) as response:
                     pages = json.loads(response.read().decode("utf-8"))
                 if isinstance(pages, list):
                     for page in pages:
@@ -950,7 +1012,7 @@ class _SpinePreviewRenderer:
                         ):
                             return page["webSocketDebuggerUrl"]
             except Exception as error:
-                last_error = type(error).__name__
+                last_error = f"{type(error).__name__}: {error}"[:500]
             time.sleep(0.05)
         raise _PreviewError(f"headless-chrome-devtools-unavailable: {last_error}")
 
@@ -987,9 +1049,10 @@ class _UnityResolver:
     in memory.
     """
 
-    def __init__(self, layout: Any, index: dict[str, Any], ensure_archive: Any = None):
+    def __init__(self, layout: Any, index: dict[str, Any], ensure_archive: Any = None, delta: Any = None):
         self.layout = layout
         self.index = index
+        self.delta = delta
         self.store = UnityObjectStore(layout, index, ensure_archive=ensure_archive)
         self.serialized_files = index.get("serializedFiles", {})
         self.records_cache: OrderedDict[str, dict[str, dict[str, Any]]] = OrderedDict()
@@ -1098,10 +1161,23 @@ class _UnityResolver:
                 )
             ]
         output = sorted(candidates, key=lambda candidate: (str(candidate.get("role") or ""), str(candidate.get("type") or "")))[0]
-        output_path = str(output.get("path") or "")
-        if not (self.layout.root / Path(*PurePosixPath(output_path).parts)).is_file():
-            return None, [_reason("media-output-absent", f"materialized output is absent: {output_path}")]
+        target = self.materialize(output)
+        if not target.is_file():
+            return None, [_reason("media-output-absent", f"materialized output is absent: {output['path']}")]
         return output, []
+
+    def materialize(self, output: dict[str, Any]) -> Path:
+        output_path = str(output["path"])
+        target = self.layout.root / Path(*PurePosixPath(output_path).parts)
+        if not target.is_file() and self.delta is not None:
+            entry = self.delta.require_entry(output_path)
+            if (
+                str(entry.get("sha256") or "") != str(output.get("sha256") or "")
+                or int(entry.get("bytes", -1)) != int(output.get("bytes", -1))
+            ):
+                raise ValueError(f"Spine dependency differs from its pinned release: {output_path}")
+            self.delta.fetch_release_path(output_path, target)
+        return target
 
     def source_output(self, source_path: str) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
         candidates = self.outputs_by_source.get(source_path, [])
@@ -1379,6 +1455,7 @@ def _preview_component(
         return None
     component = {
         "json": {"path": str(skeleton["path"])},
+        **({"format": "binary"} if runtime.get("format") == "binary" else {}),
         "atlas": {"path": str(atlas["path"])},
         "pages": [
             {"name": str(page.get("name") or ""), "path": str(page["path"])}
@@ -1890,6 +1967,43 @@ def _render_previews(
     return rendered_models, rendered_recipes, reuse_summary
 
 
+_SPINE_BINARY_METADATA_SOURCE = r'''
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { SkeletonBinary, TextureAtlas, AtlasAttachmentLoader } from "@esotericsoftware/spine-threejs";
+const [skeletonPath, atlasPath, expectedVersion] = process.argv.slice(1);
+const require = createRequire(import.meta.url);
+if (require("@esotericsoftware/spine-threejs/package.json").version !== expectedVersion)
+  throw new Error("Spine runtime package version mismatch");
+const atlas = new TextureAtlas(readFileSync(atlasPath, "utf8"));
+const parser = new SkeletonBinary(new AtlasAttachmentLoader(atlas));
+const data = parser.readSkeletonData(new Uint8Array(readFileSync(skeletonPath)));
+process.stdout.write(JSON.stringify({
+  skeleton: { spine: data.version, hash: data.hash, x: data.x, y: data.y, width: data.width, height: data.height },
+  animations: data.animations.map(animation => animation.name),
+  skins: data.skins.map(skin => skin.name),
+}));
+'''
+
+
+def _binary_skeleton_metadata(layout: Any, output: dict[str, Any], atlas: dict[str, Any]) -> dict[str, Any]:
+    result = subprocess.run(
+        [
+            "node", "--input-type=module", "-e", _SPINE_BINARY_METADATA_SOURCE,
+            str(layout.root / output["path"]), str(layout.root / atlas["atlas"]["path"]),
+            BROWSER_RUNTIME_VERSION,
+        ],
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(result.stderr.decode("utf-8", "replace").strip()[:1000] or "Spine binary parsing failed")
+    return json.loads(result.stdout)
+
+
 def _model_document(
     config: ServerConfig,
     layout: Any,
@@ -1906,6 +2020,7 @@ def _model_document(
     skeleton_pointer = resolver.resolve_pointer(data.get("skeletonJSON"), serialized_file)
     skeleton_output = None
     skeleton_json: dict[str, Any] | None = None
+    binary_metadata: dict[str, Any] | None = None
     skeleton_format = "unknown"
     if not skeleton_pointer:
         reasons.append(_reason("skeleton-json-pointer-unresolved", f"no skeleton JSON pointer: {source_path}"))
@@ -1920,10 +2035,9 @@ def _model_document(
             if not isinstance(skeleton_json, dict) or not isinstance(skeleton_json.get("skeleton"), dict):
                 raise ValueError("missing skeleton object")
             skeleton_format = "json"
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-            # The native pipeline may contain binary skeletons.  Preserve their
-            # runtime path, but never claim that an unparsed binary is browser-ready.
+        except (UnicodeDecodeError, json.JSONDecodeError):
             skeleton_format = "binary"
+        except (OSError, ValueError) as error:
             reasons.append(_reason("skeleton-json-invalid", f"cannot parse Spine JSON {skeleton_path}: {error}"))
 
     atlases: list[dict[str, Any]] = []
@@ -1940,10 +2054,15 @@ def _model_document(
         if atlas is not None:
             atlases.append(atlas)
 
-    skeleton_meta = skeleton_json.get("skeleton", {}) if isinstance(skeleton_json, dict) else {}
+    if skeleton_format == "binary" and skeleton_output is not None and len(atlases) == 1:
+        try:
+            binary_metadata = _binary_skeleton_metadata(layout, skeleton_output, atlases[0])
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            reasons.append(_reason("skeleton-binary-invalid", f"cannot parse Spine binary {skeleton_path}: {error}"))
+    skeleton_meta = (skeleton_json or binary_metadata or {}).get("skeleton", {})
     spine_version = str(skeleton_meta.get("spine") or "") if isinstance(skeleton_meta, dict) else ""
     series = _spine_series(spine_version)
-    if skeleton_format == "json" and series != BROWSER_RUNTIME_SERIES:
+    if skeleton_format in {"json", "binary"} and series != BROWSER_RUNTIME_SERIES:
         reasons.append(
             _reason(
                 "spine-runtime-series-mismatch",
@@ -1970,7 +2089,11 @@ def _model_document(
         if isinstance(skeleton_json, dict) and isinstance(skeleton_json.get("animations"), dict)
         else []
     )
-    skins = _skin_names(skeleton_json.get("skins")) if isinstance(skeleton_json, dict) else []
+    if binary_metadata is not None:
+        animations = sorted(binary_metadata["animations"])
+        skins = sorted(binary_metadata["skins"])
+    else:
+        skins = _skin_names(skeleton_json.get("skins")) if isinstance(skeleton_json, dict) else []
     family = (
         "anon-tokyo"
         if source_path.startswith("Assets/AddressableResources/AnonTokyo/")
@@ -1979,12 +2102,15 @@ def _model_document(
         else "other"
     )
     preview_policy = (
-        _anon_tokyo_front_preview_policy(skeleton_json) if family == "anon-tokyo" else None
+        _anon_tokyo_front_preview_policy(skeleton_json) if family == "anon-tokyo" and isinstance(skeleton_json, dict) else None
     )
-    ready = not reasons and skeleton_output is not None and len(atlases) == 1 and skeleton_format == "json"
+    ready = (
+        not reasons and skeleton_output is not None and len(atlases) == 1
+        and (skeleton_json is not None or binary_metadata is not None)
+    )
     runtime: dict[str, Any] = {
         "status": "ready" if ready else "unavailable",
-        "verification": "source-graph-and-JSON-structure",
+        "verification": "source-graph-and-Spine-runtime-structure" if skeleton_format == "binary" else "source-graph-and-JSON-structure",
         "package": BROWSER_RUNTIME_PACKAGE,
         "packageVersion": BROWSER_RUNTIME_VERSION,
         "runtimeSeries": BROWSER_RUNTIME_SERIES,
@@ -2666,8 +2792,8 @@ def build_spine(
 
     Delta mode adopts a candidate source's model documents wholesale from the
     base release when its selected bundle is reusable and no local media under
-    the source directory changed; the resolver otherwise fetches a reusable
-    bundle's archive on demand.
+    the source directory changed; the resolver fetches reusable object archives
+    and render dependencies from the pinned release on demand.
     """
 
     layout = build_layout(config.id, build_id)
@@ -2688,6 +2814,7 @@ def build_spine(
             if delta is not None
             else None
         ),
+        delta=delta,
     )
     base_models_by_source: dict[str, list[dict[str, Any]]] = {}
     if delta is not None and isinstance(base_document, dict):
@@ -2704,7 +2831,8 @@ def build_spine(
     )
 
     def adoptable(source_path: str) -> bool:
-        if not base_models_by_source.get(source_path):
+        base_models = base_models_by_source.get(source_path)
+        if not base_models or any(model.get("runtime", {}).get("status") != "ready" for model in base_models):
             return False
         source = (index.get("sources") or {}).get(source_path)
         if not isinstance(source, dict):
@@ -2725,6 +2853,12 @@ def build_spine(
     for source_path in _candidate_paths(index):
         if delta is not None and adoptable(source_path):
             adopted = [deepcopy(model) for model in base_models_by_source[source_path]]
+            for model in adopted:
+                resolver.materialize(model["runtime"]["json"])
+                for atlas in model["atlases"]:
+                    resolver.materialize(atlas["atlas"])
+                    for page in atlas["pages"]:
+                        resolver.materialize(page)
             models.extend(adopted)
             adopted_model_count += len(adopted)
             continue

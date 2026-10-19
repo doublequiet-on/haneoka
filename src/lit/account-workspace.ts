@@ -1,3 +1,4 @@
+import { clearContentAccess, refreshContentAccess } from "../lib/content-access";
 import { clientText } from "../i18n/client";
 import { LitElement, html, nothing } from "lit";
 import { loadingState } from "./ui/state";
@@ -10,6 +11,7 @@ import { RequestScope } from "../lib/request-scope";
 import { rememberSignedIn, signedInHint } from "../lib/community-viewer";
 import { readEarlyJson, takeEarlyRead } from "../lib/early-read";
 import { snackbar } from "../lib/snackbar";
+import { hasUserCapability } from "../lib/user-roles";
 
 const ACCOUNT_LABEL_KEYS: Readonly<Record<string, string>> = {
   appeal: "community.page.appeal",
@@ -165,6 +167,7 @@ export class AccountWorkspace extends LitElement {
     this.message = "";
   }
   private clearSession() {
+    clearContentAccess();
     this.loadRequests.cancel();
     this.profileRequests.cancel();
     this.securityRequests.cancel();
@@ -316,6 +319,7 @@ export class AccountWorkspace extends LitElement {
     const seed = (value.profile as Value | undefined)?.avatarSeed;
     if (speculative && typeof seed === "string" && seed !== userId) return this.loadProfile(signal);
     this.profile = (value.profile as Value) || null;
+    void refreshContentAccess();
     this.appeals = Array.isArray(appeals.appeals) ? (appeals.appeals as Value[]) : [];
   }
 
@@ -988,7 +992,7 @@ ${
                   `
                 : nothing
             }${
-              role === "admin" || role === "moderator"
+              hasUserCapability(role, "community.moderate")
                 ? html`
                     <a class="button button--tonal" href=${role === "moderator" ? "/admin/appeals" : "/admin"}>
                       ${icon("admin_panel_settings", 18)}${this.label("adminConsole", "Admin console")}

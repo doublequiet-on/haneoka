@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tarfile
+from dataclasses import replace
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,7 @@ from ingest.reuse import build_reuse_index
 from ingest.unity import index_unity_dependencies
 from publish.r2 import (
     R2Store,
+    _current_pointer,
     current_release_document,
     download_current_release_paths,
     fetch_package_artifact,
@@ -74,7 +76,7 @@ from publish.stages import prune_pipeline_stages
 from publish.song_reference import publish_meta_reference
 from verify.release import verify_release
 from verify.remote import verify_remote
-from verify.source import verify_source
+from verify.source import validate_source_manifest, verify_source
 
 
 def _pipeline_hash(config: ServerConfig) -> str:
@@ -248,19 +250,24 @@ def command_probe_source(args: argparse.Namespace) -> None:
 
 def _current_package_document(config, concurrency: int) -> dict:
     store = R2Store(config, concurrency)
-    pointer = store.get_json(f"servers/{config.id}/current.json")
+    pointer = _current_pointer(store, config)
+    if pointer is None:
+        return {"available": False}
     source_id = str((pointer or {}).get("sourceId") or "")
     manifest = (
         store.get_json(f"servers/{config.id}/sources/{source_id}/source.json")
         if source_id
         else None
     )
-    package = (manifest or {}).get("package") or {}
+    records = validate_source_manifest(manifest, config.id, source_id, require_storage=True)
+    package = manifest["package"]
+    if package.get("packageName") != config.package_name:
+        raise ValueError("published package name does not match the selected source configuration")
     digest = next(
         (
             str(item["sha256"])
-            for item in (manifest or {}).get("files", [])
-            if isinstance(item, dict) and item.get("role") == "package"
+            for item in records
+            if item.get("role") == "package" and item.get("path") == package["file"]
         ),
         "",
     )
@@ -285,9 +292,15 @@ def _current_package_document(config, concurrency: int) -> dict:
 
 def command_current_package(args: argparse.Namespace) -> None:
     config = load_server_config(args.server)
+    if args.from_server:
+        config = replace(config, id=args.from_server)
     try:
         document = _current_package_document(config, args.concurrency)
+        if args.from_server and not document.get("available"):
+            raise ValueError(f"no published package identity available for {config.id}")
     except Exception as error:  # noqa: BLE001 - callers treat unavailability as "no reuse"
+        if args.from_server:
+            raise
         sys.stderr.write(f"warning: current package lookup failed: {error}\n")
         _print({"server": config.id, "available": False})
         return
@@ -942,7 +955,6 @@ def command_build_textless_stamps(args: argparse.Namespace) -> None:
     identity = args.build or build_id(config, args.source)
     delta = _delta_context(config, args.delta_plan) if args.delta_plan else None
     from contextlib import nullcontext
-    from dataclasses import replace
     from build.stamp_id_cache import StampIdCache
     previous = []
     cache = None
@@ -951,10 +963,9 @@ def command_build_textless_stamps(args: argparse.Namespace) -> None:
         cache = StampIdCache(store)
     with cache if cache is not None else nullcontext() as id_cache:
         if id_cache is not None:
-            for peer in ("intl", "intl-test"):
-                snapshot = current_release_document(store, replace(config, id=peer), MANIFEST)
-                if isinstance(snapshot, dict):
-                    previous.append(snapshot["document"])
+            snapshot = current_release_document(store, config, MANIFEST)
+            if isinstance(snapshot, dict):
+                previous.append(snapshot["document"])
         _print(build_textless_stamps(config.id, args.source, identity,
                                      model=Path(args.model) if args.model else None,
                                      delta=delta, id_cache=id_cache, previous_manifests=previous,
@@ -1049,15 +1060,13 @@ def _run_build(
     build_api(config, source_id, identity)
     from build.stamp_pipeline import build_textless_stamps
     if not offline and config.id in ("intl", "intl-test"):
-        from dataclasses import replace
         from build.stamp_id_cache import StampIdCache
         store = R2Store(config, 8)
         with StampIdCache(store) as cache:
             previous = []
-            for peer in ("intl", "intl-test"):
-                snapshot = current_release_document(store, replace(config, id=peer), "runtime/stamp-maker/manifest.json")
-                if snapshot:
-                    previous.append(snapshot["document"])
+            snapshot = current_release_document(store, config, "runtime/stamp-maker/manifest.json")
+            if snapshot:
+                previous.append(snapshot["document"])
             build_textless_stamps(config.id, source_id, identity, id_cache=cache, previous_manifests=previous)
     else:
         build_textless_stamps(config.id, source_id, identity, allow_model_download=not offline)
@@ -1354,6 +1363,7 @@ def parser() -> argparse.ArgumentParser:
         help="report the published source's package fingerprint and CAS key",
     )
     current_package.add_argument("--concurrency", type=int, default=8)
+    current_package.add_argument("--from-server", choices=("jp", "intl"))
     current_package.set_defaults(run=command_current_package)
     credential = commands.add_parser(
         "cdn-credential",

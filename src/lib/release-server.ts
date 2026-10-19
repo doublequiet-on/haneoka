@@ -2,19 +2,17 @@ import { DEFAULT_LOCALE, isLocale } from "@haneoka/i18n";
 import { navigationDocumentUrl } from "./document-url";
 import { homePath, isReleaseServer, releaseServerFromPath, type ReleaseServer } from "./resource-route";
 import { formalServerForHidden, PUBLIC_RELEASE_SERVERS, temporaryPublicRedirectTarget } from "./temporary-public-routing";
-import { isTestContentServer, showTestServerContent } from "./test-server-visibility";
+import { isRestrictedContentSource, showRestrictedContent } from "./content-visibility";
 export { isReleaseServer, releaseServerFromPath, type ReleaseServer } from "./resource-route";
 export { isPublicReleaseServer } from "./temporary-public-routing";
 export const RELEASE_SERVERS: readonly ReleaseServer[] = PUBLIC_RELEASE_SERVERS;
 const KEY = "haneoka.release-server";
 
 export function normalizeReleaseServer(value: unknown): ReleaseServer {
-  const current = value === "gl-cbt" ? "intl-cbt" : value;
-  if (typeof current === "string" && isTestContentServer(current)) return "intl";
-  return formalServerForHidden(current) ?? (isReleaseServer(current) ? current : "intl");
+  return formalServerForHidden(value) ?? (value === "jp" ? "jp" : "intl");
 }
 
-/** The global selection always points at a formal server, including on preview details. */
+/** The global selection stays formal while an entity keeps its own source. */
 export function readSelectedReleaseServer(): ReleaseServer {
   const routeServer =
     typeof location === "undefined" ? undefined : releaseServerFromPath(navigationDocumentUrl().pathname);
@@ -22,7 +20,7 @@ export function readSelectedReleaseServer(): ReleaseServer {
   try {
     const queryServer =
       typeof location === "undefined" ? undefined : navigationDocumentUrl().searchParams.get("server");
-    if (isReleaseServer(queryServer) || queryServer === "gl-cbt") return writeReleaseServer(queryServer);
+    if (isReleaseServer(queryServer)) return writeReleaseServer(queryServer);
   } catch {}
   try {
     const stored = localStorage.getItem(KEY);
@@ -34,11 +32,11 @@ export function readSelectedReleaseServer(): ReleaseServer {
   }
 }
 
-/** A preview detail keeps its own data source without becoming a global selection. */
+/** An entity keeps its own data source without becoming a global selection. */
 export function readReleaseServer(): ReleaseServer {
   const source = typeof location === "undefined" ? undefined : releaseServerFromPath(navigationDocumentUrl().pathname);
   const selected = readSelectedReleaseServer();
-  return source === "intl-test" && showTestServerContent() ? source : selected;
+  return source && isRestrictedContentSource(source) && showRestrictedContent() ? source : selected;
 }
 
 export function writeReleaseServer(value: unknown): ReleaseServer {

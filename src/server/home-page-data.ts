@@ -20,7 +20,7 @@ const rows = (value: unknown) => Object.values((value || {}) as Record<string, J
 export async function homePageData(server: ReleaseServer, locale: Locale): Promise<HomeSeed> {
   const release = await staticCatalogRelease(server);
   const homeUnion =
-    server === "intl" || server === "jp" || server === "intl-test"
+    server === "intl" || server === "jp"
       ? await loadStaticCrossServerHome(server, locale)
       : {};
   const keys = [

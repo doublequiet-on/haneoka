@@ -32,7 +32,7 @@ interface CaptureManifest {
 }
 const digest = (body: string | Uint8Array) => createHash("sha256").update(body).digest("hex");
 const failureFile = () => path.resolve(".output/static-inputs/failure.json");
-class CapturedInputError extends Error {}
+export class CapturedInputError extends Error {}
 function atomic(file: string, body: string | Uint8Array): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;

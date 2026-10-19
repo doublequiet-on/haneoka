@@ -1,4 +1,5 @@
 import { getAuthSession } from "./auth";
+import { effectiveUserRole, type MemberTier, type StoredUserRole } from "../src/lib/user-roles";
 import { inspectCommunityText, scheduleEntityModeration } from "./moderation";
 
 const ACCOUNT_PROFILE_PATH = "/api/v1/account/profile";
@@ -12,7 +13,6 @@ const HANDLE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{1,30}[a-z0-9])$/u;
 
 type DisplayNameStatus = "allow" | "block" | "pending";
 type ProfileStatus = "active" | "deleted" | "suspended";
-type CommunityRole = "admin" | "member" | "moderator";
 
 interface AccountProfileRow {
   accountName: string;
@@ -30,7 +30,8 @@ interface AccountProfileRow {
   profileStatus: ProfileStatus;
   profileVersion: number;
   publicUid: number | null;
-  role: CommunityRole;
+  role: StoredUserRole;
+  memberTier: MemberTier;
   userId: string;
   writeRestricted: number;
 }
@@ -87,7 +88,7 @@ const readProfile = (env: Env, userId: string): Promise<AccountProfileRow | null
                AND attachment.deleted_at IS NULL
              ORDER BY attachment.created_at DESC, attachment.id DESC LIMIT 1) AS avatarReview,
             identity.uid AS publicUid,
-            profile.handle, profile.bio, profile.role,
+            profile.handle, profile.bio, profile.role, profile.member_tier AS memberTier,
             profile.display_name AS displayName,
             profile.pending_display_name AS pendingDisplayName,
             profile.display_name_status AS displayNameStatus,
@@ -149,7 +150,7 @@ const profileValue = (profile: AccountProfileRow): object => ({
   handle: profile.handle,
   profileStatus: profile.profileStatus,
   publicUid: profile.publicUid,
-  role: profile.role,
+  role: effectiveUserRole(profile.role, profile.memberTier),
   version: profile.profileVersion,
 });
 

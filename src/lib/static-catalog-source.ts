@@ -4,13 +4,15 @@
 // Pos: [Map](L2-2.md)；构建期目录读取与固定身份边界。
 // Effects/Dependencies: Node 文件读取、HTTP、内存请求缓存及静态输入捕获；回退受身份策略约束。
 import { withUiMarksProjection } from "./ui-marks";
+import { isPublicReleaseServer } from "./temporary-public-routing";
 import { fnv1a32Shard } from "./hash-partition.ts";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
-import { staticBuildJson } from "../server/static-input-store";
+import { CapturedInputError, staticBuildJson } from "../server/static-input-store";
 import { openReleaseCatalog, ReleaseCatalogError, type ReleaseCatalog } from "../server/release-catalog";
+import { publicStampManifest } from "./stamp-maker/public-manifest";
 
 /**
  * Build-time access to the release catalog API.
@@ -30,6 +32,7 @@ const RETRYABLE = new Set([403, 429, 500, 502, 503, 504]);
 const RELEASE_ID_PATTERN = /^r-[a-f0-9]{20}$/u;
 const SOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_ATTEMPTS = 3;
 const ERROR_BODY_BYTES = 4096;
 const ERROR_BODY_TIMEOUT_MS = 1000;
 
@@ -52,6 +55,10 @@ export interface OptionalStaticCatalogResult {
 }
 
 class StaticCatalogConsistencyError extends Error {}
+export function assertStaticServer(server: string): void {
+  if (!isPublicReleaseServer(server))
+    throw new StaticCatalogConsistencyError("Static catalogs require a public release server");
+}
 type StaticCatalogHttpDiagnostics = Record<string, string | number | boolean>;
 class StaticCatalogHttpError extends Error {
   constructor(
@@ -90,6 +97,7 @@ function releaseManifestEntry(manifest: RecordValue, relative: string): RecordVa
 }
 
 function localCatalog(server: string): ReleaseCatalog | null {
+  assertStaticServer(server);
   if (process.env.CATALOG_PAGE_RELEASE_ROOTS) {
     if (localCatalogs.has(server)) return localCatalogs.get(server) || null;
     const roots = JSON.parse(process.env.CATALOG_PAGE_RELEASE_ROOTS) as Record<string, string>;
@@ -111,6 +119,11 @@ function readLocalPath(catalog: ReleaseCatalog, route: string): unknown {
   const url = new URL(route, "https://catalog.invalid/");
   const parts = url.pathname.slice(1).split("/").map(decodeURIComponent);
   const [resource, action, name, id] = parts;
+  if (resource === "stamps" && action === "textless" && parts.length === 2)
+    return publicStampManifest(catalog.readReleaseJson("runtime/stamp-maker/manifest.json"), {
+      server: catalog.identity.server, sourceId: catalog.identity.sourceId,
+      stampIds: new Set(Object.keys(catalog.readCollection("stamps") as Record<string, unknown>)),
+    });
   if (resource === "ui-marks" && parts.length === 1) return catalog.readUiMarks();
   if (resource === "sources" && action === "tree" && parts.length === 2)
     return catalog.readReleaseJson("metadata/source-index/tree.json");
@@ -143,6 +156,7 @@ function readLocalPath(catalog: ReleaseCatalog, route: string): unknown {
 }
 
 export function staticCatalogUrl(path: string, server = "intl", releaseId?: string): string {
+  assertStaticServer(server);
   const url = new URL(`/api/v1/servers/${encodeURIComponent(server)}/${path.replace(/^\/+/, "")}`, ORIGIN);
   if (releaseId) url.searchParams.set("release", releaseId);
   else url.searchParams.set("__static_catalog_build", BUST);
@@ -240,19 +254,20 @@ async function fetchResponse(
   sourceId?: string,
   absoluteUrl?: string,
 ): Promise<Response> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < REQUEST_ATTEMPTS; attempt += 1) {
+    const retry = attempt + 1 < REQUEST_ATTEMPTS;
     let response: Response;
     try {
       response = await fetch(absoluteUrl || staticCatalogUrl(path, server, releaseId), {
         headers: headers(),
         method,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS * (attempt === 0 ? 1 : 2)),
       });
     } catch (error) {
-      if (attempt > 0) {
+      if (!retry) {
         throw new Error(`Static catalog request failed for ${server}/${path.split("?")[0]}`, { cause: error });
       }
-      await wait(1500);
+      await wait(1500 * (attempt + 1));
       continue;
     }
     if (response.ok) return response;
@@ -267,14 +282,14 @@ async function fetchResponse(
           );
         }
         diagnostics = errorBodyFields(body);
-      } else if (attempt > 0 || !RETRYABLE.has(response.status)) {
+      } else if (!retry || !RETRYABLE.has(response.status)) {
         diagnostics = await boundedErrorBody(response).catch(() => ({ errorBody: "unreadable" }));
       }
     } finally {
       await releaseResponseBody(response);
     }
-    if (attempt === 0 && RETRYABLE.has(response.status)) {
-      await wait(1500);
+    if (retry && RETRYABLE.has(response.status)) {
+      await wait(1500 * (attempt + 1));
       continue;
     }
     throw new StaticCatalogHttpError(response.status, path, server, {
@@ -302,6 +317,7 @@ function observedRelease(response: Response, expected?: StaticCatalogRelease): v
 }
 
 function requestKey(path: string, server: string, release?: StaticCatalogRelease): string {
+  assertStaticServer(server);
   return `${server}\u0000${release?.releaseId || "current"}\u0000${release?.sourceId || ""}\u0000${path}`;
 }
 
@@ -499,6 +515,7 @@ function cachedResponseFile(route: string, release: StaticCatalogRelease): strin
 
 /** Pins the current release once. All static loaders share this promise. */
 export async function staticCatalogRelease(server = "intl"): Promise<StaticCatalogRelease> {
+  assertStaticServer(server);
   const existing = releasePromises.get(server);
   if (existing) return existing;
   const promise = staticBuildJson(`native-pin:${server}`, "native-pin", async () => {
@@ -552,7 +569,23 @@ export async function fetchStaticCatalog(
       if (process.env.CATALOG_PAGE_RELEASE_ROOTS || !(error instanceof ReleaseCatalogError) || !error.fallbackToHttp) throw error;
     }
   }
-  return fetchJson(path, server, pinned);
+  try {
+    return await fetchJson(path, server, pinned);
+  } catch (error) {
+    const notFound = error instanceof StaticCatalogHttpError && error.status === 404
+      || error instanceof CapturedInputError
+        && error.message.startsWith(`Static catalog request failed for ${server}/stamps/textless (404) {`);
+    if (path !== "stamps/textless" || !notFound)
+      throw error;
+    if (!(await fetchStaticReleaseEntry("runtime/stamp-maker/manifest.json", server, pinned))) throw error;
+    const [manifest, stamps] = await Promise.all([
+      fetchStaticReleaseJson("runtime/stamp-maker/manifest.json", server, pinned),
+      fetchStaticCatalog("stamps", server, pinned),
+    ]);
+    return publicStampManifest(manifest, {
+      server, sourceId: pinned.sourceId, stampIds: new Set(Object.keys(stamps as Record<string, unknown>)),
+    });
+  }
 }
 
 /** Application projections share the catalog's immutable pin, cache and retry policy. */
@@ -710,6 +743,7 @@ export async function fetchOptionalStaticCatalog(
   server = "intl",
   release?: StaticCatalogRelease,
 ): Promise<OptionalStaticCatalogResult> {
+  assertStaticServer(server);
   const absent = (error: unknown): OptionalStaticCatalogResult => {
     if (!(error instanceof StaticCatalogHttpError || error instanceof ReleaseCatalogError) || error.status !== 404)
       throw error;
@@ -742,6 +776,7 @@ export async function fetchStaticCatalogBatch(
   server = "intl",
   release?: StaticCatalogRelease,
 ): Promise<Map<string, Record<string, unknown>>> {
+  assertStaticServer(server);
   const items = new Map<string, Record<string, unknown>>();
   if (!ids.length) return items;
   const pinned = release || (await staticCatalogRelease(server));
@@ -818,6 +853,7 @@ export async function primeStaticCatalogBatch(
   server: string,
   release: StaticCatalogRelease,
 ): Promise<void> {
+  assertStaticServer(server);
   const missing = ids.filter(
     (id) => !requestPromises.has(requestKey(`${resource}/${encodeURIComponent(id)}`, server, release)),
   );

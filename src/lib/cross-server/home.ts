@@ -1,4 +1,4 @@
-import { staticCatalogRelease, fetchStaticCatalog } from "../static-catalog-source";
+import { assertStaticServer, staticCatalogRelease, fetchStaticCatalog } from "../static-catalog-source";
 import { loadCrossServerCatalogs } from "./bundle";
 import { homeEventDisplay } from "../home-event-display";
 import {
@@ -43,6 +43,7 @@ export function compactCrossServerHomeCatalog(dto: CrossCatalogDTO): CrossCatalo
 
 /** Feed the existing HomeSeed contract. The configured build cache observes current once per server. */
 export async function loadStaticCrossServerHome(selectedServer: OfficialCatalogServer, locale: string) {
+  assertStaticServer(selectedServer);
   const reader = {
     async readIdentity(server: OfficialCatalogServer) {
       const identity = await staticCatalogRelease(server);
@@ -51,7 +52,7 @@ export async function loadStaticCrossServerHome(selectedServer: OfficialCatalogS
     readCollection: (resource: CrossCatalogResource, identity: CrossCatalogIdentity) => fetchStaticCatalog(resource, identity.server, identity),
     readEntity: (resource: CrossCatalogResource, identity: CrossCatalogIdentity, id: string) => fetchStaticCatalog(`${resource}/${encodeURIComponent(id)}`, identity.server, identity),
   };
-  const catalogs = await loadCrossServerCatalogs(["cards", "support-cards", "songs", "characters", "bands", "events"], { selectedServer, locale, reader, servers: selectedServer === "intl-test" ? ["jp", "intl", "intl-test"] : ["jp", "intl"] });
+  const catalogs = await loadCrossServerCatalogs(["cards", "support-cards", "songs", "characters", "bands", "events"], { selectedServer, locale, reader, servers: ["jp", "intl"] });
   const serverMarks: Partial<Record<OfficialCatalogServer, { identity: CrossCatalogIdentity; marks: Record<string, string> }>> = {};
   await Promise.all(OFFICIAL_CATALOG_SERVERS.map(async (server) => {
     const identity = catalogs.cards?.identities[server];

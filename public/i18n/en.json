@@ -564,7 +564,6 @@
       "tabBottom": "Bottoms",
       "tabShoes": "Shoes",
       "tabSet": "Outfit sets",
-      "viewCbt": "View Global CBT",
       "yes": "Yes",
       "no": "No",
       "name": "Name",
@@ -1115,8 +1114,8 @@
       "mirrors": "Related archives",
       "catalogJapanOnly": "Japan only",
       "catalogInternationalOnly": "International only",
-      "catalogTestOnly": "Test only",
-      "catalogTestServer": "Test environment",
+      "catalogAdditionalOnly": "Unpublished content",
+      "catalogAdditionalSource": "Additional source",
       "catalogViewingServerData": "Viewing {server} data.",
       "catalogFiltersUnavailable": "Additional card filters could not be loaded. Your cards are still available."
     },
@@ -3325,7 +3324,10 @@
       "resetPassword": "Reset password",
       "passwordReset": "Password reset.",
       "invalidResetLink": "This reset link is invalid or has expired.",
-      "signInDescription": "Sign in to access your account."
+      "signInDescription": "Sign in to access your account.",
+      "roleRegular": "Regular",
+      "roleTrusted": "Trusted member",
+      "roleContributor": "Contributor"
     },
     "profile": {
       "title": "Public profile",
@@ -4306,7 +4308,10 @@
       "roles": {
         "member": "Member",
         "moderator": "Moderator",
-        "admin": "Administrator"
+        "admin": "Administrator",
+        "regular": "Regular",
+        "trusted": "Trusted member",
+        "contributor": "Contributor"
       },
       "values": {
         "accepted": "Accepted",
@@ -4754,8 +4759,9 @@
       },
       "save": "Save",
       "cancel": "Cancel",
-      "showTestServerContent": "Show test server content",
-      "showTestServerContentHint": "Include test server entries in catalogs and the team builder."
+      "showRestrictedContent": "Show unpublished content",
+      "showRestrictedContentHint": "Only selected account groups can access this content. Public pages remain unchanged.",
+      "contentAccessGroups": "Allowed account groups"
     }
   },
   "download": {

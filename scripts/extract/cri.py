@@ -123,10 +123,24 @@ def _cri_audio_extension(header: bytes) -> str:
     raise ValueError(f"unsupported CRI audio stream header: {header[:4].hex()}")
 
 
+def _is_h264_annex_b(header: bytes) -> bool:
+    offset = 4 if header.startswith(b"\x00\x00\x00\x01") else 3 if header.startswith(b"\x00\x00\x01") else 0
+    return bool(offset and len(header) > offset and header[offset] & 31 in (7, 9))
+
+
+def _usm_header_integer(page: Any, name: str) -> int:
+    field = page.get(name)
+    if field is None or type(field.val) is not int or field.val <= 0:
+        raise ValueError(f"USM video header has invalid {name}")
+    return field.val
+
+
 def _video_output_profile(header: bytes) -> tuple[str, list[str], list[str]]:
     """Select a browser delivery container without transcoding compatible video."""
     if header[:4] == b"DKIF" and header[8:12] == b"VP90":
         return ".webm", ["-c:v", "copy"], ["-c:a", "libopus", "-b:a", "256k"]
+    if _is_h264_annex_b(header):
+        return ".mp4", ["-c:v", "copy"], ["-c:a", "aac", "-b:a", "256k"]
     if header[:4] == b"\x00\x00\x01\xb3":
         return (
             ".mp4",
@@ -382,7 +396,7 @@ def _decode_usm(
                     candidate.unlink()
                     continue
                 target = candidate.with_suffix(
-                    ".ivf" if header.startswith(b"DKIF") else ".m2v"
+                    ".ivf" if header.startswith(b"DKIF") else ".h264" if _is_h264_annex_b(header) else ".m2v"
                 )
                 os.replace(candidate, target)
                 try:
@@ -468,8 +482,29 @@ def _decode_usm(
                 # 16/235, while alpha must use the full 0/255 range.
                 command.extend(["-i", str(alpha)])
                 mask_filter = "format=gray"
-                if _probe_streams(alpha).get("videoColorRange") == "tv":
+                alpha_probe = _probe_streams(alpha)
+                if alpha_probe.get("videoColorRange") == "tv":
                     mask_filter += ",lut=y='clip((val-16)*255/219,0,255)'"
+                color_probe = _probe_streams(video)
+                visible = (color_probe["videoWidth"], color_probe["videoHeight"])
+                coded = (alpha_probe["videoWidth"], alpha_probe["videoHeight"])
+                if coded != visible:
+                    alpha_header = usm.alphas[index].header_page
+                    color_header = usm.videos[index].header_page
+                    matrix = tuple(_usm_header_integer(alpha_header, f"mat_{axis}") for axis in ("width", "height"))
+                    display = tuple(_usm_header_integer(alpha_header, f"disp_{axis}") for axis in ("width", "height"))
+                    if matrix != visible or display != visible or any(
+                        not 0 <= actual - shown < 16 for actual, shown in zip(coded, visible, strict=True)
+                    ):
+                        raise ValueError("USM alpha coded dimensions do not contain its declared display rectangle")
+                    numerator = _usm_header_integer(alpha_header, "framerate_n")
+                    denominator = _usm_header_integer(alpha_header, "framerate_d")
+                    if (numerator * _usm_header_integer(color_header, "framerate_d")
+                            != denominator * _usm_header_integer(color_header, "framerate_n")
+                            or _usm_header_integer(alpha_header, "total_frames")
+                            != _usm_header_integer(color_header, "total_frames")):
+                        raise ValueError("USM padded alpha frame clock differs from its color stream")
+                    mask_filter += f",crop={visible[0]}:{visible[1]}:0:0,setpts=N*{denominator}/({numerator}*TB)"
                 if audio:
                     command.extend(["-i", str(audio)])
                 command.extend(

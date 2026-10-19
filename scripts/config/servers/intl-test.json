@@ -1,5 +1,7 @@
 {
   "$schema": "../server.schema.json",
   "id": "intl-test",
-  "configurationEnv": "RESOURCE_PIPELINE_CONFIG"
+  "configurationEnv": "RESOURCE_PIPELINE_CONFIG",
+  "pipelineClass": "validation",
+  "dailyScheduled": false
 }

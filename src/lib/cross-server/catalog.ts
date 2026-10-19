@@ -3,9 +3,11 @@ import { sharedEventStoryContent } from "./events";
 import { exclusiveCatalogServer } from "./availability";
 import { crossCatalogDefinition, crossCatalogRowId, type CrossCatalogDocument } from "./definitions";
 import type { CrossCatalogResource } from "./definitions";
+import { CONTENT_SOURCE_IDS, isContentSourceId } from "../content-access-state";
+import { sourceVariantGroups, visibleSourceVariants, isFormalCatalogSource, semanticOwnerKey, semanticOwnersConflict, preferredCatalogVariant } from "./content";
 export type { CrossCatalogResource } from "./definitions";
-export const OFFICIAL_CATALOG_SERVERS = ["jp", "intl", "intl-test"] as const;
-export type OfficialCatalogServer = (typeof OFFICIAL_CATALOG_SERVERS)[number];
+export const OFFICIAL_CATALOG_SERVERS = CONTENT_SOURCE_IDS;
+export type OfficialCatalogServer = string;
 export type CrossCatalogRow = Record<string, unknown>;
 export interface CrossCatalogIdentity {
   server: OfficialCatalogServer;
@@ -35,13 +37,16 @@ export interface CrossCatalogEntry {
   displayServer: OfficialCatalogServer;
   inSelectedServer: boolean;
   perServer: Partial<Record<OfficialCatalogServer, CrossCatalogVariant>>;
-  serverAvailability: Record<OfficialCatalogServer, boolean>;
+  serverAvailability: Partial<Record<OfficialCatalogServer, boolean>>;
   exclusive: OfficialCatalogServer | null;
   association: { status: "verified" | "independent" | "ambiguous"; evidence: string[]; reason?: string };
   /** Only entity-name slots may cross an established association. */
   nameOverrides: CrossCatalogRow;
   nameFallbacks: { field: string; slot: number; fromServer: OfficialCatalogServer }[];
   content: CrossServerContent;
+  sourceIds: OfficialCatalogServer[];
+  /** Summary equality is presentation metadata, not entity or asset-byte identity. */
+  variantGroups: OfficialCatalogServer[][];
 }
 export interface CrossServerContent {
   overrides: CrossCatalogRow;
@@ -58,13 +63,12 @@ export interface CrossCatalogDTO {
   selectedServer: OfficialCatalogServer;
   locale: string;
   identities: Partial<Record<OfficialCatalogServer, CrossCatalogIdentity>>;
-  sourceAvailability: Record<OfficialCatalogServer, "loaded" | "unavailable">;
+  sourceAvailability: Partial<Record<OfficialCatalogServer, "loaded" | "unavailable">>;
   entries: CrossCatalogEntry[];
   documents: Partial<Record<OfficialCatalogServer, CrossCatalogDocument>>;
 }
 const object = (value: unknown): CrossCatalogRow =>
   value && typeof value === "object" && !Array.isArray(value) ? value as CrossCatalogRow : {};
-const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const text = (value: unknown): string | null => {
   if (typeof value !== "string" || !value.trim()) return null;
   return value.normalize("NFKC").replace(/\s+/gu, " ").trim();
@@ -84,8 +88,10 @@ function entitySignature(resource: CrossCatalogResource, row: CrossCatalogRow, i
     if (row.kind !== "game-event" || !fromMaster ||
         (raw._id !== undefined && String(raw._id) !== id)) return null;
   }
-  return signature(["original-entity-id", resource, id],
-    ["original-entity-id", "resource-namespace", ...(resource === "events" ? ["native-MasterEvent-kind-and-id"] : [])]);
+  const owner = semanticOwnerKey(row, resource);
+  if (owner === undefined) return null;
+  return signature(["original-entity-id", resource, id, owner],
+    ["original-entity-id", "resource-namespace", "native-owner-fields", ...(resource === "events" ? ["native-MasterEvent-kind-and-id"] : [])]);
 }
 
 const NAME_FIELDS = ["prefix", "cardName", "musicTitle", "characterName", "bandName", "title", "name"];
@@ -182,16 +188,17 @@ export function mergeCrossServerCatalog(
   snapshots: readonly CrossCatalogSnapshot[], resource: CrossCatalogResource,
   options: { selectedServer: OfficialCatalogServer; locale: string },
 ): CrossCatalogDTO {
-  if (!OFFICIAL_CATALOG_SERVERS.includes(options.selectedServer) || !/^[A-Za-z0-9-]+$/u.test(options.locale))
+  if (!isContentSourceId(options.selectedServer) || !/^[A-Za-z0-9-]+$/u.test(options.locale))
     throw new Error("Invalid cross-server view");
-  const identities: CrossCatalogDTO["identities"] = {}, availability: CrossCatalogDTO["sourceAvailability"] = { jp: "unavailable", intl: "unavailable", "intl-test": "unavailable" };
+  const identities: CrossCatalogDTO["identities"] = {}, availability: CrossCatalogDTO["sourceAvailability"] = { jp: "unavailable", intl: "unavailable" };
   const documents: CrossCatalogDTO["documents"] = {};
-  const buckets = new Map<string, { jp: CrossCatalogVariant[]; intl: CrossCatalogVariant[]; "intl-test": CrossCatalogVariant[]; signature: Signature | null }>();
+  const buckets = new Map<string, { sources: Partial<Record<OfficialCatalogServer, CrossCatalogVariant[]>>; signature: Signature | null }>();
   for (const source of snapshots) {
     const identity = source.identity, server = identity.server;
-    if (!OFFICIAL_CATALOG_SERVERS.includes(server) || identities[server] || !/^r-[a-f0-9]{20}$/u.test(identity.releaseId) ||
+    if (!isContentSourceId(server) || identities[server] || !/^r-[a-f0-9]{20}$/u.test(identity.releaseId) ||
         !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(identity.sourceId)) throw new Error("Invalid or repeated cross-server source pin");
     identities[server] = { ...identity };
+    availability[server] = "unavailable";
     const collection = source.collections[resource];
     if (!collection) continue;
     availability[server] = "loaded";
@@ -199,40 +206,50 @@ export function mergeCrossServerCatalog(
     for (const [id, original] of Object.entries(collection)) {
       const row = structuredClone(original), ownId = crossCatalogRowId(resource, row);
       if (ownId !== undefined && String(ownId) !== id) throw new Error(`Cross-server row identity mismatch:${server}/${resource}/${id}`);
+      if (!isFormalCatalogSource(server) && snapshots.some(source => {
+        const formal = isFormalCatalogSource(source.identity.server) && source.collections[resource]?.[id];
+        return formal && !semanticOwnersConflict(formal, original, resource);
+      })) continue;
       const sig = entitySignature(resource, row, id), key = sig?.key ?? `independent:${server}:${id}`;
-      const bucket = buckets.get(key) ?? { jp: [], intl: [], "intl-test": [], signature: sig };
-      bucket[server].push({ identity: { ...identity }, id, row, available: true,
+      const bucket = buckets.get(key) ?? { sources: {}, signature: sig };
+      (bucket.sources[server] ??= []).push({ identity: { ...identity }, id, row, available: true,
         releasedAt: structuredClone(row.releasedAt ?? row.publishedAt ?? row.publicStartAt ?? row.startAt ?? null), href: href(resource, server, options.locale, id), assets: assets(row) });
       buckets.set(key, bucket);
     }
   }
+  const servers = ["jp", "intl", ...Object.keys(identities).filter((server) => !isFormalCatalogSource(server)).sort()];
   const entries: CrossCatalogEntry[] = [];
   const complete = availability.jp === "loaded" && availability.intl === "loaded";
   function add(variants: CrossCatalogVariant[], sig: Signature | null, ambiguous: boolean) {
     const perServer: CrossCatalogEntry["perServer"] = {};
     for (const variant of variants) perServer[variant.identity.server] = variant;
-    const selected = perServer[options.selectedServer], display = selected ?? variants[0]!;
+    const selected = perServer[options.selectedServer], display = selected ?? preferredCatalogVariant(variants, options.selectedServer)!;
     const peer = variants.find((variant) => variant.identity.server !== display.identity.server);
     const names = nameFallbacks(display, peer);
     const both = variants.length >= 2;
     const exclusive = complete && sig && !ambiguous
-      ? exclusiveCatalogServer(OFFICIAL_CATALOG_SERVERS.filter((server) => !!perServer[server])) ?? null
+      ? exclusiveCatalogServer(servers.filter((server) => !!perServer[server])) ?? null
       : null;
     // Resource plus original ID is stable across independently updated server releases.
     const key = both ? `${resource}:shared:${sig!.key}` : `${resource}:${display.identity.server}:${display.id}`;
     entries.push({ key, resource, selectedServer: options.selectedServer, displayServer: display.identity.server,
-      inSelectedServer: !!selected, perServer, serverAvailability: { jp: !!perServer.jp, intl: !!perServer.intl, "intl-test": !!perServer["intl-test"] },
+      inSelectedServer: !!selected, perServer, serverAvailability: Object.fromEntries(servers.map((server) => [server, !!perServer[server]])),
       exclusive,
       association: { status: both ? "verified" : ambiguous ? "ambiguous" : "independent", evidence: sig?.evidence ?? [],
         ...(!both ? { reason: ambiguous ? "multiple-candidates-with-the-same-signature" : sig ? "original-id-not-in-peer-catalogue" : "insufficient-identity-evidence" } : {}) },
-      nameOverrides: names.overrides, nameFallbacks: names.provenance, content: sharedContent(resource, display, peer) });
+      nameOverrides: names.overrides, nameFallbacks: names.provenance, content: sharedContent(resource, display, peer),
+      sourceIds: variants.map((variant) => variant.identity.server), variantGroups: sourceVariantGroups(variants) });
   }
   for (const bucket of buckets.values()) {
-    if (bucket.signature && OFFICIAL_CATALOG_SERVERS.every((server) => bucket[server].length <= 1))
-      add(OFFICIAL_CATALOG_SERVERS.flatMap((server) => bucket[server]), bucket.signature, false);
+    if (bucket.signature && servers.every((server) => (bucket.sources[server]?.length ?? 0) <= 1))
+      { const variants = visibleSourceVariants(servers.flatMap((server) => bucket.sources[server] ?? []), complete);
+        if (variants.length) add(variants, bucket.signature, false); }
     else {
-      const ambiguous = OFFICIAL_CATALOG_SERVERS.some((server) => bucket[server].length > 1);
-      for (const variant of OFFICIAL_CATALOG_SERVERS.flatMap((server) => bucket[server])) add([variant], bucket.signature, ambiguous);
+      const ambiguous = servers.some((server) => (bucket.sources[server]?.length ?? 0) > 1);
+      for (const variant of servers.flatMap((server) => bucket.sources[server] ?? []))
+        if (isFormalCatalogSource(variant.identity.server) || (complete && !snapshots.some((source) =>
+          isFormalCatalogSource(source.identity.server) && Object.hasOwn(source.collections[resource] ?? {}, variant.id))))
+          add([variant], bucket.signature, ambiguous);
     }
   }
   return { schema: "haneoka-cross-server-catalog-v1", resource, selectedServer: options.selectedServer, locale: options.locale,
@@ -261,6 +278,8 @@ export function crossServerDetail(entry: CrossCatalogEntry, activeServer = entry
     selectedServer: entry.selectedServer, activeServer, identity: { ...variant.identity },
     row: { ...structuredClone(variant.row), ...names.overrides, ...content.overrides },
     perServer: entry.perServer, serverAvailability: entry.serverAvailability,
+    sourceIds: Object.keys(entry.perServer),
+    variantGroups: sourceVariantGroups(Object.values(entry.perServer).filter((value): value is CrossCatalogVariant => !!value)),
     href: variant.href, nameFallbacks: names.provenance, content,
     ownershipVariant: activeServer === entry.selectedServer ? variant : null,
   };

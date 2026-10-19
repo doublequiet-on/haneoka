@@ -3,6 +3,7 @@
 // Output: 社区读写响应及实体评论后端接口。
 // Pos: [Map](L2.md)；社区内容与读取／写入策略枢纽。
 // Effects/Dependencies: D1 查询／更新、限流、媒体与审核等协作；读写权限按路由检查。
+import type { UserRole } from "../src/lib/user-roles";
 import { measureCommunityRead } from "./community-read-timing";
 import { communitySearchCondition, communitySearchScore } from "./community-search-query";
 import { recommendationPostPool, diversifyRecommendationPage } from "./community-ranking";
@@ -76,7 +77,7 @@ interface Cursor {
 }
 
 interface CommunityProfileRow {
-  role: "admin" | "member" | "moderator";
+  role: UserRole;
   status: "active" | "deleted" | "suspended";
 }
 

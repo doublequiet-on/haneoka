@@ -81,7 +81,7 @@ export interface TileOptions {
   id?: string;
   marks?: ReadonlyArray<TileMark | null | undefined>;
   /** A verified publisher/exclusive-server emblem; separate from status/date marks. */
-  serverMark?: { image: string; label: string };
+  serverMark?: { image: string; label: string; size?: number };
   /**
    * Only for a tile that *is* a chooser — a band in the roster, a model in
    * the viewer. A tile that opens a detail must leave this undefined: the
@@ -203,8 +203,8 @@ export function tileMedia(options: TileOptions): TemplateResult {
       )}
       ${options.mediaOverlay ?? nothing}
       ${options.serverMark?.image
-        ? html`<span class="tile__server-mark" title=${options.serverMark.label}>
-            <img src=${options.serverMark.image} alt=${options.serverMark.label} width="18" height="18" decoding="async" />
+        ? html`<span class="tile__server-mark" style=${`--server-mark-size:${options.serverMark.size || 18}px`} title=${options.serverMark.label}>
+            <img src=${options.serverMark.image} alt=${options.serverMark.label} width=${options.serverMark.size || 18} height=${options.serverMark.size || 18} decoding="async" />
           </span>`
         : nothing}
     </span>

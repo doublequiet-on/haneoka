@@ -13,7 +13,24 @@ on:
       server:
         required: true
         type: string
+      audience:
+        required: false
+        default: production
+        type: string
+      source_repository:
+        required: false
+        type: string
+      source_ref:
+        required: false
+        type: string
+      api_egress:
+        required: false
+        default: false
+        type: boolean
       package_r2_key:
+        required: false
+        type: string
+      package_source_server:
         required: false
         type: string
       source_id:
@@ -57,6 +74,10 @@ on:
         required: false
       jp_version_subscription:
         required: false
+      resource_api_egress_subscription:
+        required: false
+      VALIDATION_PACKAGE_KEY:
+        required: false
 
 env:
   RESOURCE_SERVER: ${{ inputs.server }}
@@ -71,8 +92,29 @@ env:
   HANEOKA_RESOURCE_BUILD_OPTIONS: '{"ktx2":${{ inputs.ktx2 }},"basisReencode":${{ inputs.basis_reencode }}}'
 
 jobs:
+  audience:
+    name: Admit the selected server audience
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Validate the public server classification
+        env:
+          PIPELINE_AUDIENCE: ${{ inputs.audience }}
+          SCHEDULED: ${{ github.event_name == 'schedule' }}
+        run: |
+          extra=()
+          if [[ "$SCHEDULED" == "true" ]]; then extra+=(--scheduled); fi
+          python -m core.server_policy --server "$RESOURCE_SERVER" --audience "$PIPELINE_AUDIENCE" "${extra[@]}"
+
   prepare:
     name: Normalize and publish source
+    needs: [audience]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment:
@@ -94,21 +136,26 @@ jobs:
       stage_prefix: ${{ steps.unity_reuse.outputs.stage_prefix || format('private/resource-pipeline-stage/{0}/{1}', github.run_id, inputs.server) }}
     env:
       RESOURCE_PIPELINE_CONFIG: ${{ secrets.RESOURCE_PIPELINE_CONFIG }}
-      PACKAGE_R2_KEY: ${{ inputs.package_r2_key }}
+      PACKAGE_R2_KEY: ${{ inputs.package_r2_key || (inputs.package_source_server == '' && inputs.audience != 'production' && (secrets.VALIDATION_PACKAGE_KEY || vars.VALIDATION_PACKAGE_KEY)) || '' }}
+      PACKAGE_SOURCE_SERVER: ${{ inputs.package_source_server }}
       SOURCE_ID_INPUT: ${{ inputs.source_id }}
       RESUME_STAGE_RUN_ID: ${{ inputs.resume_stage_run_id }}
       RESOURCE_CDN_AUTHORIZATION: ${{ secrets.RESOURCE_CDN_AUTHORIZATION || secrets.resource_cdn_authorization }}
       JP_VERSION_SUBSCRIPTION: ${{ secrets.jp_version_subscription }}
+      RESOURCE_API_EGRESS_SUBSCRIPTION: ${{ secrets.RESOURCE_API_EGRESS_SUBSCRIPTION || secrets.resource_api_egress_subscription }}
     steps:
       - uses: actions/checkout@v7
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
           fetch-depth: 2
       - uses: ./.github/actions/setup-resource-pipeline
-      - name: Start JP API egress proxy
-        if: startsWith(inputs.server, 'jp') && env.JP_VERSION_SUBSCRIPTION != ''
+      - name: Start resource API egress proxy
+        if: (inputs.api_egress || startsWith(inputs.server, 'jp')) && (env.RESOURCE_API_EGRESS_SUBSCRIPTION != '' || env.JP_VERSION_SUBSCRIPTION != '')
         uses: ./.github/actions/setup-jp-api-egress
         with:
-          subscription_url: ${{ env.JP_VERSION_SUBSCRIPTION }}
+          subscription_url: ${{ env.RESOURCE_API_EGRESS_SUBSCRIPTION || env.JP_VERSION_SUBSCRIPTION }}
       - name: Materialize source input
         id: source_input
         run: |
@@ -152,6 +199,11 @@ jobs:
             python scripts/pipeline.py --server "$RESOURCE_SERVER" fetch-source \
               --source "$SOURCE_ID_INPUT" --role package --role master-manifest --role master-data > "$RUNNER_TEMP/source.json"
           else
+            if [[ -z "$PACKAGE_R2_KEY" && -n "$PACKAGE_SOURCE_SERVER" ]]; then
+              package_json="$(python scripts/pipeline.py --server "$RESOURCE_SERVER" current-package --from-server "$PACKAGE_SOURCE_SERVER")"
+              PACKAGE_R2_KEY="$(jq -er 'select(.available == true) | .casKey | select(type == "string" and length > 0)' <<< "$package_json")"
+              echo "Using the latest published $PACKAGE_SOURCE_SERVER package"
+            fi
             run_live "$RUNNER_TEMP/resolved-resource-summary.json" \
               python scripts/pipeline.py --server "$RESOURCE_SERVER" --defer-unavailable resolve-server \
               --output "$RUNNER_TEMP/resolved-resource-config.json" --mask-github
@@ -324,6 +376,8 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.secret_writer_gh_token }}
+          PIPELINE_AUDIENCE: ${{ inputs.audience }}
+          RESOURCE_GITHUB_ENVIRONMENT: ${{ inputs.github_environment }}
         run: |
           if [[ -z "$GH_TOKEN" ]]; then
             echo "secret_writer_gh_token is not configured; skipping CDN credential refresh" >&2
@@ -341,7 +395,12 @@ jobs:
             echo "Stored CDN credential secret is already current"
             exit 0
           fi
-          printf '%s' "$auth" | gh secret set RESOURCE_CDN_AUTHORIZATION
+          secret_args=(--repo "$GITHUB_REPOSITORY")
+          if [[ "$PIPELINE_AUDIENCE" != "production" ]]; then
+            if [[ -z "$RESOURCE_GITHUB_ENVIRONMENT" ]]; then echo "No environment selected; skipping credential storage"; exit 0; fi
+            secret_args+=(--env "$RESOURCE_GITHUB_ENVIRONMENT")
+          fi
+          printf '%s' "$auth" | gh secret set RESOURCE_CDN_AUTHORIZATION "${secret_args[@]}"
           echo "Refreshed RESOURCE_CDN_AUTHORIZATION from the $RESOURCE_SERVER server lookup"
       - name: Export build identity
         id: identity
@@ -546,10 +605,15 @@ jobs:
     strategy:
       # Delta runs only materialize shards that hold pending bundles; every
       # other shard's outputs are composed from the base release.
+      fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.prepare.outputs.unity_matrix) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/setup-resource-pipeline
       - name: Restore this shard's input archive
         if: needs.prepare.outputs.delta != 'true' && needs.prepare.outputs.shard_archives == 'true'
@@ -626,15 +690,28 @@ jobs:
             --shard-count "${{ needs.prepare.outputs.shard_count }}" \
             "${extra[@]}"
       - name: Preserve deterministic shard in private R2
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: "8"
         run: |
           build_root="data/servers/$RESOURCE_SERVER/builds/${{ needs.prepare.outputs.build_id }}"
           archive="$RUNNER_TEMP/unity-shard-${{ matrix.shard }}.tar.gz"
           tar --create --gzip --file "$archive" --directory "$build_root" shards
-          aws s3 cp "$archive" \
-            "s3://$PIPELINE_STAGE_BUCKET/$PIPELINE_STAGE_PREFIX/unity-shard-${{ matrix.shard }}.tar.gz" \
-            --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
-            --region auto \
-            --no-progress
+          upload_error="$RUNNER_TEMP/unity-stage-upload.err"
+          for attempt in 1 2 3; do
+            if aws s3 cp "$archive" \
+                "s3://$PIPELINE_STAGE_BUCKET/$PIPELINE_STAGE_PREFIX/unity-shard-${{ matrix.shard }}.tar.gz" \
+                --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
+                --region auto \
+                --no-progress 2> "$upload_error"; then
+              cat "$upload_error" >&2
+              break
+            fi
+            cat "$upload_error" >&2
+            if [[ "$attempt" == 3 ]] || ! grep -Eiq '\((InvalidPart|InternalError|ServiceUnavailable|SlowDown|RequestTimeout|Throttling)\)|Connection (was closed|reset)|[Rr]ead timeout|[Cc]onnect timeout|Could not connect to the endpoint URL' "$upload_error"; then exit 1; fi
+            echo "Transient stage upload failure; retrying attempt $((attempt + 1))/3" >&2
+            sleep "$((attempt * 5))"
+          done
 
       - name: Save resource stage measurements
         if: always()
@@ -666,6 +743,10 @@ jobs:
       HANEOKA_MODEL_PREVIEW_WORKERS: "4"
     steps:
       - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
       - name: Reclaim unused hosted-runner SDK space
         run: |
           # This job uses Node, Python and FFmpeg. The preinstalled Android,
@@ -1059,6 +1140,9 @@ jobs:
     uses: ./.github/workflows/announcements.yml
     with:
       server: ${{ inputs.server }}
+      source_repository: ${{ inputs.source_repository }}
+      source_ref: ${{ inputs.source_ref }}
+      api_egress: ${{ inputs.api_egress }}
       github_environment: ${{ inputs.github_environment }}
       source_id: ${{ needs.prepare.outputs.source_id }}
     secrets:
@@ -1068,11 +1152,12 @@ jobs:
       r2_secret_access_key: ${{ secrets.r2_secret_access_key }}
       resource_cdn_authorization: ${{ secrets.resource_cdn_authorization }}
       jp_version_subscription: ${{ secrets.jp_version_subscription }}
+      resource_api_egress_subscription: ${{ secrets.resource_api_egress_subscription }}
 
   cleanup:
     name: Remove private R2 build stages
-    needs: [prepare, unity, release, announcements]
-    if: always()
+    needs: [audience, prepare, unity, release, announcements]
+    if: ${{ always() && needs.audience.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -1091,7 +1176,7 @@ jobs:
             > "$RUNNER_TEMP/pipeline-stages.json"
           jq -c --argjson cutoff "$(date -u -d '7 days ago' +%s)" '
             [.Contents[]? |
-              select(.Key | test("^private/resource-pipeline-stage/[0-9]+/(intl|intl-test|jp|jp-cbt|intl-cbt)/"))] |
+              select(.Key | test("^private/resource-pipeline-stage/[0-9]+/[a-z0-9]+(-[a-z0-9]+)*/"))] |
             group_by(.Key | split("/")[2:4]) |
             map(select(all(.[]; (.LastModified | sub("\\+00:00$"; "Z") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < $cutoff))) |
             flatten | map({Key}) |

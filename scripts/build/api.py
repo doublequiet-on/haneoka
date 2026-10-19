@@ -29,7 +29,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 from core.config import ServerConfig
-from core.server_policy import is_test_server, project_catalog
+from core.server_policy import is_validation_source, project_catalog
 from core.contracts import (
     CATALOG_PROVENANCE_SCHEMA,
     CATALOG_RESOURCES,
@@ -2664,7 +2664,7 @@ def _stamps(data: BuildData) -> dict[str, Any]:
         source_path = f"Assets/AddressableResources/{asset}.png"
         image = data.asset(source_path)
         if not image:
-            if source_path in data.source_path_set and not is_test_server(data.server):
+            if source_path in data.source_path_set and not is_validation_source(data.server):
                 raise ValueError(f"MasterStamp image was not built: {identity}::{source_path}")
             sys.stderr.write(
                 f"warning: MasterStamp image is not available in this resource catalog: "
@@ -8744,7 +8744,7 @@ def build_api(
     documents["backgrounds"] = project("backgrounds", build_backgrounds, data)
     documents["tgw-card"] = project("tgw-card", build_tgw_card, data, documents, RESOURCE_TYPES)
     documents["studio"] = project("studio", build_studio, data, documents, RESOURCE_TYPES)
-    if is_test_server(data.server):
+    if is_validation_source(data.server):
         documents = {name: documents.get(name, {}) for name in CATALOG_RESOURCES}
     if tuple(documents) != CATALOG_RESOURCES:
         raise AssertionError("catalog resource contract and builder are out of sync")

@@ -1,5 +1,7 @@
 {
   "$schema": "../server.schema.json",
   "id": "jp",
-  "configurationEnv": "RESOURCE_PIPELINE_CONFIG"
+  "configurationEnv": "RESOURCE_PIPELINE_CONFIG",
+  "pipelineClass": "production",
+  "dailyScheduled": false
 }

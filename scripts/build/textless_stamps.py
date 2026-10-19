@@ -252,13 +252,24 @@ def discover(indir: Path) -> dict[str, dict[str, Path]]:
     return groups
 
 
-def catalog_inventory(catalog: Path, build: Path, assets: Path, server: str = 'intl', *, stamp_ids: set[str] | None = None) -> dict:
+def catalog_image_variants(entry: dict, server: str) -> dict[str, str]:
+    image = entry['image']
+    variants = entry.get('imageVariants', {}).get(image) or {'ja': image}
+    prefix = f'/assets/{server}/'
+    if any(not isinstance(path, str) or not path.startswith(prefix) for path in variants.values()):
+        raise ValueError('stamp original image belongs to a different source')
+    return {language: path.removeprefix(prefix) for language, path in variants.items()}
+
+
+def catalog_inventory(catalog: Path, build: Path, assets: Path, server: str = 'intl', *, stamp_ids: set[str] | None = None,
+                      allow_unavailable: bool = False) -> dict:
     """Read existing per-bundle metadata and Sprite headers; never re-extract assets."""
     entities = {}
     for path in sorted(catalog.glob("*.json")) if catalog.is_dir() else [catalog]:
         entities.update(json.loads(path.read_text()))
     if stamp_ids is not None:
         entities = {key: value for key, value in entities.items() if key in stamp_ids}
+    wanted = {path for entry in entities.values() for path in catalog_image_variants(entry, server).values()}
     metadata_dir = build/"metadata/bundles"
     if shutil.which("rg"):
         result = subprocess.run(["rg", "-l", "-F", "Assets/AddressableResources/Stamp/",
@@ -278,13 +289,24 @@ def catalog_inventory(catalog: Path, build: Path, assets: Path, server: str = 'i
             textures = [o for o in src["outputs"] if o["role"] == "source" and o["type"] == "Texture2D"]
             sprites = [o for o in src["outputs"] if o["type"] == "Sprite"]
             for texture in textures:
-                file = build/texture["path"]
-                if not file.is_file() or file.stat().st_size != texture["bytes"]:
+                relative = texture['path'].removeprefix('assets/')
+                if relative not in wanted:
                     continue
+                file = build/texture["path"]
+                if not file.is_file():
+                    raise FileNotFoundError(f'missing current stamp original: {relative}')
+                if file.stat().st_size != texture['bytes'] or digest(file) != texture['sha256']:
+                    raise ValueError(f'stamp original hash mismatch: {relative}')
+                archive = build/meta['objectArchive']['path']
+                if archive.stat().st_size != meta['objectArchive']['bytes'] or digest(archive) != meta['objectArchive']['sha256']:
+                    raise ValueError('stamp object archive hash mismatch')
                 if not sprites:
-                    raise ValueError(f"no Sprite metadata for {file}")
+                    continue
                 sprite = sprites[0]
-                with gzip.open(build/meta["objectArchive"]["path"], "rt") as stream:
+                sprite_file = build/sprite['path']
+                if sprite_file.stat().st_size != sprite['bytes'] or digest(sprite_file) != sprite['sha256']:
+                    raise ValueError('stamp Sprite image hash mismatch')
+                with gzip.open(archive, "rt") as stream:
                     data = next(json.loads(line)["data"] for line in stream
                                 if (item := json.loads(line)).get("type") == "Sprite"
                                 and str(item["pathId"]) == str(sprite["objectId"]))
@@ -292,7 +314,6 @@ def catalog_inventory(catalog: Path, build: Path, assets: Path, server: str = 'i
                     texture_size = list(image.size)
                 with Image.open(build/sprite["path"]) as image:
                     sprite_size = list(image.size)
-                relative = texture["path"].removeprefix("assets/")
                 row = {"path": str((assets/relative).resolve()), "sha256": texture["sha256"],
                        "textureSize": texture_size, "spritePath": str((build/sprite["path"]).resolve()),
                        "spriteSha256": sprite["sha256"], "effectiveOriginalSize": sprite_size,
@@ -303,23 +324,29 @@ def catalog_inventory(catalog: Path, build: Path, assets: Path, server: str = 'i
                 if relative in outputs and outputs[relative]["sha256"] != row["sha256"]:
                     raise ValueError(f"ambiguous selected stamp source: {relative}")
                 outputs[relative] = row
-    groups = discover(assets/"Assets/AddressableResources/Stamp")
-    records = []
+    records = []; unavailable = []
     for stamp_id, entry in sorted(entities.items(), key=lambda v: int(v[0])):
         relative = entry["image"].removeprefix(f"/assets/{server}/")
         resource = Path(relative).stem
+        paths = catalog_image_variants(entry, server)
+        for key in paths.values():
+            if not (assets/key).is_file():
+                raise FileNotFoundError(f'missing current stamp original: {key}')
+        missing = sorted({key for key in paths.values() if key not in outputs})
+        if missing:
+            if not allow_unavailable:
+                raise ValueError(f'missing actual Sprite geometry: {missing[0]}')
+            unavailable.append({'stampId': str(stamp_id), 'reason': 'missing-native-sprite-geometry', 'sourcePaths': missing})
+            continue
         variants = []
-        for language, path in groups[resource].items():
-            key = path.relative_to(assets).as_posix()
-            if key not in outputs:
-                raise ValueError(f"missing actual Sprite geometry: {key}")
+        for language, key in paths.items():
             variants.append({"language": language, **outputs[key]})
         records.append({"stampId": stamp_id, "id": resource,
                         "category": "text-only" if "/Stamp/text/" in relative else "artwork",
                         "variants": variants})
     return {"schema": "haneoka-stamp-production-inventory-v2", "server": server,
             "buildRoot":str(build.resolve()),"assetsRoot":str(assets.resolve()),
-            "records": records, "sourceIdentityPolicy": "reuse selected bundle output hashes",
+            "records": records, "unavailable": unavailable, "sourceIdentityPolicy": "reuse selected bundle output hashes",
             "summary": {"catalogItems": len(records), "languageImages": sum(len(r["variants"]) for r in records),
                         "artworkItems": sum(r["category"] == "artwork" for r in records),
                         "textOnlyItems": sum(r["category"] == "text-only" for r in records)}}

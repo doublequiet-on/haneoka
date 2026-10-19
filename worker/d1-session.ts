@@ -40,7 +40,6 @@ export function replicaReadable(request: Request): boolean {
   return (
     path.startsWith("/api/v1/community/") ||
     path === "/api/auth/get-session" ||
-    path === "/api/v1/admin/session" ||
     path === "/api/v1/account/profile" ||
     path === "/api/v1/me/preferences"
   );
@@ -82,6 +81,14 @@ function routedEnvironment(env: Env, database: D1Database): Env {
     environments.set(env, routed);
   }
   return routed;
+}
+
+/** Authorization reads stay on the primary even inside a replica-readable request. */
+export async function withPrimaryD1<T>(env: Env, handle: (env: Env) => Promise<T>): Promise<T> {
+  const database = env.DB;
+  if (!database || typeof database.withSession !== "function") return handle(env);
+  const session = database.withSession("first-primary");
+  return scope.run(session, () => handle(routedEnvironment(env, database)));
 }
 
 /** Run one fetch invocation with its D1 session; mutations hand the browser their bookmark. */

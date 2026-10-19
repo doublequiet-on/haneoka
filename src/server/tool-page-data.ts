@@ -13,6 +13,7 @@ import { readRuntimeRulesDocument } from "../lib/team-builder/data/runtime-rules
 import type { fetchCatalogVisuals } from "../lib/catalog-visuals";
 import { goalBoard, shuffle } from "../lib/song-puzzle/model";
 import { stampChoices, mergeTextlessStampManifests, type TextlessStampManifest } from "../lib/stamp-maker/catalog";
+import { publicStampManifest } from "../lib/stamp-maker/public-manifest";
 import type { HaneokaReleaseIdentity } from "../../packages/api-client/src/haneoka";
 import { rankingCardCatalog } from "../lib/ranking-card-catalog";
 import { PUBLIC_RELEASE_SERVERS, isPublicReleaseServer } from "../lib/temporary-public-routing.ts";
@@ -322,7 +323,9 @@ export function stampMakerPageData(): Promise<StampMakerPageData> {
     const manifests: unknown[] = [];
     for (const [server, pin] of Object.entries(identities)) {
       if (await fetchStaticReleaseEntry("runtime/stamp-maker/manifest.json", server, pin))
-        manifests.push(await fetchStaticReleaseJson("runtime/stamp-maker/manifest.json", server, pin));
+        manifests.push(publicStampManifest(await fetchStaticCatalog("stamps/textless", server, pin), {
+          server, sourceId: pin.sourceId, stampIds: new Set(Object.keys(catalogs[server]!)),
+        }));
     }
     const accepted: Record<string, TextlessStampManifest["records"]> = {};
     for (const input of manifests) {

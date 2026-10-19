@@ -564,7 +564,6 @@
       "tabBottom": "하의",
       "tabShoes": "신발",
       "tabSet": "세트",
-      "viewCbt": "글로벌 CBT 보기",
       "yes": "예",
       "no": "아니요",
       "name": "이름",
@@ -1115,8 +1114,8 @@
       "mirrors": "관련 자료",
       "catalogJapanOnly": "일본판 전용",
       "catalogInternationalOnly": "글로벌판 전용",
-      "catalogTestOnly": "테스트 콘텐츠",
-      "catalogTestServer": "테스트 환경",
+      "catalogAdditionalOnly": "미공개 콘텐츠",
+      "catalogAdditionalSource": "추가 출처",
       "catalogViewingServerData": "{server} 데이터를 표시하고 있습니다",
       "catalogFiltersUnavailable": "추가 카드 필터 정보를 불러오지 못했습니다. 카드는 계속 확인할 수 있습니다."
     },
@@ -3260,8 +3259,8 @@
       "uidCopied": "UID를 복사했습니다.",
       "uidCopyFailed": "UID를 복사할 수 없습니다.",
       "role": "역할",
-      "roleMember": "회원",
-      "roleModerator": "운영자",
+      "roleMember": "일반 회원",
+      "roleModerator": "운영진",
       "roleAdmin": "관리자",
       "accountStatus": "계정 상태",
       "statusActive": "정상",
@@ -3325,7 +3324,10 @@
       "resetPassword": "비밀번호 재설정",
       "passwordReset": "비밀번호를 재설정했습니다.",
       "invalidResetLink": "이 재설정 링크가 잘못되었거나 만료되었습니다.",
-      "signInDescription": "계정에 접근하려면 로그인하세요."
+      "signInDescription": "계정에 접근하려면 로그인하세요.",
+      "roleRegular": "단골 회원",
+      "roleTrusted": "신뢰 회원",
+      "roleContributor": "기여자"
     },
     "profile": {
       "title": "공개 프로필",
@@ -4304,9 +4306,12 @@
         "write": "커뮤니티 게시"
       },
       "roles": {
-        "member": "회원",
-        "moderator": "운영자",
-        "admin": "관리자"
+        "member": "일반 회원",
+        "moderator": "운영진",
+        "admin": "관리자",
+        "regular": "단골 회원",
+        "trusted": "신뢰 회원",
+        "contributor": "기여자"
       },
       "values": {
         "accepted": "승인됨",
@@ -4754,8 +4759,9 @@
       },
       "save": "저장",
       "cancel": "취소",
-      "showTestServerContent": "테스트 서버 콘텐츠 표시",
-      "showTestServerContentHint": "도감과 팀 편성 도구에 테스트 서버 콘텐츠를 표시합니다."
+      "showRestrictedContent": "미공개 콘텐츠 표시",
+      "showRestrictedContentHint": "선택한 회원 그룹만 접근할 수 있습니다. 공개 페이지에는 표시되지 않습니다.",
+      "contentAccessGroups": "접근을 허용할 회원 그룹"
     }
   },
   "download": {

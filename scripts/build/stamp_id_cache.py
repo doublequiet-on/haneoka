@@ -1,4 +1,4 @@
-"""First-successful-derivative cache shared by Intl and Intl test builds."""
+"""Shared derivative storage; callers require the current native input fingerprint."""
 from __future__ import annotations
 
 import time
@@ -72,12 +72,14 @@ class StampIdCache:
     def preserve_image(self, record, file):
         stamp_id = str(record["stampId"])
         prior = self.records.get(stamp_id)
-        if prior and prior.get("cacheImageKey"):
+        if (prior and prior.get("cacheImageKey")
+                and prior.get("inputFingerprint") == record.get("inputFingerprint")
+                and prior["artifacts"]["sourceImage"]["sha256"] == record["artifacts"]["sourceImage"]["sha256"]):
             return
         digest = record["artifacts"]["sourceImage"]["sha256"]
         key = f"{OBJECTS}/{digest}.png"
         self.store.upload_path(file, key, "image/png", cache_control="public, max-age=31536000, immutable")
-        self.records[stamp_id] = {**(prior or record), "cacheImageKey": key}
+        self.records[stamp_id] = {**record, "cacheImageKey": key}
         self.dirty = True
 
     def save(self):

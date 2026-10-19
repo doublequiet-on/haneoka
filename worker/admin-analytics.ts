@@ -1,3 +1,6 @@
+import { isUserRole } from "../src/lib/user-roles";
+import { effectiveUserRoleSql } from "./user-roles";
+
 type Binding = string | number | null;
 export interface AdminVisitFilter {
   sql: string;
@@ -103,7 +106,7 @@ export async function readAdminGeo(request: Request, env: Env): Promise<Response
     role = url.searchParams.get("role");
   if (
     (status && !["active", "suspended", "deleted"].includes(status)) ||
-    (role && !["admin", "moderator", "member"].includes(role))
+    (role && !isUserRole(role))
   )
     return reply(request, { error: { code: "invalid_cohort", message: "Invalid current user cohort" } }, 400);
   const terms = [filter.sql],
@@ -113,7 +116,7 @@ export async function readAdminGeo(request: Request, env: Env): Promise<Response
     values.push(status);
   }
   if (role) {
-    terms.push("p.role=?");
+    terms.push(`${effectiveUserRoleSql("p")}=?`);
     values.push(role);
   }
   const source = `FROM "user" AS u LEFT JOIN community_profile AS p ON p.user_id=u.id LEFT JOIN community_user_last_visit AS v ON v.user_id=u.id WHERE ${terms.join(" AND ")}`;

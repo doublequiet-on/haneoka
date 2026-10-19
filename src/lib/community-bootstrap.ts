@@ -7,6 +7,7 @@ import { fetchJson, JsonResponseError } from "../lit/shared/catalog";
 import { CommunityRealmChanged, rememberSignedIn, type CommunityViewer } from "./community-viewer";
 import type { CommunityForum, ForumGroup } from "./community-forums";
 import { discardEarlyReads, readEarlyJson, takeEarlyRead } from "./early-read";
+import { isStaffRole } from "./user-roles";
 
 export interface CommunityBootstrap<T> {
   viewer: CommunityViewer;
@@ -60,7 +61,7 @@ export async function readCommunityBootstrap<T>(path: string, signal: AbortSigna
   const viewer = result.viewer;
   const user = viewer?.session?.user;
   if (!viewer || typeof viewer.userId !== "string" ||
-      ![null, "admin", "moderator"].includes(viewer.staffRole) ||
+      (viewer.staffRole !== null && !isStaffRole(viewer.staffRole)) ||
       viewer.realm !== JSON.stringify([viewer.userId, viewer.staffRole]) ||
       (viewer.userId ? !user || typeof user !== "object" || !("id" in user) || user.id !== viewer.userId : viewer.session !== null || viewer.staffRole !== null) ||
       result.data === null || typeof result.data !== "object" || Array.isArray(result.data) ||

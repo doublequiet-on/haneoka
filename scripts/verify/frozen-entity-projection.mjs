@@ -51,7 +51,7 @@ if (process.argv[2] === "child") {
     "./searchable-catalog": forbidden(["searchableCatalogPages"]),
     "./searchable-stories": forbidden(["searchableStoryPages"]),
     "./resource-route": 'export const RELEASE_SERVERS=["jp","intl"];',
-    "./temporary-public-routing": 'export const PUBLIC_RELEASE_SERVERS=["jp","intl"];',
+    "./temporary-public-routing": 'export const PUBLIC_RELEASE_SERVERS=["jp","intl"]; export const isPublicReleaseServer=server=>PUBLIC_RELEASE_SERVERS.includes(server);',
   };
   registerHooks({
     resolve(specifier, context, next) {

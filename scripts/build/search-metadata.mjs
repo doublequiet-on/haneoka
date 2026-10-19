@@ -1,4 +1,5 @@
 import { searchCategory } from "../../src/lib/search-categories.ts";
+import { isContentSourceFamily as isPublicReleaseServer } from "../../src/lib/content-access-state.ts";
 import { parseFragment } from "parse5";
 
 const plainText = (node) => node.nodeName === "#text" ? node.value : (node.childNodes || []).map(plainText).join("");
@@ -48,12 +49,21 @@ function documentTitle(html) {
   return heading ? compact(plainText(parseFragment(heading))) : "";
 }
 
+export function assertPublicStaticDocumentPath(sourcePath) {
+  const parts = sourcePath.split(/[\\/]/u);
+  if (["provider-static", "playlist-static"].includes(parts[0])) return;
+  const position = ["static-views", "asset-static"].includes(parts[0]) ? 1 : 0;
+  if (/^(?:ja|en|ko|zh-CN|zh-TW)$/u.test(parts[position + 1] || "") && !isPublicReleaseServer(parts[position]))
+    throw new Error("Static documents require a public release server");
+}
+
 /** Add search-only classification and title weighting without changing the served document. */
 export function withSearchMetadata(html, sourcePath) {
+  assertPublicStaticDocumentPath(sourcePath);
   // Pagefind keeps script ids as anchors even when their text is excluded.
   html = withoutInlineJson(html);
   const prefix = sourcePath.split(/[\\/]/u)[0];
-  const server = ["jp", "intl", "intl-test", "jp-cbt", "intl-cbt"].includes(prefix) ? prefix : "global";
+  const server = isPublicReleaseServer(prefix) ? prefix : "global";
   const category = searchCategory(sourcePath);
   const title = documentTitle(html);
   const metadata = `<meta data-pagefind-filter="server:${server}"><meta data-pagefind-filter="section:${category.section}"><meta data-pagefind-meta="kind:${category.kind}">`;

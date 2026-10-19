@@ -1,48 +1,149 @@
+import { isPublicReleaseServer as isPublicResourceServer } from "../src/lib/temporary-public-routing";
+export { isPublicReleaseServer as isPublicResourceServer } from "../src/lib/temporary-public-routing";
 import { spoilerCookieEnabled } from "../src/lib/spoiler-cookie";
+import { withPrimaryD1 } from "./d1-session";
+import { getAuthSession } from "./auth";
+import { communityAccessState } from "./access";
+import { USER_ROLES, isUserRole, type UserRole } from "../src/lib/user-roles";
 import { WEB_BUILD_ATTRIBUTE } from "../src/lib/web-build-id";
 
 export type SiteSettings = {
-  showTestServerContent: boolean;
+  showRestrictedContent: boolean;
+  contentAccessRoles: UserRole[];
   version: number;
   updatedAt: number;
 };
 
 /** Read current administrative policy, without a stale per-isolate flag cache. */
 export async function readSiteSettings(env: Env): Promise<SiteSettings> {
-  const row = await env.DB.withSession("first-primary").prepare(
-    `SELECT show_test_server_content AS enabled, version, updated_at AS updatedAt
+  const row = await env.DB.withSession("first-primary")
+    .prepare(
+      `SELECT show_test_server_content AS enabled, test_content_roles AS roles, version, updated_at AS updatedAt
      FROM site_setting WHERE id = 1`,
-  ).first<{ enabled: number; version: number; updatedAt: number }>();
-  return { showTestServerContent: row?.enabled !== 0, version: row?.version ?? 1, updatedAt: row?.updatedAt ?? 0 };
+    )
+    .first<{ enabled: number; roles: string; version: number; updatedAt: number }>();
+  let roles: unknown;
+  try {
+    roles = JSON.parse(row?.roles ?? '["admin"]');
+  } catch {
+    roles = [];
+  }
+  return {
+    showRestrictedContent: row?.enabled === 1,
+    contentAccessRoles: Array.isArray(roles) ? USER_ROLES.filter((role) => roles.includes(role)) : [],
+    version: row?.version ?? 1,
+    updatedAt: row?.updatedAt ?? 0,
+  };
 }
 
-/** Stream the flag into HTML; immutable scripts, styles and resource JSON keep their own caches. */
-export function testContentAllowed(request: Request, settings: SiteSettings): boolean {
-  return settings.showTestServerContent && spoilerCookieEnabled(request.headers.get("Cookie"));
+/** Only the two public sources can be read without an account grant. */
+export function requestedResourceServers(request: Request): string[] {
+  const url = new URL(request.url);
+  const matches = [
+    /^\/(?:assets|runtime|objects|artifacts|game-client|static-views)\/([^/]+)/u.exec(url.pathname),
+    /^\/api\/v1\/(?:servers|team-builder|meta-reference)\/([^/]+)/u.exec(url.pathname),
+    /^\/([^/]*(?:-test|-cbt)[^/]*)\/(?:.*)?$/u.exec(url.pathname),
+    /^\/([^/]+)\/(?:ja|en|ko|zh-CN|zh-TW)(?:\/|$)/u.exec(url.pathname),
+  ];
+  const values = matches.flatMap((match) => (match?.[1] ? [match[1]] : []));
+  if (!/^\/api\/v1\/(?:garupa|sekai|bestdori|community)(?:\/|$)/u.test(url.pathname))
+    values.push(...url.searchParams.getAll("server"));
+  return [
+    ...new Set(
+      values.map((value) => {
+        try {
+          return decodeURIComponent(value);
+        } catch {
+          return value;
+        }
+      }),
+    ),
+  ];
+}
+export const restrictedResourceRequest = (request: Request): boolean =>
+  requestedResourceServers(request).some((server) => !isPublicResourceServer(server));
+
+export async function contentSourceScope(env: Env): Promise<{ sources: string[]; sourceFamilies: Record<string, "jp" | "intl"> }> {
+  const result = await env.DB.withSession("first-primary")
+    .prepare("SELECT slug, region FROM resource_server WHERE status = 'active' AND slug NOT IN ('jp', 'intl') AND slug NOT LIKE '%-cbt' ORDER BY slug")
+    .all<{ slug: string; region: string }>();
+  return {
+    sources: result.results.map((row) => row.slug),
+    sourceFamilies: Object.fromEntries(result.results.map((row) => [row.slug, row.region === "jp" ? "jp" : "intl"])),
+  };
+}
+
+const permissions = new WeakMap<Request, Promise<boolean>>();
+export async function testContentAllowed(request: Request, env: Env, settings?: SiteSettings): Promise<boolean> {
+  let pending = permissions.get(request);
+  if (!pending) {
+    pending = withPrimaryD1(env, async (primaryEnv) => {
+      if (!request.headers.has("Cookie") && !request.headers.has("Authorization")) return false;
+      const policy = settings ?? (await readSiteSettings(primaryEnv));
+      if (!policy.showRestrictedContent || !policy.contentAccessRoles.some(isUserRole)) return false;
+      const session = await getAuthSession(request, primaryEnv, { authoritative: true });
+      if (!session?.user?.id || !session.user.emailVerified) return false;
+      const state = await communityAccessState(primaryEnv, session.user.id, ["sign_in"]);
+      return state?.status === "active" && !state.restriction && policy.contentAccessRoles.includes(state.role);
+    });
+    permissions.set(request, pending);
+  }
+  return pending;
+}
+
+export function privateResourceResponse(response: Response): Response {
+  const setPolicy = (headers: Headers) => {
+    headers.set("Cache-Control", "private, no-store");
+    headers.set("Vary", "Cookie, Authorization, Accept-Encoding");
+    headers.delete("Access-Control-Allow-Origin");
+  };
+  try {
+    setPolicy(response.headers);
+    return response;
+  } catch {
+    // Network responses have immutable headers and an already encoded body.
+    const headers = new Headers(response.headers);
+    setPolicy(headers);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+      encodeBody: headers.has("Content-Encoding") ? "manual" : "automatic",
+    });
+  }
 }
 
 export async function applySiteSettings(
   request: Request,
   response: Response,
-  settings: SiteSettings,
+  settings: SiteSettings | undefined,
   buildId: string,
+  env: Env,
 ): Promise<Response> {
   if (!response.headers.get("Content-Type")?.toLowerCase().includes("text/html")) return response;
+  const allowed = settings ? await testContentAllowed(request, env, settings) : false;
+  const scope = allowed ? await contentSourceScope(env) : undefined;
   const headers = new Headers(response.headers);
-  headers.set("Cache-Control", "public, max-age=0, must-revalidate");
+  headers.set("Cache-Control", settings ? "private, max-age=0, must-revalidate" : "public, max-age=0, must-revalidate");
   const vary = new Set(
     (headers.get("Vary") || "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
   );
-  vary.add("Cookie");
+  if (settings) {
+    vary.add("Cookie");
+    vary.add("Authorization");
+  }
   vary.add("Accept-Encoding");
   headers.set("Vary", [...vary].join(", "));
   headers.delete("Content-Length");
   const assetEtag = headers.get("ETag");
-  const spoilers = spoilerCookieEnabled(request.headers.get("Cookie"));
-  const etag = assetEtag?.replace(/"$/u, `:web-${buildId}:site-${settings.version}:spoilers-${spoilers ? 1 : 0}"`);
+  const spoilers = settings ? spoilerCookieEnabled(request.headers.get("Cookie")) : false;
+  const etag = assetEtag?.replace(
+    /"$/u,
+    `:web-${buildId}${settings ? `:site-${settings.version}:access-${allowed ? 1 : 0}:spoilers-${spoilers ? 1 : 0}` : ""}"`,
+  );
   if (etag) {
     headers.set("ETag", etag);
     if (request.headers.get("If-None-Match") === etag) {
@@ -59,8 +160,17 @@ export async function applySiteSettings(
     .on("html", {
       element(element) {
         element.setAttribute(WEB_BUILD_ATTRIBUTE, buildId);
-        element.setAttribute("data-show-test-server-content", settings.showTestServerContent ? "1" : "0");
-        element.setAttribute("data-site-settings-version", String(settings.version));
+        element.removeAttribute("data-show-test-server-content");
+        element.setAttribute("data-content-access", allowed ? "1" : "0");
+        if (scope) {
+          element.setAttribute("data-content-sources", JSON.stringify(scope.sources));
+          element.setAttribute("data-content-source-families", JSON.stringify(scope.sourceFamilies));
+        } else {
+          element.removeAttribute("data-content-sources");
+          element.removeAttribute("data-content-source-families");
+        }
+        if (settings) element.setAttribute("data-site-settings-version", String(settings.version));
+        else element.removeAttribute("data-site-settings-version");
         element.setAttribute("data-spoiler-content", spoilers ? "1" : "0");
       },
     })

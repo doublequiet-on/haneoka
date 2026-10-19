@@ -135,6 +135,11 @@ The scheduled GitHub Actions run checks jp and intl at
 source's package, the run reuses the stored R2 package instead of
 re-downloading from the publisher; only a real update pays that transfer. `scripts/acquire_package.py` discovers the package using the selected environment's private acquisition settings, downloads the current file, and stores it under a SHA-256 content-addressed R2 key. Package updates create new keys; large uploads use multipart transfer.
 
+`current-package --from-server jp` (or `intl`) reads the selected base server's
+latest published package identity and CAS key. It validates the source manifest
+and package name before reuse. Resource and Master discovery still use the
+target server; an unavailable base package stops the lookup.
+
 Intl package discovery reads the official website's live JSON download
 configuration (`publisher-json`) using the private `sourceUrl`, `discoveryHosts`,
 `urlPath` field sequence, and `downloadPattern` allowlist. It keeps the package
@@ -148,16 +153,16 @@ For local operation, use a private JSON file with mode 0600:
 
 ```sh
 export RESOURCE_PIPELINE_CONFIG_FILE=/absolute/path/to/private/server.json
-PYTHONPATH=scripts python -m core.config --server intl-test
+PYTHONPATH=scripts python -m core.config --server intl
 ```
 
-`RESOURCE_PIPELINE_CONFIG` and `RESOURCE_PIPELINE_CONFIG_FILE` are mutually exclusive; missing, mismatched, or malformed settings fail before acquisition. CI masks private fields and diagnostics redact configured values. The `intl-test` server is built only through manual resource builds and remains available in cross-server content browsing; it is absent from the default Settings server choices. Formal JP/Intl availability takes precedence over its test-only badge.
+`RESOURCE_PIPELINE_CONFIG` and `RESOURCE_PIPELINE_CONFIG_FILE` are mutually exclusive; missing, mismatched, or malformed settings fail before acquisition. CI masks private fields and diagnostics redact configured values.
 
 Keep readable local copies under the ignored `.secrets/resource-pipeline/` directory. Validate and synchronize them with:
 
 ```sh
-python scripts/sync_pipeline_config.py --server intl-test --check
-python scripts/sync_pipeline_config.py --server intl-test
+python scripts/sync_pipeline_config.py --server intl --check
+python scripts/sync_pipeline_config.py --server intl
 # Validate or synchronize all configured servers with --all.
 ```
 
@@ -178,14 +183,14 @@ Master lookup stops that server's run and leaves its published release intact.
 It does not repeat the same lookup after downloading the unchanged package.
 Embedded-only servers can still fall back to inspecting their package.
 
-Intl and intl-test read their live resource version from the Master version
-service and download that exact catalog generation. This follows version jumps
+Intl reads its live resource version from the Master version
+service and downloads that exact catalog generation. This follows version jumps
 and rollbacks without scanning a configured floor or requiring old catalogs to
 remain published. Catalog hashes and contents still participate in the source
 identity, so an update within the same version is detected. If the announced
 catalog is unavailable, the run fails and retains the published release.
 
-Their private `cdnDiscovery` block specifies the server-list endpoint, client
+The private `cdnDiscovery` block specifies the server-list endpoint, client
 version, exact environment name, allowed host suffixes, and asset/Master path
 suffixes. Before acquisition, `resolve-server` selects only that environment's
 announced CDN/API roots, reads its live Master resource version, and checks a
@@ -288,21 +293,13 @@ whose size differs from the current catalog are skipped in favor of a fresh
 download. Refreshing the shared CDN credential secret is best effort because
 the active build already resolved its credential.
 
-The international server keeps its flat `catalog_{version}.bin` layout, so it
-still discovers new versions by probing. The CBT CDNs remain reachable: the
-international CBT CDN currently serves without authorization, while the
-Japanese CBT CDN requires its original credential (the
-`RESOURCE_CDN_AUTHORIZATION` secret) — its API host answers
-`UNDER_MAINTENANCE`, so the password can no longer be re-derived there.
-
 ### Credential fallback and secret refresh
 
 The server-issued CDN password is short-lived, so it is fetched fresh on every
 run and never persisted by the pipeline. When a server stops delivering one
 (maintenance, shutdown), the pipeline falls back to the
-`RESOURCE_CDN_AUTHORIZATION` secret, which is exactly how the CBT servers keep
-building. To keep that shared secret young, the reusable workflow's
-*Refresh shared CDN credential secret* step stores the credential from a
+`RESOURCE_CDN_AUTHORIZATION` secret. To refresh the shared secret, the reusable
+workflow's *Refresh shared CDN credential secret* step stores the credential from a
 successful server lookup back into the `RESOURCE_CDN_AUTHORIZATION` repo
 secret — this requires a classic PAT (or fine-grained token with **Secrets:
 write**) stored as the `SECRET_WRITER_GH_TOKEN` repo secret; without it the
@@ -321,7 +318,7 @@ releases are immutable, so closed servers lose nothing.
 ## Build a local release
 
 ```sh
-PYTHONPATH=scripts python scripts/pipeline.py --server jp-cbt run \
+PYTHONPATH=scripts python scripts/pipeline.py --server jp run \
   --input /absolute/path/to/package.apks
 ```
 
@@ -365,7 +362,7 @@ Run command-specific help for all options:
 
 ```sh
 PYTHONPATH=scripts python scripts/pipeline.py --help
-PYTHONPATH=scripts python scripts/pipeline.py --server jp-cbt <command> --help
+PYTHONPATH=scripts python scripts/pipeline.py --server jp <command> --help
 ```
 
 ## Commands
@@ -388,6 +385,7 @@ PYTHONPATH=scripts python scripts/pipeline.py --server jp-cbt <command> --help
 | `verify-release` / `verify-remote`                    | Verify local or published releases                                                                          |
 | `publish-source` / `publish-release`                  | Publish verified data to R2                                                                                 |
 | `fetch-package` / `fetch-source` / `fetch-home-spots` | Restore stored inputs (`fetch-source` supports shard and digest filtering)                                     |
+| `current-package`                                    | Read the published package identity; `--from-server jp\|intl` selects a shared base package                  |
 | `fetch-release-document`                              | Fetch one verified JSON document from a published release                                                        |
 | `prune-sources` / `prune-releases` / `prune-uploads`  | Apply retention policies                                                                                    |
 | `gc-r2`                                               | Remove unreferenced R2 objects                                                                              |

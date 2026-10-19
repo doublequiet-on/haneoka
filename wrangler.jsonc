@@ -35,6 +35,7 @@
       "/catalog/assets/*",
       "/intl/*",
       "/intl-test/*",
+      "/jp-test-*",
       "/jp/*",
       "/ja/*",
       "/en/*",

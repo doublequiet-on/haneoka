@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from core.server_policy import server_reference
+
 _private_values: set[str] = set()
 _current_settings: dict[str, Any] | None = None
 
@@ -35,6 +37,9 @@ class _PrivateDiagnostics:
 def _remember(value: Any, sensitive: bool = False) -> None:
     if isinstance(value, dict):
         for name, child in value.items():
+            if (isinstance(child, str) and child
+                    and name.lower().endswith(("password", "secret", "token", "key", "authorization", "basicuser"))):
+                _private_values.add(child)
             _remember(child, sensitive or name in {"masterCrypto", "bundleCrypto", "criHcaKey", "packageAcquisition", "hostSuffixes", "cdnDiscovery"})
     elif isinstance(value, list):
         for child in value:
@@ -59,12 +64,8 @@ def _unique_object(pairs):
 
 def load_private_settings(server: str, registry: Path) -> dict[str, Any]:
     global _current_settings
-    reference = json.loads(registry.read_text("utf-8"))
-    if set(reference) - {"$schema", "id", "configurationEnv"} or reference.get("id") != server:
-        raise ValueError(f"invalid server configuration reference: {registry.name}")
-    name = reference.get("configurationEnv")
-    if name != "RESOURCE_PIPELINE_CONFIG":
-        raise ValueError(f"invalid runtime configuration variable: {registry.name}")
+    reference = server_reference(server, registry)
+    name = reference["configurationEnv"]
     raw = os.environ.get(name, "")
     filename = os.environ.get(name + "_FILE", "")
     if raw and filename:

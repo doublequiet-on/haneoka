@@ -2,10 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "id",
-    "configurationEnv"
-  ],
+  "required": ["id", "configurationEnv", "pipelineClass"],
   "properties": {
     "$schema": {
       "type": "string"
@@ -16,6 +13,13 @@
     },
     "configurationEnv": {
       "const": "RESOURCE_PIPELINE_CONFIG"
+    },
+    "pipelineClass": {
+      "enum": ["production", "validation", "retained"]
+    },
+    "dailyScheduled": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

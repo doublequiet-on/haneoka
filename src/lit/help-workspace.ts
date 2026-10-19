@@ -1,3 +1,5 @@
+import { canUseStaticCatalogScope } from "../lib/content-visibility";
+import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { hydrateWorkspace } from "./shared/hydrate-workspace";
 import { readPageData } from "../lib/page-data";
@@ -12,7 +14,7 @@ import { currentReleaseServer } from "./shared/catalog";
 import { fetchCrossServerCatalogs } from "../lib/cross-server/fetch";
 import { crossCatalogPresentation, type CrossCatalogPresentation } from "../lib/cross-server/presentation";
 import { OFFICIAL_CATALOG_SERVERS, type OfficialCatalogServer } from "../lib/cross-server/catalog";
-import { serverAvailabilityBadge } from "./shared/server-availability";
+import { catalogServerBadge } from "./shared/server-availability";
 import { segmented } from "./ui/controls";
 import { errorState, loadingState } from "./ui/state";
 import {
@@ -55,6 +57,7 @@ export class HelpWorkspace extends LitElement {
   private request?: AbortController;
   private unionHelp?: CrossCatalogPresentation;
   private unionTips?: CrossCatalogPresentation;
+  private sourceServer?: string;
   private loading?: LoadingReporter;
   private initialViewApplied = false;
   constructor() {
@@ -72,7 +75,18 @@ export class HelpWorkspace extends LitElement {
   createRenderRoot() {
     return this;
   }
+  private contentAccessChanged = () => {
+    this.request?.abort();
+    this.request = undefined;
+    this.loading?.cancel();
+    this.unionHelp = undefined;
+    this.unionTips = undefined;
+    this.categories = [];
+    this.tips = [];
+    void this.load();
+  };
   connectedCallback() {
+    addEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     const page = readPageData<HelpCollectionPageData>(this);
     this.locale = preferredLocale(this.locale);
     if (page?.schema === "haneoka-workspace-collection-v1" && page.resource === "help")
@@ -92,7 +106,10 @@ export class HelpWorkspace extends LitElement {
     if (!this.isConnected) return;
     const url = navigationDocumentUrl();
     const selection = parseEntitySelection(url.pathname);
-    if (selection?.source === "canonical" && selection.route.kind === "help") this.entityId = selection.route.id;
+    if (selection?.source === "canonical" && selection.route.kind === "help") {
+      this.entityId = selection.route.id;
+      this.sourceServer = selection.route.server;
+    }
     this.locale = preferredLocale(this.locale);
     void Promise.all([import("@material/web/progress/circular-progress.js")]);
     const p = url.searchParams;
@@ -101,6 +118,7 @@ export class HelpWorkspace extends LitElement {
     void this.load();
   }
   disconnectedCallback() {
+    removeEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     this.request?.abort();
     this.request = undefined;
     this.loading?.cancel();
@@ -121,6 +139,7 @@ export class HelpWorkspace extends LitElement {
   }
   private collectionDocument(catalogs: WorkspaceCollectionPayload["catalogs"]): JsonRecord {
     const server = catalogs.help!.selectedServer;
+    this.sourceServer = server;
     this.unionHelp = crossCatalogPresentation(catalogs.help!);
     this.unionTips = crossCatalogPresentation(catalogs["help-tips"]!);
     const categories = new Map<string, JsonRecord>();
@@ -134,18 +153,19 @@ export class HelpWorkspace extends LitElement {
     }
     return {
       categories: Object.fromEntries(categories),
-      loadingTips: Object.fromEntries(this.unionTips.items.map((tip) => [String(tip.tipId), tip])),
+      loadingTips: Object.fromEntries(this.unionTips.items.map((tip) => [this.unionTips!.entries.get(tip)!.key, tip])),
     };
   }
   private prepareDocument(d: JsonRecord): JsonRecord | undefined {
     this.categories = recordValues(d.categories).sort((a, b) => Number(a.order) - Number(b.order));
     this.tips = recordValues(d.loadingTips).sort((a, b) => Number(a.tipId) - Number(b.tipId));
     // A deep-linked topic (?topic=) opens the category that contains it.
-    const linked = this.selectedTopic
+    const selected = this.topicForId(this.categories.flatMap(category => Array.isArray(category.subcategories) ? category.subcategories as JsonRecord[] : []), this.selectedTopic);
+    const linked = selected
       ? this.categories.find((category) =>
           Array.isArray(category.subcategories)
             ? (category.subcategories as JsonRecord[]).some(
-                (topic) => String(topic.helpSubcategoryId ?? "") === this.selectedTopic,
+                (topic) => topic === selected,
               )
             : false,
         )
@@ -153,12 +173,19 @@ export class HelpWorkspace extends LitElement {
     this.selectedCategory = Number(linked?.categoryId ?? this.categories[0]?.categoryId ?? 0);
     return linked;
   }
+  private topicForId(rows: JsonRecord[], id: string): JsonRecord | undefined {
+    if (!id) return undefined;
+    const matches = rows.filter(row => String(row.helpSubcategoryId ?? "") === id);
+    const server = this.sourceServer || currentReleaseServer();
+    const own = matches.filter(row => this.unionHelp?.entries.get(row)?.perServer[server]);
+    return own.length === 1 ? own[0] : matches.length === 1 ? matches[0] : undefined;
+  }
   private text(v: unknown) {
     return localizedText(v, this.locale);
   }
   private async load() {
     const page = readPageData<WorkspaceCollectionPayload>(this);
-    if (page?.schema === "haneoka-workspace-collection-v1" && page.resource === "help" && !this.entityId) {
+    if (page?.schema === "haneoka-workspace-collection-v1" && page.resource === "help" && !this.entityId && canUseStaticCatalogScope()) {
       this.prepareCollection(page, this.locale);
       return;
     }
@@ -175,18 +202,19 @@ export class HelpWorkspace extends LitElement {
     this.error = "";
     try {
       let d: JsonRecord;
-      const server = currentReleaseServer() as OfficialCatalogServer;
+      const server = (this.sourceServer || currentReleaseServer()) as OfficialCatalogServer;
       if (!this.entityId && OFFICIAL_CATALOG_SERVERS.includes(server)) {
         const catalogs = await fetchCrossServerCatalogs(["help", "help-tips"], server, this.locale, {
           signal: controller.signal,
         });
         if (Object.values(catalogs.help!.sourceAvailability).every((value) => value !== "loaded"))
           throw new Error("Help catalog unavailable");
+        if (controller.signal.aborted || this.request !== controller) return;
         d = this.collectionDocument(catalogs);
       } else {
         this.unionHelp = undefined;
         this.unionTips = undefined;
-        d = await fetchJson<JsonRecord>(catalogUrl("help"), { signal: controller.signal });
+        d = await fetchJson<JsonRecord>(catalogUrl("help", "", server), { signal: controller.signal });
       }
       if (this.request !== controller || controller.signal.aborted) {
         progress.cancel();
@@ -194,7 +222,7 @@ export class HelpWorkspace extends LitElement {
       }
       const linked = this.prepareDocument(d);
       if (this.entityId) {
-        const entry = this.filteredEntries().find((item) => String(item.helpSubcategoryId ?? "") === this.entityId);
+        const entry = this.topicForId(this.filteredEntries(), this.entityId);
         if (entry) updateEntityHeading(this, this.text(entry.title));
       }
       this.dataset.entityReady = String(Boolean(this.entityId && linked));
@@ -237,7 +265,7 @@ export class HelpWorkspace extends LitElement {
           () => void this.load(),
           this.error,
         );
-      const entry = entries.find((item) => String(item.helpSubcategoryId ?? "") === this.entityId);
+      const entry = this.topicForId(entries, this.entityId);
       return html`
         <section class="help-workspace help-workspace--entity">
           <main class="help-entries">
@@ -326,10 +354,10 @@ export class HelpWorkspace extends LitElement {
                       (item, index) => html`
                         <details
                           class="help-entry ${
-                            String(item.helpSubcategoryId ?? "") === this.selectedTopic ? "selected" : ""
+                            item === this.topicForId(entries, this.selectedTopic) ? "selected" : ""
                           }"
                           ?open=${
-                            String(item.helpSubcategoryId ?? "") === this.selectedTopic ||
+                            item === this.topicForId(entries, this.selectedTopic) ||
                             (index === 0 && entries.length < 8)
                           }
                         >
@@ -337,9 +365,7 @@ export class HelpWorkspace extends LitElement {
                             <span>${this.text(item.title) || "—"}</span>
                             ${(() => {
                               const entry = (this.mode === "tips" ? this.unionTips : this.unionHelp)?.entries.get(item);
-                              return entry?.exclusive
-                                ? serverAvailabilityBadge([entry.exclusive], this.locale)
-                                : nothing;
+                              return catalogServerBadge(entry, this.locale);
                             })()}
                             <svg class="material-icon" width="20" height="20">
                               <use href="/icons.svg#expand_more"></use>

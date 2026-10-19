@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { withSearchMetadata } from "./search-metadata.mjs";
+import { assertPublicStaticDocumentPath, withSearchMetadata } from "./search-metadata.mjs";
 import { existsSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -44,6 +44,7 @@ function withServerFilter(html, sourcePath) {
 const files = readdirSync(output, { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile() && entry.name.endsWith(".html"))
   .map((entry) => path.relative(output, path.join(entry.parentPath, entry.name)));
+for (const sourcePath of files) assertPublicStaticDocumentPath(sourcePath);
 // Hoisted module entries otherwise discover their shared chunks one import
 // level (one round trip) at a time.
 console.log(`added module preloads to ${await addModulePreloads(output, files)} documents`);

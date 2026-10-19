@@ -34,7 +34,7 @@ export async function catalogPageData(
     payload.sourceId !== identity.sourceId
   )
     throw new Error(`Page projection identity differs: ${server}/${resource}/${id}`);
-  if (["jp", "intl", "intl-test"].includes(server) && isCrossCatalogResource(resource)) {
+  if (["jp", "intl"].includes(server) && isCrossCatalogResource(resource)) {
     const pin = await staticCatalogRelease(server);
     if (pin.releaseId === payload.releaseId && pin.server === payload.server && pin.sourceId === payload.sourceId) {
       const union = await loadStaticCrossServerEntry(resource, server as OfficialCatalogServer, locale, id);

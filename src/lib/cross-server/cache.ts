@@ -1,7 +1,8 @@
 import { fetchCurrentTeamBuilderIdentity } from "../team-builder/data/fetch";
 import type { CrossCatalogIdentity, CrossCatalogResource, OfficialCatalogServer } from "./catalog";
 import { crossCatalogApi } from "./definitions";
-import { visibleContentServers } from "../test-server-visibility";
+import { visibleContentServers } from "../content-visibility";
+import { isPublicReleaseServer } from "../temporary-public-routing";
 
 interface Pending {
   controller: AbortController;
@@ -105,8 +106,14 @@ export class CrossServerPublicCache {
   }
 
   async readIdentity(server: OfficialCatalogServer, signal?: AbortSignal, revalidate = false): Promise<CrossCatalogIdentity> {
-    if (!visibleContentServers([server]).length) throw new Error("Test server content is disabled");
+    if (!visibleContentServers([server]).length) throw new Error("Source access is unavailable");
     signal?.throwIfAborted();
+    if (!isPublicReleaseServer(server)) {
+      const value = await fetchCurrentTeamBuilderIdentity(server, signal, this.fetcher);
+      signal?.throwIfAborted();
+      if (!visibleContentServers([server]).length) throw new Error("Source access is unavailable");
+      return { ...value, server };
+    }
     const current = this.identities.get(server);
     const age = current ? this.now() - current.observedAt : Infinity;
     const load = async (sharedSignal: AbortSignal) => {
@@ -129,13 +136,14 @@ export class CrossServerPublicCache {
   }
 
   private async readDocument(resource: CrossCatalogResource, identity: CrossCatalogIdentity, id?: string, signal?: AbortSignal, ids?: readonly string[]) {
-    if (!visibleContentServers([identity.server]).length) throw new Error("Test server content is disabled");
+    if (!visibleContentServers([identity.server]).length) throw new Error("Source access is unavailable");
     signal?.throwIfAborted();
     const path = `/api/v1/servers/${identity.server}/${crossCatalogApi(resource)}${id === undefined ? "" : `/${encodeURIComponent(id)}`}`;
     const query = new URLSearchParams({ release: identity.releaseId });
     for (const value of ids || []) query.append("id", value);
     const key = JSON.stringify([identity.server, identity.releaseId, identity.sourceId, path, ids || []]);
-    const cached = this.documents.get(key);
+    const publicSource = isPublicReleaseServer(identity.server);
+    const cached = publicSource ? this.documents.get(key) : undefined;
     if (cached) {
       this.documents.delete(key);
       this.documents.set(key, cached);
@@ -143,25 +151,28 @@ export class CrossServerPublicCache {
       signal?.throwIfAborted();
       return value;
     }
-    return this.observe(key, async (sharedSignal) => {
+    const load = async (requestSignal?: AbortSignal) => {
       const fetcher = this.fetcher;
       const response = await fetcher(`${path}?${query}`, {
-        // The URL pins one release, so the HTTP cache may answer it.
-        signal: sharedSignal,
+        // Public pinned URLs may use the HTTP cache.
+        signal: requestSignal,
+        ...(publicSource ? {} : { cache: "no-store" as const }),
       });
       if (!response.ok) throw new Error(`Cross-server data unavailable:${path}/${response.status}`);
       if (response.headers.get("x-haneoka-release-id") !== identity.releaseId ||
           response.headers.get("x-haneoka-source-id") !== identity.sourceId)
         throw new Error("Cross-server data release mismatch");
       const text = await response.text();
-      sharedSignal.throwIfAborted();
+      requestSignal?.throwIfAborted();
       const value: unknown = JSON.parse(text);
       if (!object(value) && !(id === undefined && Array.isArray(value))) throw new Error("Cross-server data must be an object");
       if (id !== undefined && !Object.keys(value).length) throw new Error("Cross-server entity is empty");
-      sharedSignal.throwIfAborted();
-      this.store(key, value, new TextEncoder().encode(text).byteLength);
+      requestSignal?.throwIfAborted();
+      if (publicSource) this.store(key, value, new TextEncoder().encode(text).byteLength);
+      else if (!visibleContentServers([identity.server]).length) throw new Error("Source access is unavailable");
       return value;
-    }, signal);
+    };
+    return publicSource ? this.observe(key, load, signal) : load(signal);
   }
 
   readCollection(resource: CrossCatalogResource, identity: CrossCatalogIdentity, signal?: AbortSignal) {

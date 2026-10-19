@@ -1,4 +1,5 @@
 import { DEFAULT_LOCALE, isLocale } from "@haneoka/i18n";
+import { CONTENT_SOURCE_IDS, contentSourceFamily } from "./content-access-state.ts";
 import {
   homePath,
   isStoryMode,
@@ -15,16 +16,15 @@ export const isPublicReleaseServer = (value: unknown): value is PublicReleaseSer
   value === "jp" || value === "intl";
 
 export function formalServerForHidden(value: unknown): PublicReleaseServer | undefined {
-  if (value === "jp-cbt") return "jp";
-  if (value === "intl-cbt" || value === "gl-cbt") return "intl";
-  return undefined;
+  if (typeof value !== "string" || isPublicReleaseServer(value) || !CONTENT_SOURCE_IDS.includes(value)) return undefined;
+  return contentSourceFamily(value);
 }
 
 export const isTemporarilyHiddenRoute = (route: string): boolean =>
   route === "/catalog/anon-tokyo" || route.startsWith("/catalog/anon-tokyo/");
 
 /**
- * Website-only temporary redirects. A CBT native id has no verified formal
+ * Website-only temporary redirects. A legacy native id has no verified formal
  * identity here, so entity links land on the corresponding collection.
  * Historical API/raw paths and the original route registry are untouched.
  */
