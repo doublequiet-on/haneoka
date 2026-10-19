@@ -10,7 +10,7 @@ import fs from "node:fs";
 import nodePath from "node:path";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
-import { staticBuildJson } from "../server/static-input-store";
+import { CapturedInputError, staticBuildJson } from "../server/static-input-store";
 import { openReleaseCatalog, ReleaseCatalogError, type ReleaseCatalog } from "../server/release-catalog";
 import { publicStampManifest } from "./stamp-maker/public-manifest";
 
@@ -564,7 +564,10 @@ export async function fetchStaticCatalog(
   try {
     return await fetchJson(path, server, pinned);
   } catch (error) {
-    if (path !== "stamps/textless" || !(error instanceof StaticCatalogHttpError) || error.status !== 404)
+    const notFound = error instanceof StaticCatalogHttpError && error.status === 404
+      || error instanceof CapturedInputError
+        && error.message.startsWith(`Static catalog request failed for ${server}/stamps/textless (404) {`);
+    if (path !== "stamps/textless" || !notFound)
       throw error;
     if (!(await fetchStaticReleaseEntry("runtime/stamp-maker/manifest.json", server, pinned))) throw error;
     const [manifest, stamps] = await Promise.all([
