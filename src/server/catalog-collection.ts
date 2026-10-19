@@ -51,7 +51,7 @@ export function catalogCollectionData(resource: string, server: ReleaseServer, l
 async function loadCollection(resource: string, server: ReleaseServer, locale: Locale): Promise<CatalogCollectionPayload> {
   const identity = await staticCatalogRelease(server);
   const collection = resource === "song-meta" ? "songs" : resource;
-  const cross = ["jp", "intl", "intl-test"].includes(server) && isCrossCatalogResource(collection);
+  const cross = ["jp", "intl"].includes(server) && isCrossCatalogResource(collection);
   const catalogs = cross
     ? await loadStaticCrossServerCatalogs([collection, "characters", "bands"], server as OfficialCatalogServer, locale)
     : undefined;
@@ -71,6 +71,7 @@ async function loadCollection(resource: string, server: ReleaseServer, locale: L
   const songMeta: CatalogCollectionPayload["songMeta"] = {};
   const chartRateTables: NonNullable<CatalogCollectionPayload["chartRates"]> = {};
   await Promise.all(Object.values(catalogs?.[collection]?.identities || { [server]: identity }).map(async (pin) => {
+    if (!pin) return;
     sourceMarks[pin.server as OfficialCatalogServer] = await fetchStaticCatalog("ui-marks", pin.server, pin) as Record<string, string>;
     if (collection === "songs") songMeta[pin.server as OfficialCatalogServer] = await fetchStaticCatalog("song-meta", pin.server, pin) as Row;
     if (resource === "song-meta") chartRateTables[pin.server as OfficialCatalogServer] = await chartRates(pin.server as ReleaseServer);

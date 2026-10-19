@@ -1,4 +1,4 @@
-import { staticCatalogRelease, fetchStaticCatalog, fetchStaticCatalogBatch, primeStaticCatalogBatch, type StaticCatalogRelease } from "../static-catalog-source";
+import { assertStaticServer, staticCatalogRelease, fetchStaticCatalog, fetchStaticCatalogBatch, primeStaticCatalogBatch, type StaticCatalogRelease } from "../static-catalog-source";
 import { loadCrossServerCatalog } from "./load";
 import { loadCrossServerCatalogs } from "./bundle";
 import type { CrossCatalogResource, OfficialCatalogServer } from "./catalog";
@@ -36,8 +36,9 @@ function collectionWithMissionFields(resource: CrossCatalogResource, identity: S
 }
 
 export function loadStaticCrossServerCatalogs(resources: readonly CrossCatalogResource[], selectedServer: OfficialCatalogServer, locale: string) {
+  assertStaticServer(selectedServer);
   return loadCrossServerCatalogs(resources, {
-    selectedServer, locale, servers: selectedServer === "intl-test" ? ["jp", "intl", "intl-test"] : ["jp", "intl"],
+    selectedServer, locale, servers: ["jp", "intl"],
     reader: {
       async readIdentity(server) { return { ...await staticCatalogRelease(server), server }; },
       readCollection: (name, identity) => collectionWithMissionFields(name, identity),
@@ -48,9 +49,10 @@ export function loadStaticCrossServerCatalogs(resources: readonly CrossCatalogRe
 
 /** Build adapter reuses the configured current-release pin and existing collection cache. */
 export function loadStaticCrossServerCatalog(resource: CrossCatalogResource, selectedServer: OfficialCatalogServer, locale: string) {
+  assertStaticServer(selectedServer);
   return loadCrossServerCatalog(resource, {
     selectedServer, locale,
-    servers: selectedServer === "intl-test" ? ["jp", "intl", "intl-test"] : ["jp", "intl"],
+    servers: ["jp", "intl"],
     reader: {
       async readIdentity(server) {
         const identity = await staticCatalogRelease(server);
@@ -64,8 +66,9 @@ export function loadStaticCrossServerCatalog(resource: CrossCatalogResource, sel
 
 /** Entity pages inspect one original ID, rather than rebuilding the entire union per page. */
 export function loadStaticCrossServerEntry(resource: CrossCatalogResource, selectedServer: OfficialCatalogServer, locale: string, id: string) {
+  assertStaticServer(selectedServer);
   return loadCrossServerCatalog(resource, {
-    selectedServer, locale, withDependencies: false, servers: selectedServer === "intl-test" ? ["jp", "intl", "intl-test"] : ["jp", "intl"],
+    selectedServer, locale, withDependencies: false, servers: ["jp", "intl"],
     reader: {
       async readIdentity(server) { return { ...await staticCatalogRelease(server), server }; },
       async readCollection(name, identity) {

@@ -1,18 +1,24 @@
 import { localizedText, UI_LOCALES, type JsonRecord } from "../../lit/shared/catalog";
-import { showTestServerContent } from "../test-server-visibility";
+import { visibleContentServers } from "../content-visibility";
+import { CONTENT_SOURCE_IDS } from "../content-access-state";
+import type { CrossCatalogDTO, CrossCatalogEntry } from "../cross-server/catalog";
+import { pinCrossCatalogValue } from "../cross-server/presentation";
+import { isFormalCatalogSource } from "../cross-server/content";
 
 /** International multilingual assets are shared by every page-server selection. */
 export const STAMP_SOURCE_SERVER = "intl";
-export const STAMP_SOURCE_SERVERS = ["intl", "intl-test"] as const;
+export const STAMP_SOURCE_SERVERS = CONTENT_SOURCE_IDS;
 export function stampSourceServers(): readonly string[] {
-  return showTestServerContent() ? STAMP_SOURCE_SERVERS : [STAMP_SOURCE_SERVER];
+  return [STAMP_SOURCE_SERVER, ...visibleContentServers(STAMP_SOURCE_SERVERS).filter((server) => server !== STAMP_SOURCE_SERVER)];
 }
 export function textlessManifestUrl(server = STAMP_SOURCE_SERVER): string {
-  return `/runtime/${server}/stamp-maker/manifest.json`;
+  return `/api/v1/servers/${encodeURIComponent(server)}/stamps/textless`;
 }
 
 export interface StampChoice {
   id: string;
+  nativeId?: string;
+  sourceEntry?: CrossCatalogEntry;
   resourceName: string;
   label: string;
   sources: string[];
@@ -39,6 +45,7 @@ export interface TextlessStampManifest {
       nativeOriginal?: { path: string; sha256?: string };
       exportCandidate?: { path: string; sha256?: string };
     };
+    server?: string;
   }[];
 }
 
@@ -90,6 +97,27 @@ export function stampChoices(catalog: JsonRecord, locale: string, imageLanguage 
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
 
+/** The shared entity merge owns source identity; the editor only adapts its image choices. */
+export function stampChoicesFromCrossCatalog(
+  dto: CrossCatalogDTO, locale: string, imageLanguage = "", activeSources: Readonly<Record<string, string>> = {},
+): StampChoice[] {
+  if (dto.resource !== "stamps") throw new TypeError("Expected a stamp catalogue");
+  const counts = new Map<string, number>();
+  for (const entry of dto.entries) {
+    const id = entry.perServer[entry.displayServer]!.id;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return dto.entries.flatMap(entry => {
+    const preferred = activeSources[entry.key];
+    const server = preferred && entry.perServer[preferred] ? preferred : entry.displayServer;
+    const variant = entry.perServer[server];
+    if (!variant) return [];
+    const choice = stampChoices({ [variant.id]: pinCrossCatalogValue(variant.row, variant.identity) }, locale, imageLanguage)[0];
+    return choice ? [{ ...choice, id: counts.get(variant.id) === 1 ? variant.id : `${server}:${variant.id}`,
+      nativeId: variant.id, sourceEntry: { ...entry, displayServer: server } }] : [];
+  });
+}
+
 export function textlessChoices(originals: StampChoice[], value: unknown, server: string): StampChoice[] {
   if (!value || typeof value !== "object") return [];
   const manifest = value as Partial<TextlessStampManifest>;
@@ -109,23 +137,31 @@ export function textlessChoices(originals: StampChoice[], value: unknown, server
         ? { width: size[0], height: size[1] }
         : undefined;
     const key = record.stampId || record.id;
-    if (source && !entries.has(key)) entries.set(key, { source, effectiveSize });
+    if (source) {
+      const value = { source, effectiveSize };
+      if (record.server) entries.set(`${record.server}:${key}`, value);
+      if (!entries.has(key)) entries.set(key, value);
+    }
   }
   return originals.flatMap((stamp) => {
-    const entry = entries.get(stamp.id) ?? entries.get(stamp.resourceName);
+    const id = stamp.nativeId ?? stamp.id, server = stamp.sourceEntry?.displayServer;
+    const entry = server ? entries.get(`${server}:${id}`) ?? entries.get(`${server}:${stamp.resourceName}`)
+      : entries.get(id) ?? entries.get(stamp.resourceName);
     return entry ? [{ ...stamp, sources: [entry.source], effectiveSize: entry.effectiveSize }] : [];
   });
 }
 
 /** Both manifests use numeric stamp identity; the first published derivative stays selected. */
-export function mergeTextlessStampManifests(values: readonly unknown[]): TextlessStampManifest {
+export function mergeTextlessStampManifests(values: readonly unknown[], catalog?: CrossCatalogDTO): TextlessStampManifest {
   const records = new Map<string, TextlessStampManifest["records"][number]>();
   for (const value of values) {
     const manifest = value as Partial<TextlessStampManifest> | null;
     if (manifest?.schema !== "haneoka-textless-stamps-v1" || !STAMP_SOURCE_SERVERS.includes(manifest.server as typeof STAMP_SOURCE_SERVERS[number]) || !Array.isArray(manifest.records)) continue;
     for (const record of manifest.records) {
-      const key = record.stampId || record.id;
-      if (record.publishable && !records.has(key)) records.set(key, record);
+      const id = record.stampId || record.id, server = manifest.server!;
+      const visible = isFormalCatalogSource(server) || catalog?.entries.some(entry => entry.perServer[server]?.id === id);
+      const key = `${server}:${id}`;
+      if (visible && record.publishable && !records.has(key)) records.set(key, { ...record, server });
     }
   }
   return { schema: "haneoka-textless-stamps-v1", server: STAMP_SOURCE_SERVER, records: [...records.values()] };

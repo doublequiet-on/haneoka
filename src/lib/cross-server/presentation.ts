@@ -1,6 +1,6 @@
 import { crossServerDisplayRow, type CrossCatalogDTO, type CrossCatalogEntry, type CrossCatalogIdentity, type CrossCatalogRow } from "./catalog";
 
-/** Pin media to its actual source release, including nested preview/runtime records. */
+/** Pin media to its actual source release, including nested runtime records. */
 export function pinCrossCatalogValue(value: unknown, identity: CrossCatalogIdentity): unknown {
   if (typeof value === "string" && /^\/(?:assets|runtime|objects)\//u.test(value)) {
     const url = new URL(value, "https://asset.invalid");
@@ -28,6 +28,7 @@ export function crossCatalogPresentation(dto: CrossCatalogDTO) {
     }
     const pinned = pinCrossCatalogValue(row, variant.identity) as CrossCatalogRow;
     entries.set(pinned, entry);
+    byId.set(`${variant.identity.server}:${variant.id}`, entry);
     if (!byId.has(variant.id) || entry.inSelectedServer) byId.set(variant.id, entry);
     return pinned;
   });

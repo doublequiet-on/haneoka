@@ -18,6 +18,7 @@ import { getAuthSession } from "./auth";
 import { communityAccessState } from "./access";
 import { avatarUrlSelect } from "./avatar-url";
 import { inspectCommunityText } from "./moderation";
+import { effectiveUserRole, hasUserCapability, type MemberTier, type StoredUserRole, type UserRole } from "../src/lib/user-roles";
 
 const PREFIX = "/api/v1/community/playlists";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -32,7 +33,7 @@ const MUSIC_ID_PATTERN = /^[1-9][0-9]{0,11}$/u;
 
 type JsonObject = Record<string, unknown>;
 type Session = NonNullable<Awaited<ReturnType<typeof getAuthSession>>>;
-type Access = { ok: false; response: Response } | { ok: true; session: Session; role: string };
+type Access = { ok: false; response: Response } | { ok: true; session: Session; role: UserRole };
 
 interface TrackRef {
   provider: "our-notes" | "bestdori";
@@ -197,10 +198,10 @@ const requireWriter = async (request: Request, env: Env): Promise<Access> => {
     if (!success)
       return { ok: false, response: error(request, 429, "rate_limit_exceeded", "Too many community writes") };
   }
-  const role = await env.DB.prepare("SELECT role FROM community_profile WHERE user_id = ?")
+  const role = await env.DB.prepare("SELECT role, member_tier AS memberTier FROM community_profile WHERE user_id = ?")
     .bind(session.user.id)
-    .first<{ role: string }>();
-  return { ok: true, session, role: role?.role ?? "member" };
+    .first<{ role: StoredUserRole; memberTier: MemberTier }>();
+  return { ok: true, session, role: effectiveUserRole(role?.role ?? "member", role?.memberTier) };
 };
 
 /** Rows a viewer may read: public playlists of active members, and their own. */
@@ -505,7 +506,7 @@ const deletePlaylist = async (request: Request, env: Env, id: string): Promise<R
   const access = await requireWriter(request, env);
   if (!access.ok) return access.response;
   const current = await ownedPlaylist(env, id);
-  const moderator = access.role === "moderator" || access.role === "admin";
+  const moderator = hasUserCapability(access.role, "community.moderate");
   if (!current || (current.ownerId !== access.session.user.id && !moderator))
     return error(request, 404, "playlist_not_found", "Playlist not found");
   const now = Date.now();

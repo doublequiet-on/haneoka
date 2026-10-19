@@ -1,4 +1,5 @@
 import { withCommunityReadTiming } from "./community-read-timing";
+import { isStaffRole, type StaffRole } from "../src/lib/user-roles";
 import { handleAuthRequest } from "./auth";
 import { handleAdminRequest } from "./admin";
 import { handleCommunityForumsRequest } from "./community-forums";
@@ -22,7 +23,7 @@ async function viewer(request: Request, env: Env) {
   const session = object(await sessionResponse.json());
   const user = object(session?.user);
   let userId = typeof user?.id === "string" ? user.id : "";
-  let staffRole: "admin" | "moderator" | null = null;
+  let staffRole: StaffRole | null = null;
   if (userId) {
     if (staffResponse.status === 401) userId = "";
     else if (staffResponse.status !== 403) {
@@ -30,7 +31,7 @@ async function viewer(request: Request, env: Env) {
       const staff = object(object(await staffResponse.json())?.session);
       if (object(staff?.user)?.id !== userId)
         return { response: json({ error: { code: "community_identity_changed" } }, 409) };
-      if (staff?.role === "admin" || staff?.role === "moderator") staffRole = staff.role;
+      if (isStaffRole(staff?.role)) staffRole = staff.role;
     }
   }
   return {

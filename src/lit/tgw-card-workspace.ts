@@ -1,3 +1,5 @@
+import { canUseStaticCatalogScope } from "../lib/content-visibility";
+import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 /**
  * T.G.W CARD — the game's membership benefits ladder.
  *
@@ -16,7 +18,7 @@ import { fetchCrossServerCatalog } from "../lib/cross-server/fetch";
 import { crossServerPublicCache } from "../lib/cross-server/cache";
 import { crossCatalogPresentation, pinCrossCatalogValue, type CrossCatalogPresentation } from "../lib/cross-server/presentation";
 import { OFFICIAL_CATALOG_SERVERS, type OfficialCatalogServer } from "../lib/cross-server/catalog";
-import { serverAvailabilityBadge } from "./shared/server-availability";
+import { catalogServerBadge } from "./shared/server-availability";
 import { syncEntityNavigation, updateEntityHeading } from "../lib/detail-navigation";
 import { entityHref, parseResourceRoute, type ReleaseServer } from "../lib/resource-route";
 import {
@@ -124,7 +126,17 @@ export class TgwCardWorkspace extends LitElement {
     this.selectedRank = entities.some((tier) => tier.rank === hashed) ? hashed : entities[0]?.rank || 0;
     this.phase = "ready";
   }
+  private contentAccessChanged = () => {
+    this.request?.abort();
+    this.request = undefined;
+    this.loading?.cancel();
+    this.unionTiers = undefined;
+    this.tiers = [];
+    this.pointName = [];
+    void this.load();
+  };
   connectedCallback() {
+    addEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     super.connectedCallback();
     this.locale = preferredLocale(this.locale);
     const route = parseResourceRoute(location.pathname);
@@ -136,6 +148,7 @@ export class TgwCardWorkspace extends LitElement {
     void this.load();
   }
   disconnectedCallback() {
+    removeEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     this.request?.abort();
     this.request = undefined;
     this.loading?.cancel();
@@ -157,12 +170,20 @@ export class TgwCardWorkspace extends LitElement {
     const key = ({ "zh-CN": "zh-Hans", "zh-TW": "zh-Hant" } as Record<string, string>)[this.locale] || this.locale;
     return typeof (localized as JsonRecord)[key] === "string" ? String((localized as JsonRecord)[key]) : source;
   }
-  private entityLink(id: string) {
+  private tierEntry(tier: Tier) {
+    return this.unionTiers?.entries.get(tier) || this.unionTiers?.byId.get(`${this.server}:${tier.id}`);
+  }
+  private selectedTier(): Tier | undefined {
+    const matches = this.tiers.filter(tier => tier.rank === this.selectedRank);
+    const own = matches.filter(tier => this.tierEntry(tier)?.perServer[this.server]);
+    return own.length === 1 ? own[0] : matches.length === 1 ? matches[0] : undefined;
+  }
+  private entityLink(tier: Tier) {
     return entityHref({
-      server: this.unionTiers?.byId.get(id)?.displayServer || this.server,
+      server: this.tierEntry(tier)?.displayServer || this.server,
       locale: this.locale as Locale,
       kind: "tgw-card",
-      id,
+      id: tier.id,
     });
   }
   private syncEntityHeading() {
@@ -173,7 +194,7 @@ export class TgwCardWorkspace extends LitElement {
   }
   private async load() {
     const page = readPageData<CatalogSystemPayload>(this);
-    if (page?.schema === "haneoka-catalog-system-v1" && page.kind === "tgw-card" && (page.entityId || "") === this.entityId) {
+    if (page?.schema === "haneoka-catalog-system-v1" && page.kind === "tgw-card" && (this.entityId || canUseStaticCatalogScope()) && (page.entityId || "") === this.entityId) {
       this.preparePage(page, this.locale, location.hash);
       return;
     }
@@ -213,6 +234,7 @@ export class TgwCardWorkspace extends LitElement {
             }
           }
         }));
+        if (controller.signal.aborted || this.request !== controller) return;
         ({ entities, pointName } = this.applyCatalog(dto, full));
       } else {
         const document = await fetchJson<JsonRecord>(catalogUrl("tgw-card", "", this.server), {
@@ -366,12 +388,13 @@ export class TgwCardWorkspace extends LitElement {
     const fallback = { normal: "Normal", gold: "Gold", platinum: "Platinum", black: "Black" } as const;
     return this.text(keys[kind], fallback[kind]);
   }
-  private select(event: MouseEvent, rank: number) {
+  private select(event: MouseEvent, tier: Tier) {
     // Plain clicks select in place; modified clicks keep the link behaviour.
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if ((this.tierEntry(tier)?.displayServer || this.server) !== this.server) return;
     event.preventDefault();
-    this.selectedRank = rank;
-    history.replaceState(history.state, "", `${location.pathname}${location.search}#tgw-rank-${rank}`);
+    this.selectedRank = tier.rank;
+    history.replaceState(history.state, "", `${location.pathname}${location.search}#tgw-rank-${tier.rank}`);
   }
   private picker() {
     const groups = new Map<ReturnType<TgwCardWorkspace["cardTier"]>, Tier[]>();
@@ -399,10 +422,10 @@ export class TgwCardWorkspace extends LitElement {
                   (tier) => html`
                     <a
                       class="tgw-rank-button tabular"
-                      href=${this.entityLink(tier.id)}
-                      aria-current=${tier.rank === this.selectedRank ? "true" : nothing}
+                      href=${this.entityLink(tier)}
+                      aria-current=${tier === this.selectedTier() ? "true" : nothing}
                       aria-label=${this.name(tier.title)}
-                      @click=${(event: MouseEvent) => this.select(event, tier.rank)}
+                      @click=${(event: MouseEvent) => this.select(event, tier)}
                     >
                       ${pad(tier.rank)}
                     </a>
@@ -434,7 +457,7 @@ export class TgwCardWorkspace extends LitElement {
             <img class="tgw-art__number" src=${String(tier.image || "")} alt="" decoding="async" />
           </figure>
           <div class="tgw-summary__copy">
-            <h2 class="tgw-summary__title" id=${`tgw-rank-title-${tier.rank}`}>${this.name(tier.title)}${(() => { const entry = this.unionTiers?.entries.get(tier); return entry?.exclusive ? serverAvailabilityBadge([entry.exclusive], this.locale) : nothing; })()}</h2>
+            <h2 class="tgw-summary__title" id=${`tgw-rank-title-${tier.rank}`}>${this.name(tier.title)}${(() => { const entry = this.unionTiers?.entries.get(tier); return catalogServerBadge(entry, this.locale); })()}</h2>
             <span class="tgw-summary__tier">${this.tierLabel(kind)}</span>
             <dl class="tgw-summary__points">
               <dt>${this.text("requiredPoints", "Total points required")}</dt>
@@ -527,6 +550,7 @@ export class TgwCardWorkspace extends LitElement {
     `;
   }
   render() {
+    const selected = this.selectedTier();
     return html`
       <section class="page tgw-card" aria-label="T.G.W CARD">
         ${
@@ -542,7 +566,7 @@ export class TgwCardWorkspace extends LitElement {
               : this.tiers.length
                 ? html`
                     ${this.entityId || this.tiers.length < 2 ? nothing : this.picker()}
-                    ${this.tier(this.tiers.find((tier) => tier.rank === this.selectedRank) || this.tiers[0]!)}
+                    ${selected ? this.tier(selected) : nothing}
                   `
                 : emptyState({ title: this.text("empty", "No rank data in this release"), icon: "credit_card" })
         }

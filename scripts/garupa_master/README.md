@@ -5,8 +5,8 @@ This package fetches the Japanese game server's encrypted
 described by the current client, and builds the web projections used by
 the playlist pages.
 
-It is separate from `scripts/extract/master.py`, which handles the NFO/CBT
-package format under `assets/Master/*.bin`.
+It is separate from `scripts/extract/master.py`, which handles packaged Master
+data under `assets/Master/*.bin`.
 
 ## Local decode
 

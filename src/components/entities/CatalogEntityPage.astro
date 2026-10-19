@@ -58,7 +58,7 @@ const seoTitleValues = Object.fromEntries(
 ) as Record<Locale, string>;
 const payload = await catalogEntityData(server,page.resource,page.id) as EntityPayload | undefined;
 if(!payload)throw new Error(`Missing page data: ${server}/${page.resource}/${page.id}`);
-if (["jp", "intl", "intl-test"].includes(server) && isCrossCatalogResource(page.resource)) {
+if (["jp", "intl"].includes(server) && isCrossCatalogResource(page.resource)) {
   const pin = await staticCatalogRelease(server);
   if (pin.releaseId === payload.releaseId && pin.server === payload.server && pin.sourceId === payload.sourceId) {
     const union = await loadStaticCrossServerEntry(page.resource, server as OfficialCatalogServer, locale, page.id);

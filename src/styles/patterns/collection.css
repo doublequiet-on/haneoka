@@ -240,13 +240,13 @@
   z-index: 1;
   right: 8px;
   bottom: 8px;
-  width: 18px;
-  height: 18px;
+  width: var(--server-mark-size, 18px);
+  height: var(--server-mark-size, 18px);
 }
 .tile__server-mark > img {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: var(--server-mark-size, 18px);
+  height: var(--server-mark-size, 18px);
   object-fit: contain;
 }
 .tile__mark--bottom-start {

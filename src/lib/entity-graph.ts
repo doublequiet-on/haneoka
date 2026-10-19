@@ -22,8 +22,8 @@ import {
 } from "./static-catalog-source";
 import { searchableCatalogPages } from "./searchable-catalog";
 import { searchableStoryPages } from "./searchable-stories";
-import { RELEASE_SERVERS, type ReleaseServer } from "./resource-route";
-import { PUBLIC_RELEASE_SERVERS } from "./temporary-public-routing";
+import type { ReleaseServer } from "./resource-route";
+import { PUBLIC_RELEASE_SERVERS, isPublicReleaseServer } from "./temporary-public-routing";
 
 export async function staticCatalogPageServers(configuredOnly = false): Promise<ReleaseServer[]> {
   if (!configuredOnly) return [...PUBLIC_RELEASE_SERVERS];
@@ -925,7 +925,7 @@ export function staticResourceServers(): ReleaseServer[] {
     .filter(Boolean);
   const servers = [...new Set(requested?.length ? requested : ["intl"])];
   for (const server of servers)
-    if (!RELEASE_SERVERS.includes(server as ReleaseServer))
+    if (!isPublicReleaseServer(server))
       throw new Error(`Unsupported static resource server: ${server}`);
   return servers as ReleaseServer[];
 }

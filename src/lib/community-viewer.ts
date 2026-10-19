@@ -1,10 +1,11 @@
 import { fetchJson, JsonResponseError } from "../lit/shared/catalog";
+import { isStaffRole, type StaffRole } from "./user-roles";
 
 type Value = Record<string, unknown>;
 export interface CommunityViewer {
   session: Value | null;
   userId: string;
-  staffRole: "admin" | "moderator" | null;
+  staffRole: StaffRole | null;
   realm: string;
 }
 
@@ -56,7 +57,7 @@ export async function readCommunityViewer(signal: AbortSignal): Promise<Communit
       const staff = result.value.session as Value | undefined;
       const staffId = (staff?.user as Value | undefined)?.id;
       if (staffId !== userId) throw new CommunityRealmChanged();
-      if (staff?.role === "admin" || staff?.role === "moderator") staffRole = staff.role;
+      if (isStaffRole(staff?.role)) staffRole = staff.role;
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof JsonResponseError && error.status === 401)

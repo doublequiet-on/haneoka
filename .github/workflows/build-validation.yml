@@ -6,16 +6,16 @@ on:
   workflow_dispatch:
     inputs:
       server:
-        description: Build source ("all" includes retained sources on manual runs)
+        description: Build source ("all" includes only daily sources)
         required: true
         default: all
         type: choice
         options:
           - all
           - intl-test
-          - build-01
-          - build-02
-          - build-03
+          - jp-test-01
+          - jp-test-02
+          - jp-test-03
           - jp-cbt
           - intl-cbt
       github_environment:
@@ -78,7 +78,7 @@ jobs:
           SCHEDULED: ${{ github.event_name == 'schedule' }}
         run: |
           extra=()
-          if [[ "$SCHEDULED" == "true" ]]; then extra+=(--scheduled); fi
+          if [[ "$SCHEDULED" == "true" || "$SERVER_SELECTION" == "all" ]]; then extra+=(--scheduled); fi
           servers="$(python -m core.server_policy --server "$SERVER_SELECTION" --audience restricted "${extra[@]}")"
           echo "servers=$servers" >> "$GITHUB_OUTPUT"
 
@@ -95,10 +95,10 @@ jobs:
     uses: ./.github/workflows/resource-pipeline-run.yml
     with:
       audience: restricted
-      api_egress: ${{ startsWith(matrix.server, 'build-') }}
-      github_environment: ${{ inputs.github_environment || (startsWith(matrix.server, 'build-') && matrix.server) || format('resource-{0}', matrix.server) }}
+      api_egress: ${{ startsWith(matrix.server, 'jp-test-') }}
+      github_environment: ${{ inputs.github_environment || format('resource-{0}', matrix.server) }}
       server: ${{ matrix.server }}
-      package_r2_key: ${{ inputs.package_r2_key }}
+      package_r2_key: ${{ inputs.package_r2_key || vars.VALIDATION_PACKAGE_KEY || '' }}
       source_id: ${{ inputs.source_id }}
       resume_stage_run_id: ${{ inputs.resume_stage_run_id }}
       ktx2: ${{ github.event_name == 'schedule' || inputs.ktx2 || false }}

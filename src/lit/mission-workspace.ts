@@ -1,3 +1,5 @@
+import { canUseStaticCatalogScope } from "../lib/content-visibility";
+import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import { SYSTEM_LABEL_PATHS } from "../i18n/system-labels";
 
 import { LitElement, html, nothing } from "lit";
@@ -19,7 +21,7 @@ import { entityHref, parseResourceRoute, resourcePath, type ReleaseServer } from
 import { fetchCrossServerCatalog } from "../lib/cross-server/fetch";
 import { crossCatalogPresentation, type CrossCatalogPresentation } from "../lib/cross-server/presentation";
 import { OFFICIAL_CATALOG_SERVERS, type OfficialCatalogServer } from "../lib/cross-server/catalog";
-import { serverAvailabilityBadge } from "./shared/server-availability";
+import { catalogServerBadge } from "./shared/server-availability";
 import { segmented } from "./ui/controls";
 import { errorState, loadingState } from "./ui/state";
 import {
@@ -122,7 +124,7 @@ export class MissionWorkspace extends LitElement {
   }
   private applyCatalog(dto: NonNullable<CatalogSystemPayload["catalog"]>): JsonRecord {
     this.unionMissions = crossCatalogPresentation(dto);
-    return { entries: Object.fromEntries(this.unionMissions.items.map((mission) => [String(mission.id), mission])) };
+    return { entries: Object.fromEntries(this.unionMissions.items.map((mission) => [this.unionMissions!.entries.get(mission)!.key, mission])) };
   }
   private applyDocument(document: JsonRecord) {
     if (this.entityId) {
@@ -134,7 +136,16 @@ export class MissionWorkspace extends LitElement {
     }
     this.phase = "ready";
   }
+  private contentAccessChanged = () => {
+    this.request?.abort();
+    this.request = undefined;
+    this.loading?.cancel();
+    this.unionMissions = undefined;
+    this.missions = [];
+    void this.load();
+  };
   connectedCallback() {
+    addEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     super.connectedCallback();
     this.locale = preferredLocale(this.locale);
     const url = navigationDocumentUrl();
@@ -162,6 +173,7 @@ export class MissionWorkspace extends LitElement {
     if (!this.groupKey) this.openedInPlace = false;
   };
   disconnectedCallback() {
+    removeEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     clearInterval(this.clock);
     this.request?.abort();
     this.request = undefined;
@@ -186,12 +198,15 @@ export class MissionWorkspace extends LitElement {
     const key = ({ "zh-CN": "zh-Hans", "zh-TW": "zh-Hant" } as Record<string, string>)[this.locale] || this.locale;
     return typeof (localized as JsonRecord)[key] === "string" ? String((localized as JsonRecord)[key]) : source;
   }
-  private entityLink(id: string) {
+  private missionEntry(mission: Mission) {
+    return this.unionMissions?.entries.get(mission) || this.unionMissions?.byId.get(`${this.server}:${mission.id}`);
+  }
+  private entityLink(mission: Mission) {
     return entityHref({
-      server: this.unionMissions?.byId.get(id)?.displayServer || this.server,
+      server: this.missionEntry(mission)?.displayServer || this.server,
       locale: this.locale as Locale,
       kind: "missions",
-      id,
+      id: mission.id,
     });
   }
   private unionMissions?: CrossCatalogPresentation;
@@ -206,6 +221,7 @@ export class MissionWorkspace extends LitElement {
     if (
       page?.schema === "haneoka-catalog-system-v1" &&
       page.kind === "missions" &&
+      (this.entityId || canUseStaticCatalogScope()) &&
       (page.entityId || "") === this.entityId
     ) {
       this.preparePage(page, this.locale);
@@ -230,6 +246,7 @@ export class MissionWorkspace extends LitElement {
         });
         if (Object.values(dto.sourceAvailability).every((value) => value !== "loaded"))
           throw new Error("Mission catalog unavailable");
+        if (controller.signal.aborted || this.request !== controller) return;
         document = this.applyCatalog(dto);
       } else {
         this.unionMissions = undefined;
@@ -403,11 +420,11 @@ export class MissionWorkspace extends LitElement {
             (mission) => html`
               <li class="mission-row">
                 <span class="mission-row__condition">
-                  <a href=${this.entityLink(mission.id)}>${this.name(mission.title) || "—"}</a>
+                  <a href=${this.entityLink(mission)}>${this.name(mission.title) || "—"}</a>
                   ${this.goal(mission)}
                   ${(() => {
-                    const entry = this.unionMissions?.byId.get(mission.id);
-                    return entry?.exclusive ? serverAvailabilityBadge([entry.exclusive], this.locale) : nothing;
+                    const entry = this.missionEntry(mission);
+                    return catalogServerBadge(entry, this.locale);
                   })()}
                 </span>
                 <span class="mission-row__rewards">

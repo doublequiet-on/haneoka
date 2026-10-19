@@ -1,3 +1,5 @@
+import { CONTENT_SOURCE_IDS } from "../lib/content-access-state";
+import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import { withUiMarksProjection } from "../lib/ui-marks";
 import { readCommunityBootstrap } from "../lib/community-bootstrap";
 import { communityStickerPreview } from "../lib/community-markup";
@@ -11,7 +13,7 @@ import type { Catalog, MessageParams } from "@haneoka/i18n";
 import { readCommunityViewer, type CommunityViewer } from "../lib/community-viewer";
 import { resourceCollectionHref, entityHref } from "../lib/resource-route";
 import { readReleaseServer } from "../lib/release-server";
-import { showTestServerContent } from "../lib/test-server-visibility";
+import { showRestrictedContent } from "../lib/content-visibility";
 import { fetchCrossServerCatalogs, crossCatalogSeedSources } from "../lib/cross-server/fetch";
 import { homeEventDisplay } from "../lib/home-event-display";
 import { pinCrossCatalogValue } from "../lib/cross-server/presentation";
@@ -43,7 +45,7 @@ import {
 import { tile } from "./ui/tile";
 import { wavyProgress } from "./ui/wavy-progress";
 import { catalogCharacterRelationship } from "./shared/catalog-relationships";
-import { serverAvailabilityImage, serverAvailabilityLabel } from "./shared/server-availability";
+import { catalogServerMark } from "./shared/server-availability";
 import {
   crossServerDisplayRow,
   crossServerDetail,
@@ -279,6 +281,7 @@ export class HomeDashboard extends LitElement {
   private fitObserved = new Set<Element>();
   private slideTimer?: number;
   private clockTimer?: number;
+  private contentAccessChanged = () => { this.crossServerCatalogs = {}; void this.load(); };
   private visibilityListener = () => {
     if (document.visibilityState === "visible") this.requestUpdate();
   };
@@ -339,7 +342,8 @@ export class HomeDashboard extends LitElement {
     if (!this.seed || this.seed.server !== readReleaseServer()) {
       void this.load();
       void this.loadProfiles();
-    } else if (showTestServerContent()) void this.loadTestCatalogs();
+    } else if (showRestrictedContent()) void this.loadAdditionalCatalogs();
+    window.addEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     window.addEventListener("haneoka:session-changed", this.onCommunityContextChange);
     window.addEventListener("haneoka:community-posts-changed", this.onCommunityContextChange);
     window.addEventListener("haneoka:community-forums-changed", this.onCommunityContextChange);
@@ -353,6 +357,7 @@ export class HomeDashboard extends LitElement {
   disconnectedCallback() {
     this.communityLifetime.abort();
     this.communityReactions.clear();
+    window.removeEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     window.removeEventListener("haneoka:session-changed", this.onCommunityContextChange);
     window.removeEventListener("haneoka:community-posts-changed", this.onCommunityContextChange);
     window.removeEventListener("haneoka:community-forums-changed", this.onCommunityContextChange);
@@ -578,12 +583,7 @@ export class HomeDashboard extends LitElement {
   }
   private exclusiveMark(row: JsonRecord) {
     const entry = row.homeCatalogEntry as CrossCatalogEntry | undefined;
-    return entry?.exclusive
-      ? {
-          image: serverAvailabilityImage(entry.exclusive),
-          label: serverAvailabilityLabel([entry.exclusive], this.locale),
-        }
-      : null;
+    return catalogServerMark(entry, this.locale) || null;
   }
   /** The live music-type emblem, from the same source as its catalogue row. */
   private attributeMark(musicType: unknown, row?: JsonRecord) {
@@ -724,25 +724,26 @@ export class HomeDashboard extends LitElement {
     this.applyDocuments(documents);
     if (results.every((result) => result.status === "rejected")) this.phase = "error";
   }
-  private async loadTestCatalogs() {
-    if (!showTestServerContent()) return;
+  private async loadAdditionalCatalogs() {
+    if (!showRestrictedContent()) return;
     const seed = this.seed, server = this.sourceServer() as OfficialCatalogServer;
     const signal = this.catalogRequests.begin();
     try {
       const catalogs = await fetchCrossServerCatalogs(["cards", "support-cards", "songs", "characters", "bands", "events"], server, this.locale, {
-        signal, servers: ["intl-test"], initialSources: crossCatalogSeedSources(this.crossServerCatalogs),
+        signal, servers: CONTENT_SOURCE_IDS, initialSources: crossCatalogSeedSources(this.crossServerCatalogs),
       });
-      if (!this.isConnected || !this.catalogRequests.current(signal) || this.seed !== seed || !showTestServerContent()) return;
+      if (!this.isConnected || !this.catalogRequests.current(signal) || this.seed !== seed || !showRestrictedContent()) return;
       this.crossServerCatalogs = catalogs;
       if (seed) this.applyDocuments(seed.documents);
       this.requestUpdate();
-      const identity = catalogs.cards?.identities["intl-test"];
-      if (seed && identity) {
-        const response = await fetch(withUiMarksProjection(`/api/v1/servers/intl-test/ui-marks?release=${encodeURIComponent(identity.releaseId)}`), { signal });
+      for (const source of CONTENT_SOURCE_IDS.filter(id => id !== "jp" && id !== "intl")) {
+        const identity = catalogs.cards?.identities[source];
+        if (!seed || !identity) continue;
+        const response = await fetch(withUiMarksProjection(`/api/v1/servers/${encodeURIComponent(source)}/ui-marks?release=${encodeURIComponent(identity.releaseId)}`), { signal, cache: "no-store" });
         if (response.ok && response.headers.get("x-haneoka-release-id") === identity.releaseId && response.headers.get("x-haneoka-source-id") === identity.sourceId) {
           const marks = await response.json() as Record<string, string>;
-          if (this.catalogRequests.current(signal) && this.seed === seed && showTestServerContent())
-            this.seed = { ...seed, serverMarks: { ...seed.serverMarks, "intl-test": { identity, marks } } };
+          if (this.catalogRequests.current(signal) && showRestrictedContent())
+            this.seed = { ...this.seed!, serverMarks: { ...this.seed?.serverMarks, [source]: { identity, marks } } };
         }
       }
       this.requestUpdate();

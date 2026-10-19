@@ -4,6 +4,7 @@
 // Pos: [Map](L2.md)；Node 本地预览 HTTP 服务入口。
 // Effects/Dependencies: 监听、读资源和代理；HTML 注入 Web 更新基准，已封装产物核对最终引用摘要，不替代生产 D1／队列。
 import { projectUiMarks } from "../src/lib/ui-marks.ts";
+import { publicStampManifest } from "../src/lib/stamp-maker/public-manifest.ts";
 import { publishedWebBuildId, WEB_BUILD_ATTRIBUTE } from "../src/lib/web-build-id.ts";
 import fs from "node:fs";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
@@ -29,7 +30,7 @@ import {
   ReleaseLevelTemplateProvider,
   RuntimeChartDataProvider,
 } from "@haneoka/sonolus";
-import { localReleaseFile, releaseWorkspace, type ReleaseWorkspace } from "./releaseWorkspace.ts";
+import { localReleaseFile, normalizeServerId, releaseWorkspace, type ReleaseWorkspace } from "./releaseWorkspace.ts";
 import { sonolusShareRedirectTarget } from "../worker/sonolus-share.ts";
 import { announcementDocumentRequest, rewriteAnnouncementDocument } from "../src/lib/announcement-document.ts";
 import { createGunzip, createGzip } from "node:zlib";
@@ -98,21 +99,24 @@ const BESTDORI_PROVIDER_ORIGIN = configuredHttpOrigin("BESTDORI_PROVIDER_ORIGIN"
 // configured, and release data for servers without a local workspace is
 // proxied instead of answering 404.
 const CLOUD_DATA_ORIGIN = configuredHttpOrigin("CLOUD_DATA_ORIGIN");
-const APPLICATION_WORKER_ORIGIN = configuredHttpOrigin("APPLICATION_WORKER_ORIGIN") ?? CLOUD_DATA_ORIGIN;
+const AUTHORIZED_WORKER_ORIGIN = configuredHttpOrigin("APPLICATION_WORKER_ORIGIN");
+const APPLICATION_WORKER_ORIGIN = AUTHORIZED_WORKER_ORIGIN ?? CLOUD_DATA_ORIGIN;
 const APPLICATION_WORKER_BROWSER_ORIGIN =
   configuredHttpOrigin("APPLICATION_WORKER_BROWSER_ORIGIN") ??
   (configuredHttpOrigin("APPLICATION_WORKER_ORIGIN") ? undefined : CLOUD_DATA_ORIGIN);
-const RELEASE_SERVERS = (process.env.RELEASE_SERVERS ?? "intl,jp-cbt,intl-cbt")
+const PUBLIC_RELEASE_SERVERS = new Set(["jp", "intl"]);
+const RELEASE_SERVERS = (process.env.RELEASE_SERVERS ?? "jp,intl")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
 const workspaceSelectionsAreFixed = Boolean(process.env.RESOURCE_BUILD_ROOT || process.env.RESOURCE_RELEASE_ROOT);
 const WORKSPACES = new Map<string, WorkspaceSelection>(
-  RELEASE_SERVERS.map((server): [string, WorkspaceSelection] => {
+  RELEASE_SERVERS.flatMap((server): Array<[string, WorkspaceSelection]> => {
+    const pointerFile = path.join(ROOT, "data", "servers", normalizeServerId(server), "current.json");
+    if (!workspaceSelectionsAreFixed && !fs.existsSync(pointerFile)) return [];
     const workspace = releaseWorkspace(server, ROOT);
-    const pointerFile = path.join(workspace.serverRoot, "current.json");
     const pointerModifiedAt = fs.existsSync(pointerFile) ? fs.statSync(pointerFile).mtimeMs : 0;
-    return [server, { workspace, pointerFile, pointerModifiedAt }];
+    return [[server, { workspace, pointerFile, pointerModifiedAt }]];
   }),
 );
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -440,6 +444,7 @@ async function proxyApplicationWorker(
   res: ServerResponse,
   url: URL,
   origin = APPLICATION_WORKER_ORIGIN,
+  privateResponse = false,
 ): Promise<void> {
   if (!origin) {
     json(res, 503, {
@@ -461,6 +466,11 @@ async function proxyApplicationWorker(
       for (const [name, value] of Object.entries(response.headers)) {
         if (value !== undefined && !proxyExcludedHeaders.has(name.toLowerCase())) responseHeaders[name] = value;
       }
+      if (privateResponse) {
+        responseHeaders["cache-control"] = "private, no-store";
+        responseHeaders.vary = "Cookie, Authorization, Accept-Encoding";
+        delete responseHeaders["access-control-allow-origin"];
+      }
       res.writeHead(response.statusCode ?? 502, responseHeaders);
       response.once("error", (error) => res.destroy(error));
       response.once("end", resolve);
@@ -471,9 +481,9 @@ async function proxyApplicationWorker(
         json(res, 502, {
           error: {
             code: "application_worker_unreachable",
-            message: `Application Worker is unavailable: ${errorMessage(error)}`,
+            message: privateResponse ? "Application Worker is unavailable" : `Application Worker is unavailable: ${errorMessage(error)}`,
           },
-        });
+        }, privateResponse ? "private, no-store" : "no-cache", privateResponse ? { Vary: "Cookie, Authorization, Accept-Encoding" } : {});
       else res.destroy(error);
       resolve();
     });
@@ -1151,6 +1161,7 @@ function localSonolusReleaseKey(release: { readonly releaseId: string; readonly 
 function localSonolusReleases(): readonly LocalSonolusRelease[] {
   const releases = new Map<string, LocalSonolusRelease>();
   for (const configuredServer of RELEASE_SERVERS) {
+    if (!PUBLIC_RELEASE_SERVERS.has(configuredServer)) continue;
     const workspace = selectedWorkspace(configuredServer);
     if (workspace) releases.set(workspace.id, { server: workspace.id, workspace });
   }
@@ -1276,7 +1287,7 @@ const LOCAL_RELEASE_LABELS: Readonly<Record<string, { displayName: string; regio
 
 function localReleaseRegistry(): JsonObject {
   return {
-    releases: RELEASE_SERVERS.map((id) => {
+    releases: RELEASE_SERVERS.filter((server) => PUBLIC_RELEASE_SERVERS.has(server)).map((id) => {
       const label = LOCAL_RELEASE_LABELS[id];
       return {
         id,
@@ -1468,8 +1479,46 @@ function serveCanonicalResourceDocument(req: IncomingMessage, res: ServerRespons
   return true;
 }
 
+function restrictedResourceRequest(url: URL): boolean {
+  const matches = [
+    /^\/(?:assets|runtime|objects|artifacts|game-client|static-views|asset-static)\/([^/]+)/u.exec(url.pathname),
+    /^\/api\/v1\/(?:servers|team-builder|meta-reference)\/([^/]+)/u.exec(url.pathname),
+    /^\/([^/]*(?:-test|-cbt)[^/]*)\/(?:.*)?$/u.exec(url.pathname),
+  ];
+  const servers = matches.flatMap((match) => match?.[1] ? [match[1]] : []);
+  if (!/^\/api\/v1\/(?:garupa|sekai|bestdori|community)(?:\/|$)/u.test(url.pathname))
+    servers.push(...url.searchParams.getAll("server"));
+  return servers.some((server) => {
+    try { return !PUBLIC_RELEASE_SERVERS.has(decodeURIComponent(server)); }
+    catch { return true; }
+  });
+}
+
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://preview.invalid");
+  if (restrictedResourceRequest(url)) {
+    if (AUTHORIZED_WORKER_ORIGIN)
+      await proxyApplicationWorker(req, res, url, AUTHORIZED_WORKER_ORIGIN, true);
+    else {
+      res.writeHead(404, { "Cache-Control": "no-store" });
+      res.end();
+    }
+    return;
+  }
+  const normalizedPath = path.posix.normalize(decodePathPart(url.pathname) || "");
+  const stampDiagnostics = /^\/runtime\/([^/]+)\/stamp-maker\/manifest\.json$/u.exec(normalizedPath);
+  if (stampDiagnostics) {
+    if (AUTHORIZED_WORKER_ORIGIN && (req.headers.cookie || req.headers.authorization))
+      await proxyApplicationWorker(req, res, url, AUTHORIZED_WORKER_ORIGIN, true);
+    else {
+      res.writeHead(302, {
+        Location: `/api/v1/servers/${encodeURIComponent(stampDiagnostics[1]!)}/stamps/textless${url.search}`,
+        "Cache-Control": "no-store",
+      });
+      res.end();
+    }
+    return;
+  }
   url.pathname = url.pathname.replace(/^\/sonolus\/sonolus(?=\/)/u, "/sonolus");
   if (
     /^\/sonolus\/?$/u.test(url.pathname) ||
@@ -1828,6 +1877,26 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const descriptor = JSON.parse(fs.readFileSync(file, "utf8")) as JsonObject;
       const projected = projectUiMarks(descriptor);
       json(res, 200, projected, "public, max-age=0, must-revalidate", releaseResponseHeaders(workspace));
+      return;
+    }
+    if (tail.length === 2 && tail[0] === "stamps" && tail[1] === "textless") {
+      const manifest = catalogStorageManifest(workspace);
+      const resources = manifest.resources;
+      const stamps = isJsonObject(resources) ? resources.stamps : null;
+      const input = localReleaseJson(workspace, "runtime/stamp-maker/manifest.json");
+      const catalog = isJsonObject(stamps) && typeof stamps.index === "string"
+        ? localReleaseJson(workspace, stamps.index) : null;
+      if (!input || !isJsonObject(catalog)) {
+        releaseJson(res, 404, { error: { code: "resource_not_found", message: "Catalog resource not found" } }, workspace);
+        return;
+      }
+      const projected = publicStampManifest(input, {
+        server: workspace.id,
+        sourceId: String(releaseIdentity(workspace).sourceId),
+        stampIds: new Set(Object.keys(catalog)),
+      });
+      if (!isJsonValue(projected)) throw new Error("Invalid public stamp manifest");
+      releaseJson(res, 200, projected, workspace);
       return;
     }
     if (tail[0] === "sources" && tail[1] === "tree" && tail.length === 2) {

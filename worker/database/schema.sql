@@ -2297,3 +2297,26 @@ WHEN NEW.status = 'deleted'
 BEGIN
   DELETE FROM account_gacha_history WHERE user_id = NEW.user_id;
 END;
+
+ALTER TABLE community_profile ADD COLUMN member_tier TEXT NOT NULL DEFAULT 'member'
+  CHECK (member_tier IN ('member', 'regular', 'trusted', 'contributor'));
+ALTER TABLE site_setting ADD COLUMN test_content_roles TEXT NOT NULL DEFAULT '["admin"]'
+  CHECK (json_valid(test_content_roles) AND json_type(test_content_roles) = 'array');
+CREATE TABLE community_group_event (
+  id TEXT PRIMARY KEY NOT NULL,
+  user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
+  from_group TEXT NOT NULL CHECK (from_group IN ('member', 'regular', 'trusted', 'contributor', 'moderator', 'admin')),
+  to_group TEXT NOT NULL CHECK (to_group IN ('member', 'regular', 'trusted', 'contributor', 'moderator', 'admin')),
+  actor_user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
+  reason_code TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  CHECK (from_group <> to_group)
+);
+CREATE INDEX community_group_event_user_idx ON community_group_event(user_id, created_at);
+
+INSERT OR IGNORE INTO resource_server
+  (slug, display_name, region, status, resource_prefix, version, created_at, updated_at, created_by, updated_by)
+VALUES
+  ('jp-test-01', 'JP Test 01', 'jp', 'draft', 'servers/jp-test-01', 1, 0, 0, NULL, NULL),
+  ('jp-test-02', 'JP Test 02', 'jp', 'draft', 'servers/jp-test-02', 1, 0, 0, NULL, NULL),
+  ('jp-test-03', 'JP Test 03', 'jp', 'draft', 'servers/jp-test-03', 1, 0, 0, NULL, NULL);

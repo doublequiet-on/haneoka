@@ -4,15 +4,16 @@
 // Pos: [Map](L2-2.md)；站点与服务共享的资源路由契约。
 // Effects/Dependencies: 依赖基础 locale 定义；路径构造／解析本身不发请求。
 import { isLocale, type Locale } from "@haneoka/i18n";
+import { CONTENT_SOURCE_IDS, isContentSourceId } from "./content-access-state.ts";
 
-export const RELEASE_SERVERS = ["jp", "intl", "intl-test", "jp-cbt", "intl-cbt"] as const;
-export type ReleaseServer = (typeof RELEASE_SERVERS)[number];
-export const isReleaseServer = (value: unknown): value is ReleaseServer =>
-  typeof value === "string" && RELEASE_SERVERS.includes(value as ReleaseServer);
+export const RELEASE_SERVERS = ["jp", "intl"] as const;
+export type ReleaseServer = string;
+export const isReleaseServer = (value: unknown, sources: readonly string[] = CONTENT_SOURCE_IDS): value is ReleaseServer =>
+  isContentSourceId(value) && sources.includes(value);
 
-export function releaseServerFromPath(pathname: string): ReleaseServer | undefined {
+export function releaseServerFromPath(pathname: string, sources: readonly string[] = CONTENT_SOURCE_IDS): ReleaseServer | undefined {
   const prefix = pathname.split("/")[1];
-  return isReleaseServer(prefix) ? prefix : undefined;
+  return isReleaseServer(prefix, sources) ? prefix : undefined;
 }
 
 export const RESOURCE_KINDS = [
@@ -107,16 +108,14 @@ const isResourceId = (value: string): boolean =>
 
 /** Public resource addresses contain identity; content revisions belong in data URLs. */
 export function resourcePath({ server, locale, kind, id }: ResourceRoute): string {
-  if (!isReleaseServer(server) || !isLocale(locale) || !isResourceKind(kind))
+  if (!isContentSourceId(server) || !isLocale(locale) || !isResourceKind(kind))
     throw new TypeError("Invalid resource route");
   if (id !== undefined && !isResourceId(id)) throw new TypeError("Invalid resource identity");
-  if (server === "intl-test" && id === undefined) server = "intl";
   return `/${server}/${locale}/${kind}/${id === undefined ? "" : `${encodeURIComponent(id)}/`}`;
 }
 
 export function homePath(server: ReleaseServer, locale: Locale): string {
-  if (!isReleaseServer(server) || !isLocale(locale)) throw new TypeError("Invalid home route");
-  if (server === "intl-test") server = "intl";
+  if (!isContentSourceId(server) || !isLocale(locale)) throw new TypeError("Invalid home route");
   return `/${server}/${locale}/`;
 }
 
@@ -156,12 +155,12 @@ export function storyCollectionPath({
 /** Alias for callers that need to make the canonical-vs-legacy distinction explicit. */
 export const formatResourceRoute = resourcePath;
 
-export function parseResourceRoute(pathname: string): ResourceRoute | undefined {
+export function parseResourceRoute(pathname: string, sources: readonly string[] = CONTENT_SOURCE_IDS): ResourceRoute | undefined {
   if (!pathname.startsWith("/") || pathname.includes("?") || pathname.includes("#")) return undefined;
   const parts = pathname.slice(1).replace(/\/$/u, "").split("/");
   if (parts.length !== 3 && parts.length !== 4 && parts.length !== 5) return undefined;
   const [server, locale, kind, encodedId, child] = parts;
-  if (!isReleaseServer(server) || !isLocale(locale) || !isResourceKind(kind)) return undefined;
+  if (!isReleaseServer(server, sources) || !isLocale(locale) || !isResourceKind(kind)) return undefined;
   if (kind === "events" && encodedId === "tracker") return undefined;
   if (parts.length === 5 && !(kind === "songs" && (child === "chart" || child === "ranking"))) return undefined;
   if (encodedId === undefined) return { server, locale, kind };
@@ -284,7 +283,6 @@ export function legacyEntityRedirectTarget(pathname: string, search = ""): strin
 
 /** Map logical catalogue destinations to the selected server's collections. */
 export function resourceCollectionHref(route: string, server: ReleaseServer, locale: Locale): string | undefined {
-  if (server === "intl-test") server = "intl";
   const source = new URL(route, "https://route.invalid");
   const parts = source.pathname.replace(/^\/+|\/+$/gu, "").split("/");
   if (parts.length === 1 && parts[0] === "calendar")

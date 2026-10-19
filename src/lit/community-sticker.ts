@@ -16,7 +16,7 @@ export function communityStamps(server: string, reload = false): Promise<JsonRec
   return promise;
 }
 export function stampServers(server: string): string[] {
-  return [...new Set([server, readReleaseServer(), "intl", "jp"])].filter(isReleaseServer);
+  return [...new Set([server, readReleaseServer(), "intl", "jp"])].filter(value => isReleaseServer(value));
 }
 export function stampSources(stamp: JsonRecord, locale: string): string[] {
   const source = String(stamp.image || "");

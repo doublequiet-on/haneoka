@@ -18,7 +18,7 @@ import { beginLoading } from "../lib/loading-progress";
 import { readReleaseServer } from "../lib/release-server";
 import { fetchCatalogVisuals } from "../lib/catalog-visuals";
 import { fetchCrossServerTeamBuilderData, mergeTeamBuilderData } from "../lib/team-builder/data/cross-server";
-import { canUseStaticCatalogScope, visibleContentServers } from "../lib/test-server-visibility";
+import { canUseStaticCatalogScope, visibleContentServers } from "../lib/content-visibility";
 import type { TeamBuilderData } from "../lib/team-builder/data";
 import { compileFromTeamData, type EngineMaster } from "../lib/team-builder/engine/master";
 import { maxMemberGrowth, maxSnapGrowth } from "../lib/team-builder/engine/box";

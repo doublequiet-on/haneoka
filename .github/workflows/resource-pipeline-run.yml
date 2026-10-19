@@ -132,7 +132,7 @@ jobs:
       stage_prefix: ${{ steps.unity_reuse.outputs.stage_prefix || format('private/resource-pipeline-stage/{0}/{1}', github.run_id, inputs.server) }}
     env:
       RESOURCE_PIPELINE_CONFIG: ${{ secrets.RESOURCE_PIPELINE_CONFIG }}
-      PACKAGE_R2_KEY: ${{ inputs.package_r2_key || (inputs.audience != 'production' && secrets.VALIDATION_PACKAGE_KEY) || '' }}
+      PACKAGE_R2_KEY: ${{ inputs.package_r2_key || (inputs.audience != 'production' && (secrets.VALIDATION_PACKAGE_KEY || vars.VALIDATION_PACKAGE_KEY)) || '' }}
       SOURCE_ID_INPUT: ${{ inputs.source_id }}
       RESUME_STAGE_RUN_ID: ${{ inputs.resume_stage_run_id }}
       RESOURCE_CDN_AUTHORIZATION: ${{ secrets.RESOURCE_CDN_AUTHORIZATION || secrets.resource_cdn_authorization }}

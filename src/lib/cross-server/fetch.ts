@@ -3,13 +3,13 @@ import { loadCrossServerCatalog } from "./load";
 import { loadCrossServerCatalogs } from "./bundle";
 import type { CrossCatalogReader } from "./load";
 import { OFFICIAL_CATALOG_SERVERS, type CrossCatalogResource, type OfficialCatalogServer, type CrossCatalogDTO, type CrossCatalogSnapshot } from "./catalog";
-import { visibleContentServers } from "../test-server-visibility";
+import { visibleContentServers } from "../content-visibility";
 
 /** Reuse already rendered source rows when adding a new optional source to a home seed. */
 export function crossCatalogSeedSources(catalogs: Partial<Record<CrossCatalogResource, CrossCatalogDTO>>): CrossCatalogSnapshot[] {
   const sources = new Map<OfficialCatalogServer, CrossCatalogSnapshot>();
   for (const dto of Object.values(catalogs)) if (dto) {
-    for (const server of OFFICIAL_CATALOG_SERVERS) {
+    for (const server of Object.keys(dto.identities)) {
       const identity = dto.identities[server];
       if (!identity || dto.sourceAvailability[server] !== "loaded") continue;
       const source = sources.get(server) ?? { identity, collections: {}, documents: {} };

@@ -1,9 +1,16 @@
+import { effectiveUserRole, type MemberTier, type StoredUserRole, type UserRole } from "../src/lib/user-roles";
+
 export type CommunityRestrictionKind = "sign_in" | "upload" | "write";
 
 export interface CommunityAccessState {
   restriction: CommunityRestrictionKind | null;
-  role: "admin" | "member" | "moderator";
+  role: UserRole;
   status: "active" | "deleted" | "suspended";
+}
+
+interface CommunityAccessRow extends Omit<CommunityAccessState, "role"> {
+  role: StoredUserRole;
+  memberTier: MemberTier;
 }
 
 export const communityAccessState = async (
@@ -21,12 +28,15 @@ export const communityAccessState = async (
         ORDER BY CASE restriction.kind WHEN 'sign_in' THEN 0 WHEN 'write' THEN 1 ELSE 2 END
         LIMIT 1)`
     : "NULL";
-  return env.DB.prepare(
-    `SELECT profile.role, profile.status, ${restrictionSelect} AS restriction
+  const row = await env.DB.prepare(
+    `SELECT profile.role, profile.member_tier AS memberTier, profile.status, ${restrictionSelect} AS restriction
      FROM community_profile AS profile
      WHERE profile.user_id = ?
      LIMIT 1`,
   )
     .bind(...kinds, ...(kinds.length ? [Date.now()] : []), userId)
-    .first<CommunityAccessState>();
+    .first<CommunityAccessRow>();
+  return row
+    ? { restriction: row.restriction, role: effectiveUserRole(row.role, row.memberTier), status: row.status }
+    : null;
 };

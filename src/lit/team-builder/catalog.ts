@@ -1,3 +1,4 @@
+import { CONTENT_SOURCE_IDS } from "../../lib/content-access-state";
 /** Names, tiles and growth helpers shared by the team builder views. */
 import { html, nothing } from "lit";
 import { clientText } from "../../i18n/client";
@@ -45,8 +46,8 @@ export class Catalog {
     const cross = this.data.crossServer;
     if (!cross?.identities.jp || !cross.identities.intl) return undefined;
     const available = (cross.availability[collection]?.[String(id)] ?? [])
-      .filter((server): server is FormalCatalogServer => server === "jp" || server === "intl" || server === "intl-test");
-    return catalogServerMark({ exclusive: exclusiveServer(available) ?? null }, this.host.locale);
+      .filter((server): server is FormalCatalogServer => CONTENT_SOURCE_IDS.includes(server));
+    return catalogServerMark({ exclusive: exclusiveServer(available) ?? null, sourceIds: available }, this.host.locale);
   }
   text(value: unknown) {
     return resolveLocalizedText(value, this.host.locale).text;

@@ -563,7 +563,6 @@
       "tabBottom": "下装",
       "tabShoes": "鞋袜",
       "tabSet": "套装",
-      "viewCbt": "查看国际服封闭测试资料",
       "yes": "是",
       "no": "否",
       "name": "名称",
@@ -1114,8 +1113,8 @@
       "mirrors": "关联资料",
       "catalogJapanOnly": "仅日服",
       "catalogInternationalOnly": "仅国际服",
-      "catalogTestOnly": "测试内容",
-      "catalogTestServer": "测试环境",
+      "catalogAdditionalOnly": "未公开内容",
+      "catalogAdditionalSource": "附加来源",
       "catalogViewingServerData": "正在查看{server}的数据",
       "catalogFiltersUnavailable": "卡牌的额外筛选信息加载失败。已有卡牌仍然可以查看。"
     },
@@ -3259,7 +3258,7 @@
       "uidCopied": "UID 已复制。",
       "uidCopyFailed": "无法复制 UID。",
       "role": "角色",
-      "roleMember": "成员",
+      "roleMember": "普通用户",
       "roleModerator": "版主",
       "roleAdmin": "管理员",
       "accountStatus": "账号状态",
@@ -3324,7 +3323,10 @@
       "resetPassword": "重置密码",
       "passwordReset": "密码已重置。",
       "invalidResetLink": "此重置链接无效或已过期。",
-      "signInDescription": "登录以访问您的账号。"
+      "signInDescription": "登录以访问您的账号。",
+      "roleRegular": "活跃用户",
+      "roleTrusted": "受信用户",
+      "roleContributor": "贡献者"
     },
     "profile": {
       "title": "个人主页",
@@ -4303,9 +4305,12 @@
         "write": "社区发帖"
       },
       "roles": {
-        "member": "成员",
+        "member": "普通用户",
         "moderator": "版主",
-        "admin": "管理员"
+        "admin": "管理员",
+        "regular": "活跃用户",
+        "trusted": "受信用户",
+        "contributor": "贡献者"
       },
       "values": {
         "accepted": "已接受",
@@ -4753,8 +4758,9 @@
       },
       "save": "保存",
       "cancel": "取消",
-      "showTestServerContent": "显示测试服务器内容",
-      "showTestServerContentHint": "在图鉴和配队工具中显示测试服务器内容。"
+      "showRestrictedContent": "显示未公开内容",
+      "showRestrictedContentHint": "仅所选身份组可以访问这些内容，公开页面保持不变。",
+      "contentAccessGroups": "允许访问的身份组"
     }
   },
   "download": {

@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { staticBuildSourceIdentity as sourceIdentity } from "../../src/server/static-build-identity.ts";
+import { isPublicReleaseServer } from "../../src/lib/temporary-public-routing.ts";
 
 export const INPUT_SCHEMA = "haneoka-static-build-inputs-v1";
 export const sha256 = (body) => createHash("sha256").update(body).digest("hex");
@@ -52,8 +53,9 @@ export function copyOnce(source, destination) {
 export async function catalogCacheKey() {
   const origin = process.env.STATIC_CATALOG_ORIGIN || "https://haneoka.org";
   const servers = [
-    ...new Set(["jp", "intl", ...(process.env.STATIC_RESOURCE_SERVERS || "").split(",").filter(Boolean)]),
+    ...new Set(["jp", "intl", ...(process.env.STATIC_RESOURCE_SERVERS || "").split(",").map((server) => server.trim()).filter(Boolean)]),
   ].sort();
+  assert(servers.every(isPublicReleaseServer), "Static catalogs require public release servers");
   const pins = await Promise.all(
     servers.map(async (server) => {
       const response = await fetch(
@@ -434,6 +436,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     try {
       console.log(await catalogCacheKey());
     } catch (error) {
+      if (error instanceof assert.AssertionError) throw error;
       console.warn(error instanceof Error ? error.message : String(error));
       console.log(`unavailable-${process.env.GITHUB_RUN_ID || Date.now()}`);
     }

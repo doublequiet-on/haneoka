@@ -3,6 +3,7 @@
 // Output: 固定身份的配队 DTO 响应。
 // Pos: [Map](L2.md)；配队资料的 Worker 组合与边缘缓存。
 // Effects/Dependencies: 调用注入读取器并读写边缘缓存；格式版本参与缓存键。
+import { isPublicReleaseServer as isPublicResourceServer } from "../src/lib/temporary-public-routing";
 import { teamBuilderDataResponse } from "../src/lib/team-builder/data/response";
 import { readRuntimeRulesDocument, type RuntimeMasterReader } from "../src/lib/team-builder/data/runtime-rules";
 
@@ -42,7 +43,7 @@ export async function handleTeamBuilderData(
   const pinUrl = new URL(`${prefix}release`, url);
   pinUrl.searchParams.set("projection", "identity");
   if (releases[0]) pinUrl.searchParams.set("release", releases[0]);
-  const pin = await readCatalog(new Request(pinUrl, { method: "HEAD", signal: request.signal }));
+  const pin = await readCatalog(new Request(pinUrl, { method: "HEAD", signal: request.signal, headers: request.headers }));
   if (!pin) return error(404, "resource_not_found");
   if (!pin.ok) return pin;
   const releaseId = pin.headers.get("x-haneoka-release-id") || "",
@@ -53,7 +54,7 @@ export async function handleTeamBuilderData(
     const target = new URL(prefix + path, url);
     target.searchParams.set("release", releaseId);
     const response = await readCatalog(
-      new Request(target, { signal: request.signal, headers: { accept: "application/json" } }),
+      new Request(target, { signal: request.signal, headers: new Headers([...request.headers, ["accept", "application/json"]]) }),
     );
     if (!response?.ok) throw new Error(`team-data-catalog:${path}/${response?.status ?? 404}`);
     if (
@@ -69,14 +70,14 @@ export async function handleTeamBuilderData(
   const cacheKey = new Request(
     `https://team-builder.cache.invalid/v${DTO_CACHE_VERSION}/${encodeURIComponent(server)}/${releaseId}/${encodeURIComponent(sourceId)}`,
   );
-  const clientCacheControl = releases[0] ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate";
+  const clientCacheControl = !isPublicResourceServer(server) ? "private, no-store" : releases[0] ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate";
   const toClient = (response: Response) => {
     const headers = new Headers(response.headers);
     headers.set("cache-control", clientCacheControl);
     headers.set("vary", "accept-encoding");
     return new Response(request.method === "HEAD" ? null : response.body, { status: response.status, headers });
   };
-  const cache = edgeCache();
+  const cache = isPublicResourceServer(server) ? edgeCache() : null;
   const hit = await cache?.match(cacheKey).catch(() => undefined);
   if (hit) return toClient(hit);
   try {

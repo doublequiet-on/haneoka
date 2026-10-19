@@ -1,3 +1,5 @@
+import { canUseStaticCatalogScope } from "../lib/content-visibility";
+import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import { clientText } from "../i18n/client";
 import { renderAnonTokyoDetails } from "./shared/anon-tokyo-detail";
 import { LitElement, html, nothing } from "lit";
@@ -27,7 +29,9 @@ import {
 } from "./shared/catalog";
 import { resolveLocalizedText } from "../lib/localized-text";
 import { openDetailLocation, closeDetailLocation, observeDetailLocation } from "../lib/detail-navigation";
-import { releaseServerPath, writeReleaseServer, type ReleaseServer } from "../lib/release-server";
+import type { ReleaseServer } from "../lib/release-server";
+import { resourceCollectionHref } from "../lib/resource-route";
+import type { Locale } from "@haneoka/i18n";
 import { OutfitStage } from "./runtime/outfit-stage";
 import { fetchCrossServerCatalog } from "../lib/cross-server/fetch";
 import { crossCatalogDocuments, type CrossCatalogDocuments } from "../lib/cross-server/documents";
@@ -197,7 +201,7 @@ export class AnonTokyoWorkspace extends LitElement {
   }
   private applySelection() {
     if (this.mode === "outfits" && this.selectedItem) {
-      const selected = values(read(this.document, "goods.reloading")).find((item) => item.id === this.selectedItem);
+      const selected = this.rowForId(values(read(this.document, "goods.reloading")), this.selectedItem);
       if (selected) {
         this.tab = Number(selected.spineType || 1);
         this.outfitSelections = { [this.tab]: this.selectedItem };
@@ -206,7 +210,21 @@ export class AnonTokyoWorkspace extends LitElement {
     const first = values(this.document?.characters)[0];
     if (!this.selectedCharacter && first) this.selectedCharacter = String(first.id || "");
   }
+  private contentAccessChanged = () => {
+    this.loadRequest?.abort();
+    this.loadRequest = undefined;
+    referenceDocuments.clear();
+    this.referenceData = undefined;
+    this.unionDocument = undefined;
+    this.document = null;
+    this.bands = [];
+    this.outfitStage?.dispose();
+    this.outfitStage = undefined;
+    this.outfitRecipeKey = "";
+    void this.load();
+  };
   connectedCallback() {
+    addEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     super.connectedCallback();
     this.locale = preferredLocale(this.locale);
     this.releaseLocation = observeDetailLocation(this.restoreLocation, this);
@@ -217,6 +235,7 @@ export class AnonTokyoWorkspace extends LitElement {
     void this.load();
   }
   disconnectedCallback() {
+    removeEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     this.loadRequest?.abort();
     clearBrowseBar();
     this.releaseLocation?.();
@@ -241,8 +260,10 @@ export class AnonTokyoWorkspace extends LitElement {
     for (const key of [...params.keys()]) if (key.startsWith("filter.")) params.delete(key);
     for (const [key, choices] of Object.entries(this.facets))
       for (const choice of choices) params.append(`filter.${key}`, choice);
-    this.query ? params.set("q", this.query) : params.delete("q");
-    this.view !== "grid" ? params.set("view", this.view) : params.delete("view");
+    if (this.query) params.set("q", this.query);
+    else params.delete("q");
+    if (this.view !== "grid") params.set("view", this.view);
+    else params.delete("view");
     history.replaceState(history.state, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
   }
   private async loadReferenceData() {
@@ -251,6 +272,7 @@ export class AnonTokyoWorkspace extends LitElement {
       return;
     }
     const server = this.server();
+    const controller = this.loadRequest;
     let request = referenceDocuments.get(server);
     if (!request) {
       request = fetch(catalogUrl("anon-tokyo", "", server)).then(async (response) => {
@@ -262,7 +284,7 @@ export class AnonTokyoWorkspace extends LitElement {
     }
     try {
       const data = await request;
-      if (this.isConnected && this.server() === server) {
+      if (this.isConnected && this.server() === server && this.loadRequest === controller) {
         this.referenceData = data;
         this.requestUpdate();
       }
@@ -279,12 +301,24 @@ export class AnonTokyoWorkspace extends LitElement {
     openDetailLocation(`${location.pathname}?${params}`);
   }
   private openForeignItem(item: Value, parameter: "item" | "character"): boolean {
-    const source = this.unionDocument?.entries.get(item) || this.unionDocument?.byId.get(String(item.id));
+    const source = this.sourceFor(item);
     if (!source || source.identity.server === this.server()) return false;
+    const target = resourceCollectionHref(`/catalog/anon-tokyo/${this.mode}`, source.identity.server, this.locale as Locale);
+    if (!target) return false;
     const params = new URLSearchParams(location.search);
     params.set(parameter, String(item.id));
-    openDetailLocation(`${releaseServerPath(location.pathname, source.identity.server)}?${params}`);
+    openDetailLocation(`${target}?${params}`);
     return true;
+  }
+  private sourceFor(item: Value) {
+    return this.unionDocument?.entries.get(item) || this.unionDocument?.byId.get(`${this.server()}:${item.id}`);
+  }
+  private ownRow(rows: Value[]): Value | undefined {
+    const own = rows.filter(row => this.sourceFor(row)?.perServer[this.server()]);
+    return own.length === 1 ? own[0] : rows.length === 1 ? rows[0] : undefined;
+  }
+  private rowForId(rows: Value[], id: string): Value | undefined {
+    return this.ownRow(rows.filter(row => String(row.id) === id));
   }
   private closeItem() {
     const params = new URLSearchParams(location.search);
@@ -329,7 +363,7 @@ export class AnonTokyoWorkspace extends LitElement {
   }
   private async load() {
     const page = readPageData<CatalogSystemPayload>(this);
-    if (page?.schema === "haneoka-catalog-system-v1" && page.kind === "anon-tokyo") {
+    if (page?.schema === "haneoka-catalog-system-v1" && page.kind === "anon-tokyo" && canUseStaticCatalogScope()) {
       this.preparePage(page, this.locale);
       return;
     }
@@ -344,6 +378,7 @@ export class AnonTokyoWorkspace extends LitElement {
       if (union) {
         const dto = await fetchCrossServerCatalog(resource, server, this.locale, { signal: controller.signal });
         if (Object.values(dto.sourceAvailability).every((value) => value !== "loaded")) throw new Error("ANON TOKYO catalog unavailable");
+        if (controller.signal.aborted || this.loadRequest !== controller) return;
         this.applyCatalog(dto);
       } else {
       this.unionDocument = undefined;
@@ -359,14 +394,15 @@ export class AnonTokyoWorkspace extends LitElement {
       };
       const requested = requestedByMode[this.mode] || [this.mode];
       try {
-        const manifestResponse = await fetch(catalogUrl("catalog", "", this.server()));
+        const manifestResponse = await fetch(catalogUrl("catalog", "", this.server()), { signal: controller.signal });
         const manifest = manifestResponse.ok ? ((await manifestResponse.json()) as Value) : {};
         const availableViews = read(manifest, "resources.anon-tokyo.views") as Value | undefined;
         if (!availableViews || requested.some((view) => !availableViews[view])) throw new Error("views unavailable");
-        const responses = await Promise.all(requested.map((view) => fetch(`${base}/views/${view}`)));
+        const responses = await Promise.all(requested.map((view) => fetch(`${base}/views/${view}`, { signal: controller.signal })));
         if (responses.some((response) => !response.ok)) throw new Error("views unavailable");
         const payloads = await Promise.all(responses.map((response) => response.json() as Promise<Value>));
         const byName = Object.fromEntries(requested.map((name, index) => [name, payloads[index]]));
+        if (controller.signal.aborted || this.loadRequest !== controller) return;
         this.document = {
           characters: byName.characters,
           goods: { reloading: byName.reloading, items: byName.goods, categories: byName["goods-categories"] },
@@ -394,21 +430,28 @@ export class AnonTokyoWorkspace extends LitElement {
       } catch {
         // Older releases remain browsable until their view projections are
         // rebuilt; new releases use the much smaller screen-specific views.
-        const response = await fetch(base);
+        if (controller.signal.aborted || this.loadRequest !== controller) return;
+        const response = await fetch(base, { signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        this.document = (await response.json()) as Value;
+        const document = (await response.json()) as Value;
+        if (controller.signal.aborted || this.loadRequest !== controller) return;
+        this.document = document;
       }
       }
       if (!this.isConnected || controller.signal.aborted || this.loadRequest !== controller) return;
       if (this.mode === "tasks") await this.loadReferenceData();
+      if (controller.signal.aborted || this.loadRequest !== controller) return;
       this.phase = "ready";
       if (this.selectedItem && this.mode !== "outfits") void this.loadReferenceData();
       if (this.mode === "fever") {
-        const response = await fetch(catalogUrl("bands"));
-        if (response.ok) this.bands = values(await response.json());
+        const response = await fetch(catalogUrl("bands"), { signal: controller.signal });
+        const bands = response.ok ? values(await response.json()) : [];
+        if (controller.signal.aborted || this.loadRequest !== controller) return;
+        this.bands = bands;
       }
       this.applySelection();
     } catch (error) {
+      if (controller.signal.aborted || this.loadRequest !== controller) return;
       this.error = error instanceof Error ? error.message : String(error);
       this.phase = "error";
     }
@@ -520,27 +563,6 @@ export class AnonTokyoWorkspace extends LitElement {
             title: this.label("availabilityTitle"),
             body: this.label("unavailable"),
             icon: "inventory_2",
-            ...(this.server() === "intl-cbt"
-              ? {}
-              : {
-                  action: html`
-                    <button
-                      class="button button--tonal"
-                      @click=${() => {
-                        // The addressed server lives in the URL prefix; view
-                        // the collection's CBT copy by navigating to it.
-                        writeReleaseServer("intl-cbt");
-                        location.assign(
-                          releaseServerPath(`${location.pathname}${location.search}${location.hash}`, "intl-cbt"),
-                        );
-                      }}
-                    >
-                      ${uiText(this.locale, "settingsGlobalCbt") === "settingsGlobalCbt"
-                        ? this.label("viewCbt")
-                        : uiText(this.locale, "settingsGlobalCbt")}
-                    </button>
-                  `,
-                }),
           })}
         </section>
       `;
@@ -616,7 +638,7 @@ export class AnonTokyoWorkspace extends LitElement {
                 this.label(String(item.entityGroup)),
               ]),
             );
-    const selected = source.find((item) => String(item.id) === this.selectedItem);
+    const selected = this.rowForId(source, this.selectedItem);
     return html`
       ${renderBrowse({
         kind: "anon",
@@ -752,9 +774,9 @@ export class AnonTokyoWorkspace extends LitElement {
       ),
     });
   }
-  private selectCharacter(id: string) {
-    const character = values(this.document?.characters).find((row) => String(row.id) === id);
-    if (character && this.openForeignItem(character, "character")) return;
+  private selectCharacter(character: Value) {
+    if (this.openForeignItem(character, "character")) return;
+    const id = String(character.id);
     this.selectedCharacter = id;
     this.selectedItem = "";
     this.outfitSelections = {};
@@ -766,7 +788,7 @@ export class AnonTokyoWorkspace extends LitElement {
   private renderOutfits() {
     clearBrowseBar();
     const characters = values(this.document?.characters).sort((a, b) => Number(a.rawId) - Number(b.rawId));
-    const character = characters.find((item) => item.id === this.selectedCharacter) || characters[0];
+    const character = this.selectedCharacter ? this.rowForId(characters, this.selectedCharacter) : characters[0];
     const rawId = Number(character?.rawId);
     const wearables = values(read(this.document, "goods.reloading"))
       .filter(
@@ -788,10 +810,10 @@ export class AnonTokyoWorkspace extends LitElement {
             (item) => html`
               <button
                 type="button"
-                aria-pressed=${character?.id === item.id}
+                aria-pressed=${character === item}
                 aria-label=${this.entityTitle(item)}
                 title=${this.entityTitle(item)}
-                @click=${() => this.selectCharacter(String(item.id))}
+                @click=${() => this.selectCharacter(item)}
               >
                 ${
                   this.media(item)
@@ -851,11 +873,11 @@ export class AnonTokyoWorkspace extends LitElement {
                 label: this.entityTitle(item),
                 image: this.media(item),
                 fit: "contain",
-                selected: selectedId === item.id,
+                selected: this.rowForId(wearables, selectedId) === item,
                 kind: "outfit",
                 onOpen: () => {
                   if (this.openForeignItem(item, "item")) return;
-                  const value = item.id === selectedId ? "" : String(item.id);
+                  const value = this.rowForId(wearables, selectedId) === item ? "" : String(item.id);
                   const next = { ...this.outfitSelections, [this.tab]: value };
                   if (value && this.tab === 5) {
                     next[2] = "";
@@ -947,14 +969,16 @@ export class AnonTokyoWorkspace extends LitElement {
   }
   private outfitRecipe(): Value | undefined {
     const characters = values(this.document?.characters);
-    const character = characters.find((item) => item.id === this.selectedCharacter) || characters[0];
+    const character = this.selectedCharacter ? this.rowForId(characters, this.selectedCharacter) : characters[0];
+    if (!character) return undefined;
     const rawId = Number(character?.rawId);
-    const recipes = values(read(this.document, "spine.renderRecipes"));
-    const base = recipes.find((item) => Number(item.characterId) === rawId && !Array.isArray(item.outfitReloadingIds));
+    const document = this.referenceData || this.document;
+    const recipes = values(read(document, "spine.renderRecipes"));
+    const base = this.ownRow(recipes.filter((item) => Number(item.characterId) === rawId && !Array.isArray(item.outfitReloadingIds)));
     if (!base) return undefined;
     const selectedIds = Object.values(this.outfitSelections).filter(Boolean);
-    const reloading = values(read(this.document, "goods.reloading"));
-    const parts = values(read(this.document, "spine.parts"));
+    const reloading = values(read(document, "goods.reloading"));
+    const parts = values(read(document, "spine.parts"));
     const slotGroup = (modelId: unknown) => {
       const id = String(modelId || "");
       const slot = id.includes("_") ? id.slice(id.indexOf("_") + 1) : id;
@@ -965,7 +989,7 @@ export class AnonTokyoWorkspace extends LitElement {
         ...(Array.isArray(entry.spineParent) ? entry.spineParent : []),
         ...(Array.isArray(entry.spineSpecialPartIds) ? entry.spineSpecialPartIds : []),
       ].flatMap((partId) => {
-        const part = parts.find((candidate) => Number(candidate.rawId) === Number(partId));
+        const part = this.ownRow(parts.filter((candidate) => Number(candidate.rawId) === Number(partId)));
         const stem =
           String(part?.pathName || "")
             .split("/")
@@ -975,7 +999,7 @@ export class AnonTokyoWorkspace extends LitElement {
       });
     let result = (Array.isArray(base.parts) ? (base.parts as Value[]) : []).map((part) => ({ ...part }));
     for (const selectedId of selectedIds) {
-      const selected = reloading.find((item) => item.id === selectedId);
+      const selected = this.rowForId(reloading, selectedId);
       if (!selected) continue;
       const own = ownParts(selected);
       const type = Number(selected.spineType || 0);

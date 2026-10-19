@@ -3,6 +3,7 @@
 // Output: 目录筛选、视图、实体详情、媒体及关联评论交互。
 // Pos: [Map](L2-2.md)；集合与实体资料的 Lit 协调枢纽。
 // Effects/Dependencies: DOM、事件、HTTP／资源加载和页面状态；部分渲染被构建期 SSR 复用。
+import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import { withUiMarksProjection } from "../lib/ui-marks";
 import { catalogLabelPath } from "../config/catalog-labels";
 import { relativeTimeWindow, relativeTimestamp, TIME_REGIONS, type TimeRegion } from "../lib/relative-time";
@@ -24,10 +25,13 @@ import { cardRarityName, rarityIcon } from "./shared/rarity-icon";
 import { catalogCharacterRelationship } from "./shared/catalog-relationships";
 import {
   serverAvailabilityBadge,
+  catalogServerMark,
+  catalogSourceChoices,
   serverAvailabilityImage,
   serverAvailabilityLabel,
 } from "./shared/server-availability";
 import {
+  OFFICIAL_CATALOG_SERVERS,
   crossServerDetail,
   crossServerDisplayRow,
   type CrossCatalogDTO,
@@ -38,7 +42,7 @@ import {
 } from "../lib/cross-server/catalog";
 import { fetchCrossServerCatalogs } from "../lib/cross-server/fetch";
 import { isCrossCatalogResource } from "../lib/cross-server/definitions";
-import { canUseStaticCatalogScope, showTestServerContent } from "../lib/test-server-visibility";
+import { canUseStaticCatalogScope, showRestrictedContent } from "../lib/content-visibility";
 import { crossServerPublicCache } from "../lib/cross-server/cache";
 import { fetchCrossServerDetail } from "../lib/cross-server/detail";
 import { specList } from "./ui/spec";
@@ -896,7 +900,7 @@ export class CatalogScreen extends LitElement {
       const entry = this.unionEntry(item);
       const variant = entry?.perServer[entry.displayServer];
       const identity = variant?.identity || this.nativeCatalogPin;
-      if (!identity || !["jp", "intl", "intl-test"].includes(identity.server)) continue;
+      if (!identity || !OFFICIAL_CATALOG_SERVERS.includes(identity.server)) continue;
       const pinned: CrossCatalogIdentity = { ...identity, server: identity.server as OfficialCatalogServer };
       const key = JSON.stringify(identity);
       let group = groups.get(key);
@@ -951,7 +955,7 @@ export class CatalogScreen extends LitElement {
   private unionResource(): CrossCatalogResource | undefined {
     const resource = this.profile.collection || this.settings.resource;
     return !this.isProvider() &&
-      ["jp", "intl", "intl-test"].includes(this.dataServer()) &&
+      OFFICIAL_CATALOG_SERVERS.includes(this.dataServer()) &&
       isCrossCatalogResource(resource)
       ? resource
       : undefined;
@@ -961,6 +965,11 @@ export class CatalogScreen extends LitElement {
   }
   private itemSourceServer(item: Item): ReleaseServer {
     return this.unionEntry(item)?.displayServer || this.dataServer();
+  }
+  private itemForNativeId(id: string): Item | undefined {
+    const matches = this.items.filter(item => this.itemId(item) === id);
+    const own = matches.find(item => this.itemSourceServer(item) === this.dataServer());
+    return own || (matches.length === 1 ? matches[0] : undefined);
   }
   private itemKey(item: Item): string {
     const entry = this.unionEntry(item);
@@ -1021,17 +1030,12 @@ export class CatalogScreen extends LitElement {
     );
   }
   private itemExclusive(item: Item) {
-    const exclusive = this.unionEntry(item)?.exclusive;
-    return exclusive ? serverAvailabilityBadge([exclusive], this.settings.locale) : nothing;
+    const entry = this.unionEntry(item);
+    return entry ? serverAvailabilityBadge(entry.sourceIds || (entry.exclusive ? [entry.exclusive] : []), this.settings.locale) : nothing;
   }
   private unionTile(options: TileOptions, item: Item): TileOptions {
-    const exclusive = this.unionEntry(item)?.exclusive;
-    if (!exclusive) return options;
-    const label = serverAvailabilityLabel([exclusive], this.settings.locale);
-    return {
-      ...options,
-      serverMark: { image: serverAvailabilityImage(exclusive), label },
-    };
+    const mark = catalogServerMark(this.unionEntry(item), this.settings.locale);
+    return mark ? { ...options, serverMark: mark } : options;
   }
   private pinnedUnionAsset(source: string, identity: CrossCatalogIdentity): string {
     if (!source) return source;
@@ -1114,12 +1118,12 @@ export class CatalogScreen extends LitElement {
     }
   }
   private unionPresentationScope(): string {
-    return JSON.stringify([this.settings.resource, this.settings.locale, this.dataServer(), showTestServerContent()]);
+    return JSON.stringify([this.settings.resource, this.settings.locale, this.dataServer(), showRestrictedContent(), [...OFFICIAL_CATALOG_SERVERS]]);
   }
   private unionPresentationSourceKey(dto: CrossCatalogDTO, scopeKey: string): string {
     return JSON.stringify([
       scopeKey,
-      ...(["jp", "intl", "intl-test"] as const).map((server) => {
+      ...(OFFICIAL_CATALOG_SERVERS).map((server) => {
         const pin = dto.identities[server];
         return [server, pin?.releaseId || "", pin?.sourceId || "", dto.sourceAvailability[server]];
       }),
@@ -1150,7 +1154,7 @@ export class CatalogScreen extends LitElement {
     this.bands = [...(snapshot.bands[server]?.values() || [])];
     if (this.settings.resource === "characters") {
       const bandIds = new Set(this.bands.map((band) => Number(band.bandId)));
-      for (const peer of ["jp", "intl", "intl-test"] as const)
+      for (const peer of OFFICIAL_CATALOG_SERVERS)
         for (const band of snapshot.bands[peer]?.values() || []) {
           if (bandIds.has(Number(band.bandId))) continue;
           this.bands.push(band);
@@ -1181,7 +1185,7 @@ export class CatalogScreen extends LitElement {
     const characters: UnionPresentationSnapshot["characters"] = {}, bands: UnionPresentationSnapshot["bands"] = {};
     const facetKeys = { character: new Map<string, string>(), collectionBand: new Map<string, string>() };
     this.indexUnionFacets(catalogs.characters, catalogs.bands, dto, facetKeys);
-    for (const server of ["jp", "intl", "intl-test"] as const) {
+    for (const server of OFFICIAL_CATALOG_SERVERS) {
       const identity = dto.identities[server];
       if (!identity) continue;
         const ownCharacters = new Map<number, Item>(),
@@ -1256,7 +1260,7 @@ export class CatalogScreen extends LitElement {
       );
       if (!current()) return;
       const dto = catalogs[resource];
-      if (!dto || (["jp", "intl", "intl-test"] as const).every((server) => dto.sourceAvailability[server] !== "loaded"))
+      if (!dto || (OFFICIAL_CATALOG_SERVERS).every((server) => dto.sourceAvailability[server] !== "loaded"))
         throw new Error("Cross-server catalogue unavailable");
       const sourceKey = this.unionPresentationSourceKey(dto, scopeKey);
       const samePin = unionPresentations.get(sourceKey);
@@ -1267,7 +1271,7 @@ export class CatalogScreen extends LitElement {
       const marks: UnionPresentationSnapshot["marks"] = {};
       // Both servers' marks are independent: start them together.
       const markReads = new Map(
-        (["jp", "intl", "intl-test"] as const).map((server) => {
+        (OFFICIAL_CATALOG_SERVERS).map((server) => {
           const identity = dto.identities[server];
           if (!identity || unionPresentationMarks.has(JSON.stringify([server, identity.releaseId, identity.sourceId])))
             return [server, null] as const;
@@ -1278,7 +1282,7 @@ export class CatalogScreen extends LitElement {
           return [server, read] as const;
         }),
       );
-      for (const server of ["jp", "intl", "intl-test"] as const) {
+      for (const server of OFFICIAL_CATALOG_SERVERS) {
         const identity = dto.identities[server];
         if (!identity) continue;
         const markKey = JSON.stringify([server, identity.releaseId, identity.sourceId]);
@@ -1327,6 +1331,13 @@ export class CatalogScreen extends LitElement {
       // Keep the prior immutable public view when a current-pointer observation fails.
     }
   }
+  private sourceVariants() {
+    const detail = this.unionDetail;
+    return catalogSourceChoices(detail, this.settings.locale, {
+      activeSource: detail?.activeServer,
+      href: source => detail?.perServer[source]?.href,
+    });
+  }
   private viewingServerNotice() {
     const detail = this.unionDetail;
     if (!detail?.exclusive || typeof window === "undefined" || !this.isConnected) return nothing;
@@ -1343,8 +1354,8 @@ export class CatalogScreen extends LitElement {
     )
       return nothing;
     const server =
-      detail.activeServer === "intl-test"
-        ? this.label("catalogTestServer", "Test environment")
+      detail.activeServer !== "jp" && detail.activeServer !== "intl"
+        ? detail.activeServer.toUpperCase()
         : this.label(detail.activeServer === "jp" ? "settingsJapan" : "settingsGlobal", detail.activeServer);
     return html`
       <p class="detail-copy">
@@ -1608,7 +1619,7 @@ export class CatalogScreen extends LitElement {
     }
     this.detailRequests.cancel();
     this.selectedId = id;
-    this.selected = this.items.find((item) => this.itemId(item) === id) ?? null;
+    this.selected = this.itemForNativeId(id) ?? null;
     this.setEntityReady(false);
     this.detailAux = {};
     this.sim = null;
@@ -1780,9 +1791,11 @@ export class CatalogScreen extends LitElement {
       if (this.isConnected) this.syncEntityChrome();
     });
   };
+  private contentAccessChanged = () => { void this.load(); };
   connectedCallback() {
     super.connectedCallback();
     document.addEventListener("visibilitychange", this.onTimeVisibility);
+    window.addEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     window.addEventListener("haneoka:session-changed", this.onCommentsAuthorityChange);
     window.addEventListener("haneoka:community-forums-changed", this.onCommentsAuthorityChange);
     this.disposeDifficultyDisplay = observeDifficultyDisplay(() => {
@@ -1882,6 +1895,7 @@ export class CatalogScreen extends LitElement {
     this.relativeTimeClock = 0;
     this.relativeTimeDeadline = 0;
     document.removeEventListener("visibilitychange", this.onTimeVisibility);
+    window.removeEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     window.removeEventListener("haneoka:session-changed", this.onCommentsAuthorityChange);
     window.removeEventListener("haneoka:community-forums-changed", this.onCommentsAuthorityChange);
     this.resetCommentsActivation();
@@ -2338,7 +2352,7 @@ export class CatalogScreen extends LitElement {
     this.songMeta = payload.songMeta[this.dataServer() as OfficialCatalogServer] || {};
     this.chartRates = payload.chartRates || {};
     this.songMetaProvision = Promise.resolve();
-    for (const server of ["jp", "intl", "intl-test"] as const) {
+    for (const server of OFFICIAL_CATALOG_SERVERS) {
       const identity = payload.catalogs?.[this.unionResource()!]?.identities[server];
       const meta = payload.songMeta[server];
       if (identity && meta) {
@@ -2350,7 +2364,7 @@ export class CatalogScreen extends LitElement {
     this.gameItems = asItems(payload.gameItems, "items");
     if (payload.catalogs) {
       const marks: UnionPresentationSnapshot["marks"] = {};
-      for (const server of ["jp", "intl", "intl-test"] as const) {
+      for (const server of OFFICIAL_CATALOG_SERVERS) {
         const pin = payload.catalogs[this.unionResource()!]?.identities[server];
         if (!pin) continue;
         marks[server] = new Map(Object.entries(payload.sourceMarks[server] || {}).map(([name, path]) => [
@@ -2605,7 +2619,7 @@ export class CatalogScreen extends LitElement {
       if (this.hasBandRail() && !this.bands.some((band) => Number(band.bandId || 0) === this.activeBand))
         this.activeBand = Number(this.railBands()[0]?.bandId || 0);
       if (this.selectedId) {
-        const selected = this.items.find((item) => this.itemId(item) === this.selectedId);
+        const selected = this.itemForNativeId(this.selectedId);
         if (selected) {
           this.selected = selected;
           this.setEntityReady(false);
@@ -3446,7 +3460,7 @@ export class CatalogScreen extends LitElement {
       !["time", "score", "eff", "bpm", "n", "nps", "sr"].includes(this.sort)
     )
       return;
-    for (const server of ["jp", "intl", "intl-test"] as const) {
+    for (const server of OFFICIAL_CATALOG_SERVERS) {
       const identity = this.unionCatalog?.identities[server];
       if (!identity || server === this.dataServer()) continue;
       const key = JSON.stringify(identity);
@@ -5684,7 +5698,7 @@ export class CatalogScreen extends LitElement {
   private sonolusUrl(item: Item) {
     if (this.profile.presentation !== "song") return "";
     const rows = Array.isArray(item.difficulty) ? (item.difficulty as Item[]) : [];
-    const selectedDetail = this.selected && this.itemId(item) === this.itemId(this.selected);
+    const selectedDetail = this.selected && this.itemKey(item) === this.itemKey(this.selected);
     const row = this.profile.perDifficulty
       ? rows[0]
       : selectedDetail
@@ -5695,6 +5709,7 @@ export class CatalogScreen extends LitElement {
     const difficulty = difficultyKey(row, rows.indexOf(row));
     if (this.settings.origin === "sekai") return "";
     const source = this.isProvider() ? "gbp" : this.itemSourceServer(item);
+    if (source !== "gbp" && source !== "jp" && source !== "intl") return "";
     return `${SONOLUS_SERVER_LINK}/levels/${encodeURIComponent(releaseChartLevelName(source, String(Number(item.musicId || 0)), difficulty))}`;
   }
   private chartPageTitle(item: Item) {
@@ -5778,7 +5793,7 @@ export class CatalogScreen extends LitElement {
           : Math.min(3, Math.max(0, rows.length - 1));
     const returnTo = returnStateFromLocation(location.pathname, location.search, kind);
     const href = this.chartPageHref(item);
-    this.captureLocationState(returnTo, this.itemId(item));
+    this.captureLocationState(returnTo, this.itemKey(item));
     this.pendingNavigation = href;
     void navigateDetailPage(href, "push").finally(() => {
       if (this.pendingNavigation === href) this.pendingNavigation = "";
@@ -6975,7 +6990,7 @@ export class CatalogScreen extends LitElement {
                     </section>
                   `
                 : nothing
-            }${this.renderExtendedDetail(item)}${this.renderSourceReference(item)}${this.viewingServerNotice()}
+            }${this.renderExtendedDetail(item)}${this.renderSourceReference(item)}${this.sourceVariants()}${this.viewingServerNotice()}
           `,
           this.detailDiscussion(item),
         ),

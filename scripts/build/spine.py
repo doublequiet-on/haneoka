@@ -26,6 +26,7 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -845,6 +846,13 @@ class _SpinePreviewRenderer:
         self.cdp: _CdpSocket | None = None
 
     def __enter__(self) -> _SpinePreviewRenderer:
+        try:
+            return self._start()
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def _start(self) -> _SpinePreviewRenderer:
         bundle = self.temp_root / "spine-preview-runtime.js"
         bundled = subprocess.run(
             [
@@ -872,73 +880,109 @@ class _SpinePreviewRenderer:
         self.server_thread.start()
         host, port = self.server.server_address[:2]
         page_url = f"http://{host}:{port}/__haneoka_spine_preview__/index.html"
-        debug_port = self._unused_tcp_port()
-        user_data = self.temp_root / "chrome-profile"
-        self.chrome_process = subprocess.Popen(
-            [
-                str(self.chrome),
-                "--headless=new",
-                "--enable-webgl",
-                "--ignore-gpu-blocklist",
-                "--use-angle=swiftshader",
-                "--remote-debugging-address=127.0.0.1",
-                f"--remote-debugging-port={debug_port}",
-                f"--user-data-dir={user_data}",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--window-size=512,512",
-                page_url,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        endpoint = self._page_endpoint(debug_port, page_url)
-        self.cdp = _CdpSocket(endpoint)
-        for _ in range(100):
-            ready = self.cdp.call(
-                "Runtime.evaluate",
-                {
-                    "expression": "Boolean(window.__haneokaSpinePreviewReady)",
-                    "returnByValue": True,
-                },
-            )
-            result = ready.get("result")
-            if isinstance(result, dict) and result.get("value") is True:
-                return self
-            time.sleep(0.05)
+        self.layout.reports.mkdir(parents=True, exist_ok=True)
+        for attempt in range(1, 3):
+            user_data = self.temp_root / f"chrome-profile-{attempt}"
+            log = self.layout.reports / f"spine-preview-chrome-attempt-{attempt}.log"
+            try:
+                with log.open("wb") as stderr:
+                    self.chrome_process = subprocess.Popen(
+                        [
+                            str(self.chrome),
+                            "--headless=new",
+                            "--enable-webgl",
+                            "--ignore-gpu-blocklist",
+                            "--use-angle=swiftshader",
+                            "--remote-debugging-address=127.0.0.1",
+                            "--remote-debugging-port=0",
+                            f"--user-data-dir={user_data}",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--window-size=512,512",
+                            page_url,
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=stderr,
+                        start_new_session=os.name == "posix",
+                    )
+                self.cdp = _CdpSocket(self._page_endpoint(user_data, page_url), timeout=10)
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    ready = self.cdp.call(
+                        "Runtime.evaluate",
+                        {
+                            "expression": "Boolean(window.__haneokaSpinePreviewReady)",
+                            "returnByValue": True,
+                        },
+                    )
+                    result = ready.get("result")
+                    if isinstance(result, dict) and result.get("value") is True:
+                        self.cdp.socket.settimeout(90)
+                        return self
+                    time.sleep(0.05)
+                raise _PreviewError("headless-preview-page-did-not-initialize")
+            except Exception as error:
+                self._stop_chrome()
+                with log.open("rb") as stderr:
+                    stderr.seek(max(0, log.stat().st_size - 4096))
+                    detail = stderr.read().decode("utf-8", "replace").strip()
+                sys.stderr.write(f"Spine preview Chrome startup attempt {attempt}/2 failed: {error}\n{detail}\n")
+                if attempt == 2:
+                    raise
         raise _PreviewError("headless-preview-page-did-not-initialize")
 
-    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+    def _stop_chrome(self) -> None:
         if self.cdp is not None:
             self.cdp.close()
+            self.cdp = None
         if self.chrome_process is not None:
-            self.chrome_process.terminate()
+            process = self.chrome_process
+            self.chrome_process = None
+            def terminate(force: bool = False) -> None:
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                    elif force:
+                        process.kill()
+                    else:
+                        process.terminate()
+                except ProcessLookupError:
+                    pass
+            terminate()
             try:
-                self.chrome_process.wait(timeout=5)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.chrome_process.kill()
-                self.chrome_process.wait(timeout=5)
+                terminate(force=True)
+                process.wait(timeout=5)
+            finally:
+                if os.name == "posix":
+                    terminate(force=True)
+
+    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+        self._stop_chrome()
         if self.server is not None:
-            self.server.shutdown()
+            if self.server_thread is not None and self.server_thread.is_alive():
+                self.server.shutdown()
             self.server.server_close()
+            self.server = None
         if self.server_thread is not None:
             self.server_thread.join(timeout=5)
         self._temporary.cleanup()
 
-    @staticmethod
-    def _unused_tcp_port() -> int:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as value:
-            value.bind(("127.0.0.1", 0))
-            return int(value.getsockname()[1])
-
-    def _page_endpoint(self, debug_port: int, page_url: str) -> str:
-        endpoint = f"http://127.0.0.1:{debug_port}/json/list"
+    def _page_endpoint(self, user_data: Path, page_url: str) -> str:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        active_port = user_data / "DevToolsActivePort"
         last_error = "Chrome DevTools did not start"
-        for _ in range(160):
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
             if self.chrome_process is not None and self.chrome_process.poll() is not None:
                 raise _PreviewError("headless-chrome-exited-before-devtools-ready")
             try:
-                with urllib.request.urlopen(endpoint, timeout=1) as response:
+                debug_port = int(active_port.read_text("utf-8").splitlines()[0])
+                if not 0 < debug_port < 65536:
+                    raise ValueError("Chrome DevTools port is invalid")
+                endpoint = f"http://127.0.0.1:{debug_port}/json/list"
+                with opener.open(endpoint, timeout=1) as response:
                     pages = json.loads(response.read().decode("utf-8"))
                 if isinstance(pages, list):
                     for page in pages:
@@ -950,7 +994,7 @@ class _SpinePreviewRenderer:
                         ):
                             return page["webSocketDebuggerUrl"]
             except Exception as error:
-                last_error = type(error).__name__
+                last_error = f"{type(error).__name__}: {error}"[:500]
             time.sleep(0.05)
         raise _PreviewError(f"headless-chrome-devtools-unavailable: {last_error}")
 

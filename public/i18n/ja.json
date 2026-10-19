@@ -563,7 +563,6 @@
       "tabBottom": "ボトムス",
       "tabShoes": "靴下・シューズ",
       "tabSet": "セット",
-      "viewCbt": "グローバル版 CBT を表示",
       "yes": "はい",
       "no": "いいえ",
       "name": "名前",
@@ -1114,8 +1113,8 @@
       "mirrors": "関連資料",
       "catalogJapanOnly": "日本版のみ",
       "catalogInternationalOnly": "グローバル版のみ",
-      "catalogTestOnly": "テスト環境のみ",
-      "catalogTestServer": "テスト環境",
+      "catalogAdditionalOnly": "未公開コンテンツ",
+      "catalogAdditionalSource": "追加ソース",
       "catalogViewingServerData": "{server}のデータを表示しています",
       "catalogFiltersUnavailable": "追加のカード絞り込み情報を読み込めませんでした。カードは引き続き表示できます。"
     },
@@ -3259,7 +3258,7 @@
       "uidCopied": "UID をコピーしました。",
       "uidCopyFailed": "UID をコピーできませんでした。",
       "role": "ロール",
-      "roleMember": "メンバー",
+      "roleMember": "一般ユーザー",
       "roleModerator": "モデレーター",
       "roleAdmin": "管理者",
       "accountStatus": "アカウント状態",
@@ -3324,7 +3323,10 @@
       "resetPassword": "パスワードを再設定",
       "passwordReset": "パスワードを再設定しました。",
       "invalidResetLink": "この再設定リンクは無効か、有効期限が切れています。",
-      "signInDescription": "アカウントを利用するにはログインしてください。"
+      "signInDescription": "アカウントを利用するにはログインしてください。",
+      "roleRegular": "常連",
+      "roleTrusted": "信頼メンバー",
+      "roleContributor": "貢献者"
     },
     "profile": {
       "title": "公開プロフィール",
@@ -4303,9 +4305,12 @@
         "write": "投稿停止"
       },
       "roles": {
-        "member": "メンバー",
+        "member": "一般ユーザー",
         "moderator": "モデレーター",
-        "admin": "管理者"
+        "admin": "管理者",
+        "regular": "常連",
+        "trusted": "信頼メンバー",
+        "contributor": "貢献者"
       },
       "values": {
         "accepted": "承認済み",
@@ -4753,8 +4758,9 @@
       },
       "save": "保存",
       "cancel": "キャンセル",
-      "showTestServerContent": "テストサーバーの内容を表示",
-      "showTestServerContentHint": "図鑑と編成ツールにテストサーバーの内容を表示します。"
+      "showRestrictedContent": "未公開コンテンツを表示",
+      "showRestrictedContentHint": "選択したユーザー区分のみアクセスできます。公開ページには表示されません。",
+      "contentAccessGroups": "アクセスを許可するユーザー区分"
     }
   },
   "download": {

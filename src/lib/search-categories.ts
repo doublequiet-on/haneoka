@@ -1,3 +1,4 @@
+import { CONTENT_SOURCE_IDS } from "./content-access-state";
 export const SEARCH_SCOPES = ["all", "catalog", "stories", "help", "community"] as const;
 export type SearchScope = (typeof SEARCH_SCOPES)[number];
 export const isSearchScope = (value: unknown): value is SearchScope =>
@@ -27,7 +28,7 @@ export function searchCategory(path: string): SearchCategory {
     try { path = new URL(path).pathname; } catch { /* Treat invalid input as an unclassified path. */ }
   }
   const segments = path.split(/[?#]/u, 1)[0]!.split(/[\\/]/u).filter(Boolean);
-  if (["jp", "intl", "intl-test", "jp-cbt", "intl-cbt"].includes(segments[0] || "")) segments.shift();
+  if (CONTENT_SOURCE_IDS.includes(segments[0] || "")) segments.shift();
   if (["ja", "en", "zh-CN", "zh-TW", "ko"].includes(segments[0] || "")) segments.shift();
   if (segments[0] === "catalog") segments.shift();
   const resource = segments[0] || "";

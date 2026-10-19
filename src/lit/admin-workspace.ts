@@ -1,3 +1,5 @@
+import { refreshContentAccess } from "../lib/content-access";
+import { USER_ROLES, isUserRole } from "../lib/user-roles";
 import { modal } from "./ui/modal";
 import "../styles/admin-forums.css";
 import {
@@ -283,7 +285,7 @@ export class AdminWorkspace extends LitElement {
     this.forumFilter = filters.get("forumId") || "";
     const moderation = filters.get("moderationStatus");
     const state = filters.get("status");
-    this.userRoleFilter = ["member", "moderator", "admin"].includes(filters.get("role") || "")
+    this.userRoleFilter = isUserRole(filters.get("role"))
       ? filters.get("role")!
       : "";
     this.userStatusFilter = ["active", "suspended", "deleted"].includes(state || "") ? state! : "";
@@ -295,6 +297,7 @@ export class AdminWorkspace extends LitElement {
     void Promise.all([
       import("@material/web/progress/linear-progress.js"),
       import("@material/web/checkbox/checkbox.js"),
+      import("@material/web/switch/switch.js"),
       import("@material/web/select/outlined-select.js"),
       import("@material/web/select/select-option.js"),
       import("@material/web/textfield/outlined-text-field.js"),
@@ -604,23 +607,26 @@ export class AdminWorkspace extends LitElement {
       await this.load(false);
     });
   }
-  private changeTestServerContent(event: Event) {
-    const control = event.currentTarget as HTMLElement & { selected: boolean };
+  private changeContentAccess(event: Event, role?: string) {
+    const control = event.currentTarget as HTMLElement & { selected: boolean; checked: boolean };
     const settings = this.document.siteSettings as Value | undefined;
     if (!settings || this.busy) return;
-    const enabled = control.selected;
-    control.selected = settings.showTestServerContent === true;
+    const roles = new Set(Array.isArray(settings.contentAccessRoles) ? settings.contentAccessRoles : ["admin"]);
+    const enabled = role ? settings.showRestrictedContent === true : control.selected;
+    if (role) { if (control.checked) roles.add(role); else roles.delete(role); }
+    if (role) control.checked = (settings.contentAccessRoles as string[]).includes(role);
+    else control.selected = settings.showRestrictedContent === true;
     void this.mutate("site-settings", async (assertCurrent) => {
       const result = await this.request("/api/v1/admin/site-settings", {
         method: "PUT",
-        body: JSON.stringify({ showTestServerContent: enabled, expectedVersion: settings.version }),
+        body: JSON.stringify({ showRestrictedContent: enabled, contentAccessRoles: USER_ROLES.filter(role => roles.has(role)), expectedVersion: settings.version }),
       });
       assertCurrent();
       if (result.siteSettings) {
         this.document = { ...this.document, siteSettings: result.siteSettings };
         const saved = result.siteSettings as Value;
-        document.documentElement.dataset.showTestServerContent = saved.showTestServerContent === true ? "1" : "0";
         document.documentElement.dataset.siteSettingsVersion = String(saved.version);
+        await refreshContentAccess();
       } else await this.load(false);
     });
   }
@@ -1730,12 +1736,19 @@ export class AdminWorkspace extends LitElement {
         ${this.document.siteSettings ? html`
           <section class="admin-summary surface">
             <label class="cluster">
-              <md-switch .selected=${(this.document.siteSettings as Value).showTestServerContent === true}
-                ?disabled=${Boolean(this.busy)} @change=${this.changeTestServerContent}
-                aria-label=${this.label("showTestServerContent", "Show test server content")}></md-switch>
-              <strong>${this.label("showTestServerContent", "Show test server content")}</strong>
+              <md-switch .selected=${(this.document.siteSettings as Value).showRestrictedContent === true}
+                ?disabled=${Boolean(this.busy)} @change=${(event: Event) => this.changeContentAccess(event)}
+                aria-label=${this.label("showRestrictedContent", "Show unpublished content")}></md-switch>
+              <strong>${this.label("showRestrictedContent", "Show unpublished content")}</strong>
             </label>
-            <p>${this.label("showTestServerContentHint", "Include test server entries in catalogs and the team builder.")}</p>
+            <p>${this.label("showRestrictedContentHint", "Only selected account groups can access this content. Public pages remain unchanged.")}</p>
+            <div class="cluster" role="group" aria-label=${this.label("contentAccessGroups", "Allowed account groups")}>
+              ${USER_ROLES.map(role => html`<label class="cluster">
+                <md-checkbox aria-label=${this.label(`roles.${role}`, role)} .checked=${((this.document.siteSettings as Value).contentAccessRoles as string[]).includes(role)}
+                  ?disabled=${Boolean(this.busy)} @change=${(event: Event) => this.changeContentAccess(event, role)}></md-checkbox>
+                ${this.label(`roles.${role}`, role)}
+              </label>`)}
+            </div>
           </section>` : nothing}
         <section class="admin-work-queue" aria-labelledby="admin-queue-heading">
           <div class="admin-section-heading">
@@ -2023,7 +2036,7 @@ export class AdminWorkspace extends LitElement {
           <md-select-option value="all">
             <div slot="headline">${this.label("userDetails.allRoles", "All roles")}</div>
           </md-select-option>
-          ${["member", "moderator", "admin"].map(
+          ${USER_ROLES.map(
             (role) => html`
               <md-select-option value=${role}>
                 <div slot="headline">${this.label(`roles.${role}`, role)}</div>
@@ -2407,7 +2420,7 @@ export class AdminWorkspace extends LitElement {
         <div class="admin-action-controls">
           <form @submit=${(event: SubmitEvent) => this.changeRole(user, event)}>
             <md-outlined-select name="role" label=${this.label("actions.role", "Role")}>
-              ${["member", "moderator", "admin"].map(
+              ${USER_ROLES.map(
                 (role) => html`
                   <md-select-option value=${role} ?selected=${user.role === role}>
                     <div slot="headline">${this.label(`roles.${role}`, role)}</div>

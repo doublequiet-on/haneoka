@@ -563,7 +563,6 @@
       "tabBottom": "下裝",
       "tabShoes": "鞋襪",
       "tabSet": "套裝",
-      "viewCbt": "查看國際版封閉測試資料",
       "yes": "是",
       "no": "否",
       "name": "名稱",
@@ -1114,8 +1113,8 @@
       "mirrors": "關聯資料",
       "catalogJapanOnly": "僅日服",
       "catalogInternationalOnly": "僅國際服",
-      "catalogTestOnly": "測試內容",
-      "catalogTestServer": "測試環境",
+      "catalogAdditionalOnly": "未公開內容",
+      "catalogAdditionalSource": "附加來源",
       "catalogViewingServerData": "正在查看{server}的資料",
       "catalogFiltersUnavailable": "卡牌的額外篩選資訊載入失敗。現有卡牌仍然可以檢視。"
     },
@@ -3259,7 +3258,7 @@
       "uidCopied": "UID 已複製。",
       "uidCopyFailed": "無法複製 UID。",
       "role": "角色",
-      "roleMember": "會員",
+      "roleMember": "一般使用者",
       "roleModerator": "版主",
       "roleAdmin": "管理員",
       "accountStatus": "帳號狀態",
@@ -3324,7 +3323,10 @@
       "resetPassword": "重設密碼",
       "passwordReset": "密碼已重設。",
       "invalidResetLink": "此重設連結無效或已過期。",
-      "signInDescription": "登入以存取您的帳號。"
+      "signInDescription": "登入以存取您的帳號。",
+      "roleRegular": "活躍使用者",
+      "roleTrusted": "受信使用者",
+      "roleContributor": "貢獻者"
     },
     "profile": {
       "title": "個人主頁",
@@ -4303,9 +4305,12 @@
         "write": "社群發文"
       },
       "roles": {
-        "member": "成員",
+        "member": "一般使用者",
         "moderator": "版主",
-        "admin": "管理員"
+        "admin": "管理員",
+        "regular": "活躍使用者",
+        "trusted": "受信使用者",
+        "contributor": "貢獻者"
       },
       "values": {
         "accepted": "已接受",
@@ -4753,8 +4758,9 @@
       },
       "save": "儲存",
       "cancel": "取消",
-      "showTestServerContent": "顯示測試伺服器內容",
-      "showTestServerContentHint": "在圖鑑與配隊工具中顯示測試伺服器內容。"
+      "showRestrictedContent": "顯示未公開內容",
+      "showRestrictedContentHint": "僅所選身分組可以存取這些內容，公開頁面維持不變。",
+      "contentAccessGroups": "允許存取的身分組"
     }
   },
   "download": {

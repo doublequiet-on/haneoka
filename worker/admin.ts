@@ -5,7 +5,9 @@ import { resolveModerationAppeal } from "./moderation";
 import { readAdminPost, readAdminAttachment, readAdminStatistics } from "./admin-content";
 import { readAdminUser } from "./admin-user-details";
 import { adminVisitFilter, readAdminGeo, readAdminSeries } from "./admin-analytics";
-import { readSiteSettings } from "./site-settings";
+import { USER_ROLES, isUserRole, isStaffRole, type UserRole, type StaffRole, type StoredUserRole, type MemberTier } from "../src/lib/user-roles";
+import { effectiveUserRoleSql } from "./user-roles";
+import { isPublicResourceServer, readSiteSettings } from "./site-settings";
 
 const ADMIN_PREFIX = "/api/v1/admin";
 const JSON_BODY_LIMIT = 64 * 1024;
@@ -18,6 +20,7 @@ const PACKAGE_UPLOAD_TTL_MS = 24 * 60 * 60 * 1_000;
 const RESOURCE_OWNER = "haneoka-gakuen";
 const RESOURCE_REPOSITORY = "haneoka";
 const RESOURCE_WORKFLOW = "resource-pipeline.yml";
+const resourceWorkflow = (server: string) => isPublicResourceServer(server) ? RESOURCE_WORKFLOW : "build-validation.yml";
 const RESOURCE_REF = "main";
 const CAS_PREFIX = "cas/v1/sha256";
 const PACKAGE_LEASE_PREFIX = "private/v1/package-leases";
@@ -40,7 +43,7 @@ const RESOURCE_SERVER_REGIONS: ReadonlySet<ResourceServerRegion> = new Set(["glo
 const RESOURCE_SERVER_STATUSES: ReadonlySet<ResourceServerStatus> = new Set(["draft", "active", "retired"]);
 const REQUEST_IDS = new WeakMap<Request, string>();
 
-type AdminRole = "admin" | "member" | "moderator";
+type AdminRole = UserRole;
 type StaffRequirement = "admin" | "staff";
 type BindValue = null | number | string;
 type JsonPrimitive = boolean | null | number | string;
@@ -69,7 +72,7 @@ interface StaffAccess {
   email: string;
   name: string;
   profileVersion: number;
-  role: Exclude<AdminRole, "member">;
+  role: StaffRole;
   userId: string;
 }
 
@@ -285,6 +288,8 @@ interface ContentReportRow {
 }
 
 interface UserStateRow {
+  storedRole: StoredUserRole;
+  memberTier: MemberTier;
   email: string;
   emailVerified: number;
   id: string;
@@ -641,8 +646,7 @@ const decodeCursor = (value: string | null): TextCursor | NumericCursor | null =
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/gu, (character) => `\\${character}`);
 
-const isRole = (value: JsonValue | undefined): value is AdminRole =>
-  value === "admin" || value === "member" || value === "moderator";
+const isRole = isUserRole;
 
 const isRestrictionKind = (value: JsonValue | undefined): value is RestrictionKind =>
   value === "sign_in" || value === "upload" || value === "write";
@@ -802,8 +806,8 @@ const getUsers = async (request: Request, env: Env, url: URL): Promise<Response>
   if (!limit) return error(request, 400, "invalid_limit", "limit must be between 1 and 100");
   const role = url.searchParams.get("role");
   const status = url.searchParams.get("status");
-  if (role && role !== "admin" && role !== "member" && role !== "moderator") {
-    return error(request, 400, "invalid_role", "role must be member, moderator, or admin");
+  if (role && !isUserRole(role)) {
+    return error(request, 400, "invalid_role", "Unknown account group");
   }
   if (status && status !== "active" && status !== "deleted" && status !== "suspended") {
     return error(request, 400, "invalid_status", "status must be active, suspended, or deleted");
@@ -821,7 +825,7 @@ const getUsers = async (request: Request, env: Env, url: URL): Promise<Response>
   const conditions: string[] = visitFilter.sql === "1" ? [] : [visitFilter.sql];
   const values: BindValue[] = [...visitFilter.values];
   if (role) {
-    conditions.push("profile.role = ?");
+    conditions.push(`${effectiveUserRoleSql("profile")} = ?`);
     values.push(role);
   }
   if (status) {
@@ -858,7 +862,7 @@ const getUsers = async (request: Request, env: Env, url: URL): Promise<Response>
             profile.display_name AS publicDisplayName,
             profile.pending_display_name AS candidateDisplayName,
             profile.display_name_status AS displayNameStatus,
-            profile.handle, profile.role, profile.status, profile.version,
+            profile.handle, ${effectiveUserRoleSql("profile")} AS role, profile.status, profile.version,
             EXISTS(
               SELECT 1 FROM community_user_restriction AS restriction
               WHERE restriction.user_id = account.id AND restriction.kind = 'write'
@@ -2326,7 +2330,7 @@ const userStateValue = (row: UserStateRow): JsonObject => ({
 const findUserState = async (env: Env, userId: string): Promise<UserStateRow | null> =>
   env.DB.prepare(
     `SELECT account.id, account.email, account.emailVerified AS emailVerified,
-            profile.role, profile.status, profile.version
+            ${effectiveUserRoleSql("profile")} AS role, profile.role AS storedRole, profile.member_tier AS memberTier, profile.status, profile.version
      FROM "user" AS account
      JOIN community_profile AS profile ON profile.user_id = account.id
      WHERE account.id = ?
@@ -2376,10 +2380,12 @@ const putUserRole = async (request: Request, env: Env, userId: string): Promise<
     return json(request, { operation: operationValue(operation), user: userStateValue(target) });
   }
   const now = Date.now();
+  const storedRole = isStaffRole(role) ? role : "member";
+  const memberTier = isStaffRole(role) ? target.memberTier : role;
   const results = await env.DB.batch([
     env.DB.prepare(
       `UPDATE community_profile
-       SET role = ?, version = version + 1, updated_at = ?
+       SET role = ?, member_tier = ?, version = version + 1, updated_at = ?
        WHERE user_id = ? AND version = ?
          AND (
            role <> 'admin'
@@ -2401,15 +2407,15 @@ const putUserRole = async (request: Request, env: Env, userId: string): Promise<
                )
            )
          )`,
-    ).bind(role, now, userId, version, role, now),
+    ).bind(storedRole, memberTier, now, userId, version, storedRole, now),
     env.DB.prepare(
-      `INSERT INTO community_role_event
-         (id, user_id, from_role, to_role, actor_user_id, reason_code, created_at)
+      `INSERT INTO community_group_event
+         (id, user_id, from_group, to_group, actor_user_id, reason_code, created_at)
        SELECT ?, ?, ?, ?, ?, ?, ?
        WHERE EXISTS (
-         SELECT 1 FROM community_profile WHERE user_id = ? AND role = ? AND version = ?
+         SELECT 1 FROM community_profile WHERE user_id = ? AND role = ? AND member_tier = ? AND version = ?
        )`,
-    ).bind(crypto.randomUUID(), userId, target.role, role, access.userId, reasonCode, now, userId, role, version + 1),
+    ).bind(crypto.randomUUID(), userId, target.role, role, access.userId, reasonCode, now, userId, storedRole, memberTier, version + 1),
   ]);
   if (Number(results[0]?.meta.changes || 0) !== 1 || Number(results[1]?.meta.changes || 0) !== 1) {
     await failOperation(env, started.operationId, "role_change_conflict");
@@ -3868,7 +3874,7 @@ const dispatchGitHubWorkflow = async (
   // A GitHub App installation token can replace this without changing the dispatch contract.
   const token = env.GITHUB_ACTIONS_TOKEN?.trim();
   if (!token) throw new Error("GitHubActionsTokenUnavailable");
-  const endpoint = `https://api.github.com/repos/${RESOURCE_OWNER}/${RESOURCE_REPOSITORY}/actions/workflows/${RESOURCE_WORKFLOW}/dispatches`;
+  const endpoint = `https://api.github.com/repos/${RESOURCE_OWNER}/${RESOURCE_REPOSITORY}/actions/workflows/${resourceWorkflow(server)}/dispatches`;
   const inputs: JsonObject = { ktx2, server };
   inputs[sourceKind === "package" ? "package_r2_key" : "source_id"] = workflowSource;
   const response = await fetch(endpoint, {
@@ -3909,7 +3915,7 @@ const createResourceRun = async (request: Request, env: Env): Promise<Response> 
   const fixedFields: ReadonlyArray<readonly [string, string]> = [
     ["owner", RESOURCE_OWNER],
     ["repo", RESOURCE_REPOSITORY],
-    ["workflow", RESOURCE_WORKFLOW],
+    ["workflow", typeof body.server === "string" ? resourceWorkflow(body.server) : RESOURCE_WORKFLOW],
     ["ref", RESOURCE_REF],
   ];
   if (fixedFields.some(([key, value]) => body[key] !== undefined && body[key] !== value)) {
@@ -4088,7 +4094,7 @@ const createResourceRun = async (request: Request, env: Env): Promise<Response> 
     .run();
   const run = await findResourceRun(env, runId);
   if (!run) throw new Error("Queued resource run disappeared");
-  const workflowUrl = `https://github.com/${RESOURCE_OWNER}/${RESOURCE_REPOSITORY}/actions/workflows/${RESOURCE_WORKFLOW}`;
+  const workflowUrl = `https://github.com/${RESOURCE_OWNER}/${RESOURCE_REPOSITORY}/actions/workflows/${resourceWorkflow(server)}`;
   const operation = await transitionOperation(
     env,
     started.operationId,
@@ -4114,7 +4120,7 @@ const createResourceRun = async (request: Request, env: Env): Promise<Response> 
         owner: RESOURCE_OWNER,
         ref: RESOURCE_REF,
         repo: RESOURCE_REPOSITORY,
-        workflow: RESOURCE_WORKFLOW,
+        workflow: resourceWorkflow(server),
       },
     },
     202,
@@ -4135,22 +4141,26 @@ const putSiteSettings = async (request: Request, env: Env): Promise<Response> =>
   const body = await readJsonBody(request);
   if (!body) return error(request, 400, "invalid_body", "A JSON body is required");
   const version = expectedVersion(body);
-  if (version === null || typeof body.showTestServerContent !== "boolean")
-    return error(request, 422, "invalid_site_settings", "showTestServerContent and expectedVersion are required");
+  const roles = body.contentAccessRoles;
+  if (!Array.isArray(roles) || roles.some(role => !isUserRole(role)) || new Set(roles).size !== roles.length)
+    return error(request, 422, "invalid_site_settings", "Valid unique contentAccessRoles are required");
+  const allowedRoles = USER_ROLES.filter(role => roles.includes(role));
+  if (version === null || typeof body.showRestrictedContent !== "boolean")
+    return error(request, 422, "invalid_site_settings", "showRestrictedContent and expectedVersion are required");
   const started = await startOperation(request, env, access, "site.content_visibility.update", "site_setting", "1");
   if (started.kind === "response") return started.response;
   if (started.kind === "existing") return existingOperationResponse(request, started.operation);
   try {
     const updated = await env.DB.prepare(
-      `UPDATE site_setting SET show_test_server_content = ?, version = version + 1, updated_at = ?
+      `UPDATE site_setting SET show_test_server_content = ?, test_content_roles = ?, version = version + 1, updated_at = ?
        WHERE id = 1 AND version = ?`,
-    ).bind(body.showTestServerContent ? 1 : 0, Date.now(), version).run();
+    ).bind(body.showRestrictedContent ? 1 : 0, JSON.stringify(allowedRoles), Date.now(), version).run();
     if (Number(updated.meta.changes || 0) !== 1) {
       await failOperation(env, started.operationId, "version_conflict");
       return error(request, 409, "version_conflict", "Site settings changed; refresh and retry");
     }
     const operation = await transitionOperation(env, started.operationId, "succeeded",
-      { showTestServerContent: body.showTestServerContent, version: version + 1 }, null, null);
+      { showRestrictedContent: body.showRestrictedContent, contentAccessRoles: [...allowedRoles], version: version + 1 }, null, null);
     return json(request, { operation: operationValue(operation), siteSettings: await readSiteSettings(env) });
   } catch (failure) {
     await failOperation(env, started.operationId, "site_settings_update_failed");

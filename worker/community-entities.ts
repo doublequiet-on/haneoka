@@ -1,3 +1,5 @@
+import { hasUserCapability } from "../src/lib/user-roles";
+
 import { measureCommunityRead } from "./community-read-timing";
 import { getAuthSession } from "./auth";
 import { communityAccessState } from "./access";
@@ -201,7 +203,7 @@ async function purposes(request: Request, env: Env, url: URL): Promise<Response>
   );
   if (
     !access ||
-    access.role !== "admin" ||
+    !hasUserCapability(access.role, "site.admin") ||
     access.status !== "active" ||
     access.restriction ||
     !session.user.emailVerified

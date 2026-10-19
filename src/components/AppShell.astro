@@ -29,7 +29,7 @@ const shellTitle = entity?.title ?? title;
 const shellTitleKey = entity ? undefined : titleKey;
 const itemActive = (target: string) => target === "/community" ? ["/community", "/community/feeds"].includes(route) : isRouteActive(target, route);
 const sectionActive = (section: { items: { route: string }[] }) => section.items.some((item) => itemActive(item.route));
-const navigationServer = server === "intl-test" ? "intl" : server ?? "intl";
+const navigationServer = server?.startsWith("jp") ? "jp" : "intl";
 const navigationHref = (target: string) => {
   if (target === "/") return `/${navigationServer}/${locale}/`;
   if (target === "/announcements") return `/${navigationServer}/${locale}/announcements/`;

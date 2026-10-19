@@ -24,7 +24,7 @@ export const GET: APIRoute = async () => {
     .map((value) => value.trim())
     .filter(Boolean);
   const servers = [...new Set(configured?.length ? configured : ["intl"])];
-  if (!servers.every(isReleaseServer)) throw new Error("Unsupported static resource server");
+  if (!servers.every(value => value === "jp" || value === "intl")) throw new Error("Unsupported static resource server");
   const urls = new Set<string>();
   for (const selected of servers.filter(isPublicReleaseServer)) {
     const server = selected as ReleaseServer;

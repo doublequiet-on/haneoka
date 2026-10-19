@@ -170,10 +170,16 @@ const i18nSeed = serializeI18nSeed(createServerI18nContext(locale, route).seed()
       import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
       import { installI18nDom } from "../i18n/dom";
       import { installUiFonts } from "../lib/ui-fonts";
+      import { refreshContentAccess } from "../lib/content-access";
+      import { signedInHint } from "../lib/community-viewer";
       import { installUpdateCheck } from "../lib/update-check";
       installUiFonts();
       installI18nDom();
       installUpdateCheck();
+      const refreshDocumentAccess = () => {
+        if (signedInHint() || document.documentElement.dataset.contentAccess === "1") void refreshContentAccess();
+      };
+      refreshDocumentAccess();
       if ("serviceWorker" in navigator)
         addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}), { once: true });
       const restoreAudioDock = async () => {
@@ -237,13 +243,18 @@ const i18nSeed = serializeI18nSeed(createServerI18nContext(locale, route).seed()
         next.documentElement.dataset.seed = isSeed(seed) ? seed : "haneoka";
         // A prefetched document must not undo a newer administrative setting observed in this tab.
         if (Number(document.documentElement.dataset.siteSettingsVersion || 0) > Number(next.documentElement.dataset.siteSettingsVersion || 0)) {
-          next.documentElement.dataset.showTestServerContent = document.documentElement.dataset.showTestServerContent || "0";
+          next.documentElement.dataset.contentAccess = document.documentElement.dataset.contentAccess || "0";
+          if (document.documentElement.dataset.contentSources) next.documentElement.dataset.contentSources = document.documentElement.dataset.contentSources;
+          else delete next.documentElement.dataset.contentSources;
+          if (document.documentElement.dataset.contentSourceFamilies) next.documentElement.dataset.contentSourceFamilies = document.documentElement.dataset.contentSourceFamilies;
+          else delete next.documentElement.dataset.contentSourceFamilies;
           next.documentElement.dataset.siteSettingsVersion = document.documentElement.dataset.siteSettingsVersion;
         }
       });
       document.addEventListener("astro:after-swap", () => {
         delete document.documentElement.dataset.navigationHref;
         applyTheme();
+        refreshDocumentAccess();
       });
     </script>
   </body>
