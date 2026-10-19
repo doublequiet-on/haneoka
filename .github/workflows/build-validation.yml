@@ -98,7 +98,8 @@ jobs:
       api_egress: ${{ startsWith(matrix.server, 'jp-test-') }}
       github_environment: ${{ inputs.github_environment || format('resource-{0}', matrix.server) }}
       server: ${{ matrix.server }}
-      package_r2_key: ${{ inputs.package_r2_key || vars.VALIDATION_PACKAGE_KEY || '' }}
+      package_r2_key: ${{ inputs.package_r2_key }}
+      package_source_server: ${{ startsWith(matrix.server, 'jp-test-') && 'jp' || '' }}
       source_id: ${{ inputs.source_id }}
       resume_stage_run_id: ${{ inputs.resume_stage_run_id }}
       ktx2: ${{ github.event_name == 'schedule' || inputs.ktx2 || false }}

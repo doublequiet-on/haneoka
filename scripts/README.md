@@ -30,6 +30,11 @@ The scheduled GitHub Actions run checks jp and intl at
 source's package, the run reuses the stored R2 package instead of
 re-downloading from the publisher; only a real update pays that transfer. `scripts/acquire_package.py` discovers the package using the selected environment's private acquisition settings, downloads the current file, and stores it under a SHA-256 content-addressed R2 key. Package updates create new keys; large uploads use multipart transfer.
 
+`current-package --from-server jp` (or `intl`) reads the selected base server's
+latest published package identity and CAS key. It validates the source manifest
+and package name before reuse. Resource and Master discovery still use the
+target server; an unavailable base package stops the lookup.
+
 Intl package discovery reads the official website's live JSON download
 configuration (`publisher-json`) using the private `sourceUrl`, `discoveryHosts`,
 `urlPath` field sequence, and `downloadPattern` allowlist. It keeps the package
@@ -275,6 +280,7 @@ PYTHONPATH=scripts python scripts/pipeline.py --server jp <command> --help
 | `verify-release` / `verify-remote`                    | Verify local or published releases                                                                          |
 | `publish-source` / `publish-release`                  | Publish verified data to R2                                                                                 |
 | `fetch-package` / `fetch-source` / `fetch-home-spots` | Restore stored inputs (`fetch-source` supports shard and digest filtering)                                     |
+| `current-package`                                    | Read the published package identity; `--from-server jp\|intl` selects a shared base package                  |
 | `fetch-release-document`                              | Fetch one verified JSON document from a published release                                                        |
 | `prune-sources` / `prune-releases` / `prune-uploads`  | Apply retention policies                                                                                    |
 | `gc-r2`                                               | Remove unreferenced R2 objects                                                                              |

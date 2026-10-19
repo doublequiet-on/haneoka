@@ -1,4 +1,4 @@
-import { CONTENT_SOURCE_IDS } from "./content-access-state";
+import { CONTENT_SOURCE_IDS } from "./content-access-state.ts";
 export const SEARCH_SCOPES = ["all", "catalog", "stories", "help", "community"] as const;
 export type SearchScope = (typeof SEARCH_SCOPES)[number];
 export const isSearchScope = (value: unknown): value is SearchScope =>

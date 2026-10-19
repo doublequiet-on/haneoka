@@ -1,5 +1,5 @@
 import { searchCategory } from "../../src/lib/search-categories.ts";
-import { isPublicReleaseServer } from "../../src/lib/temporary-public-routing.ts";
+import { isContentSourceFamily as isPublicReleaseServer } from "../../src/lib/content-access-state.ts";
 import { parseFragment } from "parse5";
 
 const plainText = (node) => node.nodeName === "#text" ? node.value : (node.childNodes || []).map(plainText).join("");

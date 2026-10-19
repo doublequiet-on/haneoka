@@ -30,6 +30,9 @@ on:
       package_r2_key:
         required: false
         type: string
+      package_source_server:
+        required: false
+        type: string
       source_id:
         required: false
         type: string
@@ -132,7 +135,8 @@ jobs:
       stage_prefix: ${{ steps.unity_reuse.outputs.stage_prefix || format('private/resource-pipeline-stage/{0}/{1}', github.run_id, inputs.server) }}
     env:
       RESOURCE_PIPELINE_CONFIG: ${{ secrets.RESOURCE_PIPELINE_CONFIG }}
-      PACKAGE_R2_KEY: ${{ inputs.package_r2_key || (inputs.audience != 'production' && (secrets.VALIDATION_PACKAGE_KEY || vars.VALIDATION_PACKAGE_KEY)) || '' }}
+      PACKAGE_R2_KEY: ${{ inputs.package_r2_key || (inputs.package_source_server == '' && inputs.audience != 'production' && (secrets.VALIDATION_PACKAGE_KEY || vars.VALIDATION_PACKAGE_KEY)) || '' }}
+      PACKAGE_SOURCE_SERVER: ${{ inputs.package_source_server }}
       SOURCE_ID_INPUT: ${{ inputs.source_id }}
       RESUME_STAGE_RUN_ID: ${{ inputs.resume_stage_run_id }}
       RESOURCE_CDN_AUTHORIZATION: ${{ secrets.RESOURCE_CDN_AUTHORIZATION || secrets.resource_cdn_authorization }}
@@ -194,6 +198,11 @@ jobs:
             python scripts/pipeline.py --server "$RESOURCE_SERVER" fetch-source \
               --source "$SOURCE_ID_INPUT" --role package --role master-manifest --role master-data > "$RUNNER_TEMP/source.json"
           else
+            if [[ -z "$PACKAGE_R2_KEY" && -n "$PACKAGE_SOURCE_SERVER" ]]; then
+              package_json="$(python scripts/pipeline.py --server "$RESOURCE_SERVER" current-package --from-server "$PACKAGE_SOURCE_SERVER")"
+              PACKAGE_R2_KEY="$(jq -er 'select(.available == true) | .casKey | select(type == "string" and length > 0)' <<< "$package_json")"
+              echo "Using the latest published $PACKAGE_SOURCE_SERVER package"
+            fi
             run_live "$RUNNER_TEMP/resolved-resource-summary.json" \
               python scripts/pipeline.py --server "$RESOURCE_SERVER" --defer-unavailable resolve-server \
               --output "$RUNNER_TEMP/resolved-resource-config.json" --mask-github
@@ -366,6 +375,8 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.secret_writer_gh_token }}
+          PIPELINE_AUDIENCE: ${{ inputs.audience }}
+          RESOURCE_GITHUB_ENVIRONMENT: ${{ inputs.github_environment }}
         run: |
           if [[ -z "$GH_TOKEN" ]]; then
             echo "secret_writer_gh_token is not configured; skipping CDN credential refresh" >&2
@@ -383,7 +394,12 @@ jobs:
             echo "Stored CDN credential secret is already current"
             exit 0
           fi
-          printf '%s' "$auth" | gh secret set RESOURCE_CDN_AUTHORIZATION
+          secret_args=(--repo "$GITHUB_REPOSITORY")
+          if [[ "$PIPELINE_AUDIENCE" != "production" ]]; then
+            if [[ -z "$RESOURCE_GITHUB_ENVIRONMENT" ]]; then echo "No environment selected; skipping credential storage"; exit 0; fi
+            secret_args+=(--env "$RESOURCE_GITHUB_ENVIRONMENT")
+          fi
+          printf '%s' "$auth" | gh secret set RESOURCE_CDN_AUTHORIZATION "${secret_args[@]}"
           echo "Refreshed RESOURCE_CDN_AUTHORIZATION from the $RESOURCE_SERVER server lookup"
       - name: Export build identity
         id: identity

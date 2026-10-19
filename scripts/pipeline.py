@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tarfile
+from dataclasses import replace
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,7 @@ from ingest.reuse import build_reuse_index
 from ingest.unity import index_unity_dependencies
 from publish.r2 import (
     R2Store,
+    _current_pointer,
     current_release_document,
     download_current_release_paths,
     fetch_package_artifact,
@@ -73,7 +75,7 @@ from publish.stages import prune_pipeline_stages
 from publish.song_reference import publish_meta_reference
 from verify.release import verify_release
 from verify.remote import verify_remote
-from verify.source import verify_source
+from verify.source import validate_source_manifest, verify_source
 
 
 def _pipeline_hash(config: ServerConfig) -> str:
@@ -245,19 +247,24 @@ def command_probe_source(args: argparse.Namespace) -> None:
 
 def _current_package_document(config, concurrency: int) -> dict:
     store = R2Store(config, concurrency)
-    pointer = store.get_json(f"servers/{config.id}/current.json")
+    pointer = _current_pointer(store, config)
+    if pointer is None:
+        return {"available": False}
     source_id = str((pointer or {}).get("sourceId") or "")
     manifest = (
         store.get_json(f"servers/{config.id}/sources/{source_id}/source.json")
         if source_id
         else None
     )
-    package = (manifest or {}).get("package") or {}
+    records = validate_source_manifest(manifest, config.id, source_id, require_storage=True)
+    package = manifest["package"]
+    if package.get("packageName") != config.package_name:
+        raise ValueError("published package name does not match the selected source configuration")
     digest = next(
         (
             str(item["sha256"])
-            for item in (manifest or {}).get("files", [])
-            if isinstance(item, dict) and item.get("role") == "package"
+            for item in records
+            if item.get("role") == "package" and item.get("path") == package["file"]
         ),
         "",
     )
@@ -282,9 +289,15 @@ def _current_package_document(config, concurrency: int) -> dict:
 
 def command_current_package(args: argparse.Namespace) -> None:
     config = load_server_config(args.server)
+    if args.from_server:
+        config = replace(config, id=args.from_server)
     try:
         document = _current_package_document(config, args.concurrency)
+        if args.from_server and not document.get("available"):
+            raise ValueError(f"no published package identity available for {config.id}")
     except Exception as error:  # noqa: BLE001 - callers treat unavailability as "no reuse"
+        if args.from_server:
+            raise
         sys.stderr.write(f"warning: current package lookup failed: {error}\n")
         _print({"server": config.id, "available": False})
         return
@@ -1347,6 +1360,7 @@ def parser() -> argparse.ArgumentParser:
         help="report the published source's package fingerprint and CAS key",
     )
     current_package.add_argument("--concurrency", type=int, default=8)
+    current_package.add_argument("--from-server", choices=("jp", "intl"))
     current_package.set_defaults(run=command_current_package)
     credential = commands.add_parser(
         "cdn-credential",
