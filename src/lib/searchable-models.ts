@@ -12,6 +12,7 @@ import {
 import { disambiguateTitles } from "./title-disambiguation";
 import type { ReleaseServer } from "./release-server";
 import { modelPreviewSources } from "./model-artwork";
+import { pinCrossCatalogValue } from "./cross-server/presentation";
 
 export interface SearchableModelPage {
   kind: "live2d" | "spine";
@@ -109,6 +110,7 @@ async function buildSearchableModelPages(server: ReleaseServer): Promise<Searcha
     const mergedModel = { ...model, ...detail };
     const coreMetadata = await cubismModelMetadata(mergedModel, release);
     if (coreMetadata) mergedModel.coreMetadata = coreMetadata;
+    const pinnedModel = pinCrossCatalogValue(mergedModel, release) as RecordValue;
     live2dPages.push({
       kind: "live2d" as const,
       id: key,
@@ -125,13 +127,13 @@ async function buildSearchableModelPages(server: ReleaseServer): Promise<Searcha
         ]),
       ) as Record<Locale, string>,
       facts,
-      image: modelPreviewSources(mergedModel)[0] || "",
-      model: mergedModel,
+      image: modelPreviewSources(pinnedModel)[0] || "",
+      model: pinnedModel,
     });
   }
 
   const spinePages = spineModels.map(([key, index]) => {
-    const model = { ...index, ...spineDetails.get(key) };
+    const model = pinCrossCatalogValue({ ...index, ...spineDetails.get(key) }, release) as RecordValue;
     const id = String(model.id ?? key);
     const animations = (Array.isArray(model.animations) ? model.animations : [])
       .map((name) => text(name, "ja"))

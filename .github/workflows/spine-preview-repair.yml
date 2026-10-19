@@ -1,0 +1,84 @@
+name: Repair released Spine previews
+
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: Production server
+        type: choice
+        options: [intl, jp]
+        default: intl
+        required: true
+      base_release:
+        description: Exact observed current release
+        type: string
+        required: true
+      source_id:
+        description: Exact source of the observed current release
+        type: string
+        required: true
+      producer_pin:
+        description: Reviewed immutable producer commit
+        type: string
+        required: true
+      mode:
+        description: Publish only after at least 230 verified real model previews
+        type: choice
+        options: [prepare, publish]
+        default: prepare
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resource-build-server-${{ inputs.server }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: resource-${{ inputs.server }}
+    env:
+      RESOURCE_SERVER: ${{ inputs.server }}
+      RESOURCE_PIPELINE_CONFIG: ${{ secrets.RESOURCE_PIPELINE_CONFIG }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.producer_pin }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-resource-pipeline
+      - name: Install pnpm
+        run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install locked rendering dependencies
+        run: |
+          python scripts/publish/spine_preview_repair.py --bootstrap-node "$RUNNER_TEMP/spine-preview-node"
+          pnpm --dir "$RUNNER_TEMP/spine-preview-node" install --frozen-lockfile
+          ln -s "$RUNNER_TEMP/spine-preview-node/node_modules" node_modules
+      - name: Render, verify and optionally publish the preview-only projection
+        env:
+          BASE_RELEASE: ${{ inputs.base_release }}
+          SOURCE_ID: ${{ inputs.source_id }}
+          PRODUCER_PIN: ${{ inputs.producer_pin }}
+          MODE: ${{ inputs.mode }}
+        run: >-
+          python scripts/publish/spine_preview_repair.py
+          --server "$RESOURCE_SERVER" --base-release "$BASE_RELEASE"
+          --source "$SOURCE_ID" --producer-pin "$PRODUCER_PIN"
+          --mode "$MODE" --output "$RUNNER_TEMP/spine-preview-repair-output"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: spine-preview-repair-${{ inputs.server }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/spine-preview-repair-output/*.json
+          if-no-files-found: ignore
+          retention-days: 7

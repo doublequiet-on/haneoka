@@ -9,7 +9,7 @@ export type SpineBackground = { r: number; g: number; b: number } | null;
 interface Entry extends Value {
   animations?: string[];
   atlases?: Array<{ pages?: Resource[] }>;
-  runtime?: { atlas?: Resource; json?: Resource; scale?: number; status?: string };
+  runtime?: { atlas?: Resource; json?: Resource; format?: string; scale?: number; status?: string };
   scale?: number;
   skins?: string[];
 }
@@ -120,16 +120,17 @@ export class SpineStage {
     try {
       check();
       const runtime = entry.runtime;
+      const binary = runtime?.format === "binary";
       const atlasUrl = String(runtime?.atlas?.url || "");
-      const jsonUrl = String(runtime?.json?.url || "");
+      const skeletonUrl = String(runtime?.json?.url || "");
       const pages = (entry.atlases || []).flatMap((atlas) => atlas.pages || []).filter((page) => page.name && page.url);
-      if (runtime?.status !== "ready" || !atlasUrl || !jsonUrl || !pages.length)
+      if (runtime?.status !== "ready" || !atlasUrl || !skeletonUrl || !pages.length)
         throw new Error("Spine model is not browser-ready");
-      const [three, spine, atlasText, skeletonJson] = await Promise.all([
+      const [three, spine, atlasText, skeletonSource] = await Promise.all([
         import("three"),
         import("@esotericsoftware/spine-threejs"),
         readAsset(atlasUrl, controller.signal, (response) => response.text()),
-        readAsset(jsonUrl, controller.signal, (response) => response.json()),
+        readAsset(skeletonUrl, controller.signal, (response) => binary ? response.arrayBuffer() : response.json()),
       ]);
       check();
       const atlas = new spine.TextureAtlas(atlasText);
@@ -149,10 +150,12 @@ export class SpineStage {
         check();
         page.setTexture(new spine.ThreeJsTexture(bitmap, true));
       }
-      const parser = new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
+      const parser = binary
+        ? new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas))
+        : new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
       parser.scale = Number(runtime.scale ?? entry.scale ?? 1);
       check();
-      const skeletonData = parser.readSkeletonData(skeletonJson);
+      const skeletonData = parser.readSkeletonData(binary ? new Uint8Array(skeletonSource) : skeletonSource);
       // Some animations begin with every attachment hidden. The exported
       // skeleton bounds reserve their framing until those attachments appear.
       this.authoredBounds = {

@@ -1,6 +1,6 @@
 """Build a provenance-preserving manifest for every extracted Spine model.
 
-The Unity extractor already materializes the real Spine JSON, atlas text, and
+The Unity extractor already materializes the real Spine skeleton bytes, atlas text, and
 page textures.  This stage connects those outputs through the actual Unity
 ``SkeletonDataAsset -> SpineAtlasAsset -> Material -> Texture2D`` pointers.
 It intentionally does *not* invent a portrait from one atlas page: a browser
@@ -66,14 +66,15 @@ SCHEMA = "haneoka-spine-build-v3"
 # rendered v4 PNG must not be reused after this transparency-policy change.
 # v6 renders at 2x the publish size and Lanczos-filters the render back down:
 # the supersampled result replaces the aliased v5 edges, so v5 PNGs are not
-# reusable either.
-PREVIEW_SCHEMA = "haneoka-spine-preview-v6"
+# reusable either. v7 frames the actual posed attachments rather than unused
+# vertices in Three's preallocated batch buffers.
+PREVIEW_SCHEMA = "haneoka-spine-preview-v7"
 BROWSER_RUNTIME_PACKAGE = "@esotericsoftware/spine-threejs"
 BROWSER_RUNTIME_VERSION = "4.2.119"
 BROWSER_RUNTIME_SERIES = "4.2"
 DEFAULT_ANON_TOKYO_ANIMATION = "f_idle"
 PREVIEW_UNAVAILABLE_REASON = "headless-webgl-spine-renderer-not-provisioned"
-BROWSER_LOADER = "TextureAtlas + AtlasAttachmentLoader + SkeletonJson (explicit page resolver)"
+BROWSER_LOADER = "TextureAtlas + AtlasAttachmentLoader + SkeletonJson / SkeletonBinary (explicit page resolver)"
 PREVIEW_RENDERER = "headless-chrome-webgl-spine-threejs"
 PREVIEW_WIDTH = 512
 PREVIEW_HEIGHT = 512
@@ -340,6 +341,8 @@ def _anon_tokyo_front_preview_policy(skeleton_json: dict[str, Any] | None) -> di
 
 def _spine_series(value: Any) -> str:
     text = str(value or "").strip()
+    if text == "4.2-from-4.3.23":
+        return "4.2"
     parts = text.split(".")
     if len(parts) >= 2 and all(part.isdigit() for part in parts[:2]):
         return f"{parts[0]}.{parts[1]}"
@@ -666,9 +669,14 @@ async function loadComponent(component) {
   }
   const jsonResponse = await fetch(`/${component.json.path}`, { cache: "no-store" });
   if (!jsonResponse.ok) throw new Error(`skeleton request failed (${jsonResponse.status}): ${component.json.path}`);
-  const parser = new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
+  const binary = component.format === "binary";
+  const parser = binary
+    ? new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas))
+    : new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
   parser.scale = component.scale;
-  const skeletonData = parser.readSkeletonData(JSON.parse(await jsonResponse.text()));
+  const skeletonData = parser.readSkeletonData(binary
+    ? new Uint8Array(await jsonResponse.arrayBuffer())
+    : JSON.parse(await jsonResponse.text()));
   // Match Unity's source material: all slot fragments use ordinary
   // premultiplied-alpha blending, but neither read nor write the depth buffer.
   // `installSpinePainterOrder` below makes the authored slot order, rather
@@ -733,7 +741,17 @@ function disposeComponent(component) {
 
 function cameraFor(group, width, height) {
   group.updateMatrixWorld(true);
-  const bounds = new THREE.Box3().setFromObject(group);
+  const bounds = new THREE.Box3();
+  for (const mesh of group.children) {
+    const posed = mesh.skeleton.getBoundsRect(new spine.SkeletonClipping());
+    if (!(posed.width > 0 && posed.height > 0)
+      || ![posed.x, posed.y, posed.width, posed.height].every(Number.isFinite)) continue;
+    const attached = new THREE.Box3(
+      new THREE.Vector3(posed.x, posed.y, 0),
+      new THREE.Vector3(posed.x + posed.width, posed.y + posed.height, 0),
+    );
+    bounds.union(attached.applyMatrix4(mesh.matrixWorld));
+  }
   if (bounds.isEmpty()) throw new Error("rendered Spine geometry has no bounds");
   const size = bounds.getSize(new THREE.Vector3());
   if (!(size.x > 0) || !(size.y > 0)) throw new Error("rendered Spine geometry has zero bounds");
@@ -1437,6 +1455,7 @@ def _preview_component(
         return None
     component = {
         "json": {"path": str(skeleton["path"])},
+        **({"format": "binary"} if runtime.get("format") == "binary" else {}),
         "atlas": {"path": str(atlas["path"])},
         "pages": [
             {"name": str(page.get("name") or ""), "path": str(page["path"])}
@@ -1948,6 +1967,43 @@ def _render_previews(
     return rendered_models, rendered_recipes, reuse_summary
 
 
+_SPINE_BINARY_METADATA_SOURCE = r'''
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { SkeletonBinary, TextureAtlas, AtlasAttachmentLoader } from "@esotericsoftware/spine-threejs";
+const [skeletonPath, atlasPath, expectedVersion] = process.argv.slice(1);
+const require = createRequire(import.meta.url);
+if (require("@esotericsoftware/spine-threejs/package.json").version !== expectedVersion)
+  throw new Error("Spine runtime package version mismatch");
+const atlas = new TextureAtlas(readFileSync(atlasPath, "utf8"));
+const parser = new SkeletonBinary(new AtlasAttachmentLoader(atlas));
+const data = parser.readSkeletonData(new Uint8Array(readFileSync(skeletonPath)));
+process.stdout.write(JSON.stringify({
+  skeleton: { spine: data.version, hash: data.hash, x: data.x, y: data.y, width: data.width, height: data.height },
+  animations: data.animations.map(animation => animation.name),
+  skins: data.skins.map(skin => skin.name),
+}));
+'''
+
+
+def _binary_skeleton_metadata(layout: Any, output: dict[str, Any], atlas: dict[str, Any]) -> dict[str, Any]:
+    result = subprocess.run(
+        [
+            "node", "--input-type=module", "-e", _SPINE_BINARY_METADATA_SOURCE,
+            str(layout.root / output["path"]), str(layout.root / atlas["atlas"]["path"]),
+            BROWSER_RUNTIME_VERSION,
+        ],
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(result.stderr.decode("utf-8", "replace").strip()[:1000] or "Spine binary parsing failed")
+    return json.loads(result.stdout)
+
+
 def _model_document(
     config: ServerConfig,
     layout: Any,
@@ -1964,6 +2020,7 @@ def _model_document(
     skeleton_pointer = resolver.resolve_pointer(data.get("skeletonJSON"), serialized_file)
     skeleton_output = None
     skeleton_json: dict[str, Any] | None = None
+    binary_metadata: dict[str, Any] | None = None
     skeleton_format = "unknown"
     if not skeleton_pointer:
         reasons.append(_reason("skeleton-json-pointer-unresolved", f"no skeleton JSON pointer: {source_path}"))
@@ -1978,10 +2035,9 @@ def _model_document(
             if not isinstance(skeleton_json, dict) or not isinstance(skeleton_json.get("skeleton"), dict):
                 raise ValueError("missing skeleton object")
             skeleton_format = "json"
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-            # The native pipeline may contain binary skeletons.  Preserve their
-            # runtime path, but never claim that an unparsed binary is browser-ready.
+        except (UnicodeDecodeError, json.JSONDecodeError):
             skeleton_format = "binary"
+        except (OSError, ValueError) as error:
             reasons.append(_reason("skeleton-json-invalid", f"cannot parse Spine JSON {skeleton_path}: {error}"))
 
     atlases: list[dict[str, Any]] = []
@@ -1998,10 +2054,15 @@ def _model_document(
         if atlas is not None:
             atlases.append(atlas)
 
-    skeleton_meta = skeleton_json.get("skeleton", {}) if isinstance(skeleton_json, dict) else {}
+    if skeleton_format == "binary" and skeleton_output is not None and len(atlases) == 1:
+        try:
+            binary_metadata = _binary_skeleton_metadata(layout, skeleton_output, atlases[0])
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            reasons.append(_reason("skeleton-binary-invalid", f"cannot parse Spine binary {skeleton_path}: {error}"))
+    skeleton_meta = (skeleton_json or binary_metadata or {}).get("skeleton", {})
     spine_version = str(skeleton_meta.get("spine") or "") if isinstance(skeleton_meta, dict) else ""
     series = _spine_series(spine_version)
-    if skeleton_format == "json" and series != BROWSER_RUNTIME_SERIES:
+    if skeleton_format in {"json", "binary"} and series != BROWSER_RUNTIME_SERIES:
         reasons.append(
             _reason(
                 "spine-runtime-series-mismatch",
@@ -2028,7 +2089,11 @@ def _model_document(
         if isinstance(skeleton_json, dict) and isinstance(skeleton_json.get("animations"), dict)
         else []
     )
-    skins = _skin_names(skeleton_json.get("skins")) if isinstance(skeleton_json, dict) else []
+    if binary_metadata is not None:
+        animations = sorted(binary_metadata["animations"])
+        skins = sorted(binary_metadata["skins"])
+    else:
+        skins = _skin_names(skeleton_json.get("skins")) if isinstance(skeleton_json, dict) else []
     family = (
         "anon-tokyo"
         if source_path.startswith("Assets/AddressableResources/AnonTokyo/")
@@ -2037,12 +2102,15 @@ def _model_document(
         else "other"
     )
     preview_policy = (
-        _anon_tokyo_front_preview_policy(skeleton_json) if family == "anon-tokyo" else None
+        _anon_tokyo_front_preview_policy(skeleton_json) if family == "anon-tokyo" and isinstance(skeleton_json, dict) else None
     )
-    ready = not reasons and skeleton_output is not None and len(atlases) == 1 and skeleton_format == "json"
+    ready = (
+        not reasons and skeleton_output is not None and len(atlases) == 1
+        and (skeleton_json is not None or binary_metadata is not None)
+    )
     runtime: dict[str, Any] = {
         "status": "ready" if ready else "unavailable",
-        "verification": "source-graph-and-JSON-structure",
+        "verification": "source-graph-and-Spine-runtime-structure" if skeleton_format == "binary" else "source-graph-and-JSON-structure",
         "package": BROWSER_RUNTIME_PACKAGE,
         "packageVersion": BROWSER_RUNTIME_VERSION,
         "runtimeSeries": BROWSER_RUNTIME_SERIES,
