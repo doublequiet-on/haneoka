@@ -90,6 +90,11 @@ bind server, source, release, engine and the v6 recipe. Core snapshots remain
 immutable when computations become ready. In-progress chart-player pages stay
 on their existing data.
 
+`STATIC_BUILD_INPUT_ROOT` points to the capture directory containing `capture.json`
+and `content/`. Run `node scripts/build/publish-page-computed.mjs --verify-only`
+to validate these real captured records and construct receipts in memory without
+R2 credentials or publication. This does not verify remote bucket permissions.
+
 `config/catalog-page-rollout.json` selects enabled kinds. A new frontend backfills
 its executing projector revision before exposing the matching registration in
 ASSETS. To disable adoption, deploy an empty enabledKinds list, or revert the
