@@ -2,7 +2,7 @@ import { LOCALES } from "../i18n/locales";
 import { ROUTES } from "../config/routes";
 import { SEKAI_STORY_SECTIONS } from "../config/navigation";
 import { ANON_TOKYO_MODES, type ReleaseServer } from "../lib/resource-route";
-import { catalogEntityData, staticCatalogPageServers, ENTITY_PAYLOAD_RESOURCES } from "../lib/entity-graph";
+import { catalogEntityData, staticCatalogPageServers, ENTITY_PAYLOAD_RESOURCES, entityProjectionMetrics } from "../lib/entity-graph";
 import { searchableCatalogPages } from "../lib/searchable-catalog";
 import { searchableModelPages } from "../lib/searchable-models";
 import { searchableStoryPages } from "../lib/searchable-stories";
@@ -75,10 +75,12 @@ export async function prepareStaticInputs(): Promise<void> {
         () => searchableStoryPages(server),
         () => searchableHelpPages(server),
       ]);
-      const first = pages.find((page) =>
-        ENTITY_PAYLOAD_RESOURCES.includes(page.resource as (typeof ENTITY_PAYLOAD_RESOURCES)[number]),
-      );
-      if (first) await catalogEntityData(server, first.resource, first.id);
+      for (const page of pages) {
+        if (ENTITY_PAYLOAD_RESOURCES.includes(page.resource as (typeof ENTITY_PAYLOAD_RESOURCES)[number]))
+          await catalogEntityData(server, page.resource, page.id);
+      }
+      for (const page of await searchableStoryPages(server))
+        await catalogEntityData(server, "stories", page.storyId);
       for (const kind of ["missions", "tgw-card"] as const) {
         const first = pages.find((page) => page.resource === kind);
         if (first) await catalogSystemEntityData(kind, server, first.id);
@@ -147,7 +149,11 @@ export async function prepareStaticInputs(): Promise<void> {
   console.log(
     JSON.stringify({
       captured: manifest?.records.length,
+      entityProjection: entityProjectionMetrics(),
       files: manifest?.files.length,
+      entityProjectionRecords: manifest?.records.filter(record => record.role === "entity-projection").length,
+      entityProjectionUniqueBytes: [...new Map(manifest?.records.filter(record => record.role === "entity-projection")
+        .map(record => [record.sha256, record.bytes])).values()].reduce((sum, bytes) => sum + bytes, 0),
       nativeBlobs: staticCatalogBlobMetrics(),
       nativeJson: staticCatalogJsonMetrics(),
       unavailableInputs: manifest?.records.filter((record) => record.format === "error").map((record) => record.key),

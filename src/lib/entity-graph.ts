@@ -24,6 +24,7 @@ import { searchableCatalogPages } from "./searchable-catalog";
 import { searchableStoryPages } from "./searchable-stories";
 import { RELEASE_SERVERS, type ReleaseServer } from "./resource-route";
 import { PUBLIC_RELEASE_SERVERS } from "./temporary-public-routing";
+import { staticBuildJson } from "../server/static-input-store";
 
 export async function staticCatalogPageServers(configuredOnly = false): Promise<ReleaseServer[]> {
   if (!configuredOnly) return [...PUBLIC_RELEASE_SERVERS];
@@ -237,8 +238,12 @@ interface Graph {
 }
 
 const graphs = new Map<ReleaseServer, Promise<Graph>>();
+const projectionMetrics = { fullGraphs: 0, coreGraphs: 0, pageMaps: 0 };
+export const entityProjectionMetrics = () => ({ ...projectionMetrics });
 
-async function loadGraph(server: ReleaseServer): Promise<Graph> {
+async function loadGraph(server: ReleaseServer, core = false): Promise<Graph> {
+  if (core) projectionMetrics.coreGraphs++;
+  else projectionMetrics.fullGraphs++;
   const release = await staticCatalogRelease(server);
   const required = (path: string) => fetchStaticCatalog(path, server, release);
   const [
@@ -282,13 +287,13 @@ async function loadGraph(server: ReleaseServer): Promise<Graph> {
     required("stickers"),
     required("songs?projection=4"),
     fetchOptionalStaticCatalog("sources/Assets/AddressableResources/Live/Images/Atlas/LiveAtlas.spriteatlasv2",server,release),
-    required("stories?projection=4"),
-    required("live2d"),
-    required("friendships"),
-    fetchOptionalStaticCatalog("character-missions", server, release),
-    required("voices"),
+    core ? {} : required("stories?projection=4"),
+    core ? {} : required("live2d"),
+    core ? {} : required("friendships"),
+    core ? { value: null } : fetchOptionalStaticCatalog("character-missions", server, release),
+    core ? {} : required("voices"),
   ]);
-  const voiceDetails = await fetchStaticCatalogBatch("voices", entries(voices, "entries").map(([id]) => id), server, release);
+  const voiceDetails = core ? new Map<string, RecordValue>() : await fetchStaticCatalogBatch("voices", entries(voices, "entries").map(([id]) => id), server, release);
   return {
     server,
     release,
@@ -654,6 +659,25 @@ export async function buildEntityPayloads(
   ids: readonly string[],
 ): Promise<Map<string, EntityPayload>> {
   const graph = await entityGraph(server);
+  return projectEntityPayloads(graph, resource, ids);
+}
+
+const coreGraphs = new Map<ReleaseServer, Promise<Graph>>();
+export async function buildCoreEntityPayloads(
+  server: ReleaseServer, resource: "cards" | "support-cards" | "events" | "songs", ids: readonly string[],
+): Promise<Map<string, EntityPayload>> {
+  if (!["cards", "support-cards", "events", "songs"].includes(resource)) throw new Error("Unsupported core entity resource");
+  let graph = coreGraphs.get(server);
+  if (!graph) {
+    graph = loadGraph(server, true);
+    coreGraphs.set(server, graph);
+    graph.catch(() => coreGraphs.delete(server));
+  }
+  return projectEntityPayloads(await graph, resource, ids);
+}
+
+async function projectEntityPayloads(graph: Graph, resource: EntityPayloadResource, ids: readonly string[]): Promise<Map<string, EntityPayload>> {
+  const server = graph.server;
   const [details, summaries] = await Promise.all([
     fetchStaticCatalogBatch(resource, ids, server, graph.release),
     collectionSummaries(graph, resource),
@@ -889,6 +913,8 @@ const pageData = new Map<ReleaseServer, Promise<Map<string, PageData>>>();
 const payloadKey = (resource: string, id: string) => `${resource}\u0000${id}`;
 
 async function buildPageData(server: ReleaseServer): Promise<Map<string, PageData>> {
+  if (process.env.STATIC_BUILD_INPUT_MODE === "frozen") throw new Error("Frozen render must read entity projections");
+  projectionMetrics.pageMaps++;
   const pages = await searchableCatalogPages(server);
   const output = new Map<string, PageData>();
   for (const resource of ENTITY_PAYLOAD_RESOURCES) {
@@ -909,13 +935,26 @@ export async function catalogEntityData(
   resource: string,
   id: string,
 ): Promise<PageData | undefined> {
-  let pending = pageData.get(server);
-  if (!pending) {
-    pending = buildPageData(server);
-    pageData.set(server, pending);
-    pending.catch(() => pageData.delete(server));
-  }
-  return (await pending).get(payloadKey(resource, id));
+  const pin = await staticCatalogRelease(server);
+  const identity = { schema: "haneoka-base-page-v1", server, sourceId: pin.sourceId, releaseId: pin.releaseId, resource, id };
+  const record = await staticBuildJson(`base-page:${JSON.stringify(identity)}`, "entity-projection", async () => {
+    let pending = pageData.get(server);
+    if (!pending) {
+      pending = buildPageData(server);
+      pageData.set(server, pending);
+      pending.catch(() => pageData.delete(server));
+    }
+    return { ...identity, payload: (await pending).get(payloadKey(resource, id)) ?? null };
+  });
+  for (const key of Object.keys(identity) as Array<keyof typeof identity>)
+    if (record[key] !== identity[key]) throw new Error(`Frozen page identity differs: ${server}/${resource}/${id}`);
+  const payload = record.payload;
+  if (payload && (payload.server !== server || payload.releaseId !== pin.releaseId || payload.id !== id ||
+    payload.schema !== (resource === "stories" ? STORY_PAYLOAD_SCHEMA : ENTITY_PAYLOAD_SCHEMA)))
+    throw new Error(`Frozen page payload differs: ${server}/${resource}/${id}`);
+  if (payload?.schema === ENTITY_PAYLOAD_SCHEMA && (payload.resource !== resource || payload.sourceId !== pin.sourceId))
+    throw new Error(`Frozen entity source differs: ${server}/${resource}/${id}`);
+  return payload ?? undefined;
 }
 
 /** Servers whose entity pages this build renders (`STATIC_RESOURCE_SERVERS`, default intl). */

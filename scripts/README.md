@@ -7,6 +7,43 @@ catalog, runtime, and Sonolus data and can publish releases to Cloudflare R2.
 Operators must have permission to access and process every input. Do not commit
 packages, credentials, authorization headers, or generated releases.
 
+## Static render transport and entity projections
+
+`seal-render --inputs <frozen-manifest>` emits render manifest v2. Only shared,
+unplanned files with matching path, bytes and SHA-256 may refer to verified
+frozen common content. `merge-render` requires the same manifest, restores those
+references and verifies the full route and client-asset sets. Without `--inputs`,
+sealing emits the original fully carried v1 transport. A merge rejects mixed
+transport versions. To roll back transport, omit `--inputs` from both render
+commands and regenerate every partition; never publish an unverified sparse part.
+
+Prepare captures base entity/story payloads individually in the existing input
+store. Frozen rendering reads those records directly and fails on a missing or
+mismatched record. Old captures do not contain these records and must be prepared
+again. Reverting this change requires regenerating inputs under the reverted
+source identity rather than mixing captures across revisions.
+
+The final entity projector supplies SSR full mode and an explicit core mode.
+Core mode requires a base payload from the four-resource core builder and does
+not generate chart rates. This helper alone does not publish page snapshots or
+refresh player pages.
+
+Offline acceptance commands (Node 24, no game input or production credentials):
+
+```sh
+node scripts/verify/static-render-transport.mjs .output/build-speed/transport.json
+node scripts/verify/catalog-page-projector.mjs
+node scripts/verify/frozen-entity-projection.mjs
+```
+
+The transport comparison uses separate empty output trees and the same fixed
+inputs. OS file caching is uncontrolled. Its compressed byte count uses a
+deterministic gzip fixture encoding, not the workflow's tar.zst artifacts.
+The captured f173 run in `verify/fixtures/build-speed-baseline.json` is an
+observation from the supplied plan, not a controlled performance comparison.
+Measure real tar.zst bytes and prepare-plus-render cost with the same released
+input before attributing production savings to these changes.
+
 ## Setup
 
 Requirements: Python 3.13, FFmpeg, `vgmstream-cli`, Node.js 24, and pnpm.
