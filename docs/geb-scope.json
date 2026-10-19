@@ -174,7 +174,20 @@
     "scripts/verify/static-render-transport.mjs",
     "src/server/catalog-page-projector.ts",
     "scripts/verify/catalog-page-projector.mjs",
-    "scripts/verify/frozen-entity-projection.mjs"
+    "scripts/verify/frozen-entity-projection.mjs",
+    "scripts/core/build_metrics.py",
+    "scripts/publish/catalog_pages.py",
+    "scripts/build/catalog-pages.mjs",
+    "scripts/build/catalog-page-store.mjs",
+    "scripts/build/publish-page-computed.mjs",
+    "scripts/verify/catalog-page-snapshot.mjs",
+    "src/lib/catalog-page-contract.ts",
+    "src/lib/catalog-page-reader.ts",
+    "src/lib/catalog-page-refresh.ts",
+    "src/lib/catalog-page-computed.ts",
+    "src/server/catalog-page-producer.ts",
+    "src/server/catalog-page-snapshot.ts",
+    "worker/catalog-page-data.ts"
   ],
   "entry_documents": [
     "AGENTS.md",

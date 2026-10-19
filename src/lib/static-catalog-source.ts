@@ -90,6 +90,14 @@ function releaseManifestEntry(manifest: RecordValue, relative: string): RecordVa
 }
 
 function localCatalog(server: string): ReleaseCatalog | null {
+  if (process.env.CATALOG_PAGE_RELEASE_ROOTS) {
+    if (localCatalogs.has(server)) return localCatalogs.get(server) || null;
+    const roots = JSON.parse(process.env.CATALOG_PAGE_RELEASE_ROOTS) as Record<string, string>;
+    if (!roots[server]) throw new Error(`Missing snapshot release root: ${server}`);
+    const catalog = openReleaseCatalog(server, { releaseRoot: roots[server] });
+    localCatalogs.set(server, catalog);
+    return catalog;
+  }
   if (process.env.STATIC_CATALOG_SOURCE === "http") return null;
   if (localCatalogs.has(server)) return localCatalogs.get(server) || null;
   const pointer = nodePath.join(process.cwd(), "data", "servers", server, "current.json");
@@ -541,7 +549,7 @@ export async function fetchStaticCatalog(
         readLocalPath(local, path),
       );
     } catch (error) {
-      if (!(error instanceof ReleaseCatalogError) || !error.fallbackToHttp) throw error;
+      if (process.env.CATALOG_PAGE_RELEASE_ROOTS || !(error instanceof ReleaseCatalogError) || !error.fallbackToHttp) throw error;
     }
   }
   return fetchJson(path, server, pinned);

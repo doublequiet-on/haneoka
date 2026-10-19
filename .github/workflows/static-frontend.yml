@@ -146,6 +146,24 @@ jobs:
             node scripts/build/team-builder-engine.mjs
             node scripts/build/package-build-cache.mjs record team-engine
           fi
+      - name: Backfill core snapshots before registering the new reader
+        env:
+          PYTHONPATH: scripts
+          STATIC_BUILD_INPUT_MODE: ""
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          python -m pip install boto3
+          for attempt in 1 2 3; do
+            python scripts/publish/catalog_pages.py stage
+            export CATALOG_PAGE_RELEASE_ROOTS="$(cat .output/catalog-page-inputs/roots.json)"
+            node scripts/build/catalog-pages.mjs --publish
+            if python scripts/publish/catalog_pages.py check-current; then break; fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+          done
+          node scripts/build/catalog-pages.mjs --register
       - uses: actions/cache/save@v6
         if: steps.package-cache.outputs.cache-hit != 'true'
         with:
@@ -175,6 +193,14 @@ jobs:
           node scripts/build/prepare-static-inputs.mjs
           STATIC_BUILD_PHASE=prepare pnpm exec astro build
           node scripts/build/static-build-inputs.mjs compact-catalog-cache --root "$PWD" --capture "$STATIC_BUILD_INPUT_ROOT"
+      - name: Publish completed chart computations without changing core snapshots
+        env:
+          PYTHONPATH: scripts
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: node scripts/build/publish-page-computed.mjs
       - name: Verify and freeze complete shared inputs
         id: freeze
         run: |

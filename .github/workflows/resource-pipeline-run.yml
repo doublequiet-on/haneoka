@@ -67,6 +67,7 @@ env:
   PIPELINE_STAGE_BUCKET: hotdori-assets
   PIPELINE_STAGE_PREFIX: private/resource-pipeline-stage/${{ inputs.resume_stage_run_id || github.run_id }}/${{ inputs.server }}
   PYTHONPATH: scripts
+  PIPELINE_MEASUREMENTS_DIR: .output/build-measurements
   HANEOKA_RESOURCE_BUILD_OPTIONS: '{"ktx2":${{ inputs.ktx2 }},"basisReencode":${{ inputs.basis_reencode }}}'
 
 jobs:
@@ -520,6 +521,15 @@ jobs:
             --region auto \
             --no-progress
 
+      - name: Save resource stage measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: resource-measurements-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.server }}-${{ github.job }}-${{ strategy.job-index }}
+          path: .output/build-measurements
+          if-no-files-found: ignore
+
+
   unity:
     name: Unity shard ${{ matrix.shard }}
     needs: prepare
@@ -625,6 +635,15 @@ jobs:
             --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
             --region auto \
             --no-progress
+
+      - name: Save resource stage measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: resource-measurements-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.server }}-${{ github.job }}-${{ strategy.job-index }}
+          path: .output/build-measurements
+          if-no-files-found: ignore
+
 
   release:
     name: Assemble and publish release
@@ -1009,6 +1028,27 @@ jobs:
             --recursive --only-show-errors \
             --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
             --region auto
+
+      - name: Save resource stage measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: resource-measurements-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.server }}-${{ github.job }}-${{ strategy.job-index }}
+          path: .output/build-measurements
+          if-no-files-found: ignore
+
+
+  catalog_pages:
+    name: Publish complete core page snapshots
+    needs: [release]
+    if: needs.release.outputs.release_promoted == 'true' && (inputs.server == 'jp' || inputs.server == 'intl')
+    uses: ./.github/workflows/catalog-pages.yml
+    with:
+      github_environment: ${{ inputs.github_environment }}
+    secrets:
+      cloudflare_account_id: ${{ secrets.cloudflare_account_id }}
+      r2_access_key_id: ${{ secrets.r2_access_key_id }}
+      r2_secret_access_key: ${{ secrets.r2_secret_access_key }}
 
   announcements:
     name: Refresh operational announcements
