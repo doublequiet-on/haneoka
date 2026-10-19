@@ -28,6 +28,7 @@ const SEARCH_LANG = { en: "en", ja: "ja-jp", ko: "ko", "zh-CN": "zh-cn", "zh-TW"
 const PLAN_SCHEMA = "haneoka-static-shard-plan-v1";
 const PART_SCHEMA = "haneoka-static-shard-part-v1";
 const RENDER_SCHEMA = "haneoka-static-render-part-v1";
+const SPARSE_RENDER_SCHEMA = "haneoka-static-render-part-v2";
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const writeJson = (file, value) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -315,8 +316,9 @@ export function restrictShardCoverage(root, locale) {
   }
 }
 
-export async function sealRenderPartition({ root, locale, partition: selected, planFile, output }) {
+export async function sealRenderPartition({ root, locale, partition: selected, planFile, output, inputsManifest }) {
   const { plan, sha256: planSha256 } = readPlan(planFile);
+  const commonAssets = frozenCommonAssets(plan, inputsManifest);
   const partition = staticRenderPartition(selected);
   if (!partition || !LOCALES.includes(locale) || fs.existsSync(output)) throw new Error("Invalid render partition");
   const planned = new Map(
@@ -334,8 +336,15 @@ export async function sealRenderPartition({ root, locale, partition: selected, p
     if (owner !== "shared" && owner !== locale && !route) continue;
     const source = path.join(root, ".output/public", relative);
     const file = `public/${relative}`;
-    files.push({ path: file, ...(await fileDigest(source)) });
-    linkOnce(source, path.join(output, file));
+    const digest = await fileDigest(source);
+    const common = !route && matchingCommonAsset(commonAssets, { path: relative, owner, ...digest });
+    if (common) assert.deepEqual(await fileDigest(common.source), digest, `Frozen common asset differs: ${relative}`);
+    files.push({
+      path: file,
+      ...digest,
+      ...(inputsManifest ? { storage: common ? "frozen-common" : "artifact" } : {}),
+    });
+    if (!common) linkOnce(source, path.join(output, file));
   }
   const rendered = new Set(files.map((file) => file.path.slice(7)));
   for (const file of expected) if (!rendered.has(file)) throw new Error(`Missing rendered route: ${file}`);
@@ -357,8 +366,9 @@ export async function sealRenderPartition({ root, locale, partition: selected, p
     files.push({ path: "static-documents/coverage.json", ...(await fileDigest(coverage)) });
     copyOnce(coverage, path.join(output, "static-documents/coverage.json"));
   }
+  if (inputsManifest) for (const file of files) file.storage ??= "artifact";
   writeJson(path.join(output, "render.json"), {
-    schema: RENDER_SCHEMA,
+    schema: inputsManifest ? SPARSE_RENDER_SCHEMA : RENDER_SCHEMA,
     locale,
     partition,
     planSha256,
@@ -366,11 +376,23 @@ export async function sealRenderPartition({ root, locale, partition: selected, p
     expected,
     files,
   });
-  return { locale, partition, routes: expected.length, files: files.length };
+  return {
+    locale,
+    partition,
+    routes: expected.length,
+    files: files.length,
+    logicalBytes: files.reduce((sum, file) => sum + file.bytes, 0),
+    carriedBytes: files.filter((file) => file.storage !== "frozen-common").reduce((sum, file) => sum + file.bytes, 0),
+    omittedCommonFiles: files.filter((file) => file.storage === "frozen-common").length,
+    omittedCommonBytes: files
+      .filter((file) => file.storage === "frozen-common")
+      .reduce((sum, file) => sum + file.bytes, 0),
+  };
 }
 
-export async function mergeRenderPartitions({ planFile, partsRoot, output, locale }) {
+export async function mergeRenderPartitions({ planFile, partsRoot, output, locale, inputsManifest }) {
   const { plan, sha256: planSha256 } = readPlan(planFile);
+  const commonAssets = frozenCommonAssets(plan, inputsManifest);
   if (!LOCALES.includes(locale) || fs.existsSync(output)) throw new Error("Invalid render merge output");
   const planned = new Set(plan.routes.filter((row) => row.locale === locale).map((row) => row.astroPathname.slice(1)));
   const parts = fs
@@ -381,18 +403,20 @@ export async function mergeRenderPartitions({ planFile, partsRoot, output, local
     rendered = new Set(),
     records = new Map(),
     indexes = new Set();
-  let count, clients;
+  let count, clients, schema;
   for (const partRoot of parts) {
     const part = readJson(path.join(partRoot, "render.json"));
     const partition = staticRenderPartition(`${part.partition?.index}/${part.partition?.count}`);
     if (
-      part.schema !== RENDER_SCHEMA ||
+      ![RENDER_SCHEMA, SPARSE_RENDER_SCHEMA].includes(part.schema) ||
       part.locale !== locale ||
       part.planSha256 !== planSha256 ||
       indexes.has(partition.index)
     )
       throw new Error("Render partition identity differs");
     assert.deepEqual(part.generation, plan.generation);
+    schema ??= part.schema;
+    assert.equal(part.schema, schema, "Mixed render transport schemas");
     if (count === undefined) count = partition.count;
     else assert.equal(count, partition.count);
     indexes.add(partition.index);
@@ -402,12 +426,31 @@ export async function mergeRenderPartitions({ planFile, partsRoot, output, local
     const expectedPaths = new Set(expected);
     assert.deepEqual(part.expected, expected, "Render partition route coverage differs");
     const own = new Set();
+    const carried = new Set();
     for (const file of part.files) {
       safeRelative(file.path);
       if (own.has(file.path) || !/^(?:public|static-documents)\//u.test(file.path))
         throw new Error("Invalid render partition file");
       own.add(file.path);
-      const source = path.join(partRoot, file.path);
+      if (file.path.startsWith("public/")) {
+        const owner = assetOwner(file.path.slice(7));
+        if (owner !== "shared" && owner !== locale) throw new Error("Unowned render asset");
+      }
+      let source = path.join(partRoot, file.path);
+      if (part.schema === SPARSE_RENDER_SCHEMA && file.storage === "frozen-common") {
+        const relative = file.path.slice(7);
+        const common =
+          file.path.startsWith("public/") &&
+          !planned.has(relative) &&
+          matchingCommonAsset(commonAssets, { ...file, path: relative, owner: assetOwner(relative) });
+        if (!common) throw new Error(`Invalid frozen common reference: ${file.path}`);
+        source = common.source;
+      } else {
+        if (part.schema === SPARSE_RENDER_SCHEMA && file.storage !== "artifact")
+          throw new Error("Invalid render storage");
+        if (part.schema === RENDER_SCHEMA && file.storage !== undefined) throw new Error("Unexpected legacy storage");
+        carried.add(file.path);
+      }
       assert.deepEqual(
         await fileDigest(source),
         { sha256: file.sha256, bytes: file.bytes },
@@ -438,7 +481,7 @@ export async function mergeRenderPartitions({ planFile, partsRoot, output, local
       listFiles(partRoot)
         .filter((file) => file !== "render.json")
         .sort(),
-      [...own].sort(),
+      [...carried].sort(),
       "Unverified render files",
     );
     const ownClients = [...own].filter((file) => /^public\/_astro\/[^/]+\.(?:js|css)$/u.test(file)).sort();
@@ -779,6 +822,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         partition: values.partition,
         planFile: values.plan,
         output: path.resolve(values.output),
+        inputsManifest: values.inputs,
       }),
     );
   } else if (mode === "merge-render" && values.locale && values.plan && values.parts && values.output) {
@@ -788,6 +832,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         partsRoot: values.parts,
         output: path.resolve(values.output),
         locale: values.locale,
+        inputsManifest: values.inputs,
       }),
     );
   } else if (mode === "plan" && values.inputs && values.routes && values.output) {

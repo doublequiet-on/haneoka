@@ -64,7 +64,7 @@ jobs:
       - name: Render and verify the assigned complete pages
         run: |
           pnpm exec astro build
-          node scripts/build/static-build-shards.mjs seal-render --root "$PWD" --locale "$STATIC_BUILD_LOCALE" --partition "$STATIC_BUILD_PARTITION" --plan .output/static-shard-plan.json --output .output/static-render-part
+          node scripts/build/static-build-shards.mjs seal-render --root "$PWD" --locale "$STATIC_BUILD_LOCALE" --partition "$STATIC_BUILD_PARTITION" --plan .output/static-shard-plan.json --inputs .output/static-frozen-inputs/manifest.json --output .output/static-render-part
           tar --use-compress-program="zstd -T2 -3" -cf .output/static-render-part.tar.zst -C .output/static-render-part .
       - uses: actions/upload-artifact@v7
         with:
@@ -120,7 +120,7 @@ jobs:
             mkdir -p ".output/static-render-parts/$partition"
             tar --zstd -xf ".output/static-render-archives/static-render-${{ inputs.inputs_sha }}-${{ inputs.locale }}-$partition/static-render-part.tar.zst" -C ".output/static-render-parts/$partition"
           done
-          node scripts/build/static-build-shards.mjs merge-render --locale "$STATIC_BUILD_LOCALE" --plan .output/static-shard-plan.json --parts .output/static-render-parts --output .output/static-render-merged
+          node scripts/build/static-build-shards.mjs merge-render --locale "$STATIC_BUILD_LOCALE" --plan .output/static-shard-plan.json --parts .output/static-render-parts --inputs .output/static-frozen-inputs/manifest.json --output .output/static-render-merged
           cp -a .output/static-render-merged/. .output/
           pnpm finalize:frontend
           node scripts/build/static-build-shards.mjs seal --root "$PWD" --locale "$STATIC_BUILD_LOCALE" --plan .output/static-shard-plan.json --inputs .output/static-frozen-inputs/manifest.json --output .output/static-part
