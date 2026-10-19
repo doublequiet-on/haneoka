@@ -21,7 +21,7 @@ const { staticRenderPartitionForPath } = await import("../../src/server/static-b
 const { sha256, INPUT_SCHEMA, listFiles } = await import("../build/static-build-inputs.mjs");
 const { outputInventory, compareInventories, measureStage, fixtureIdentity, compressedFixtureBytes } =
   await import("../build/build-performance.mjs");
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "haneoka-transport-"));
+const root = fs.mkdtempSync(path.join(process.env.BUILD_FIXTURE_TMP || os.tmpdir(), "haneoka-transport-"));
 const write = (file, body) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, body);
