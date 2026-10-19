@@ -26,6 +26,7 @@ export const LABEL_ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["grid", "common.layout.grid"],
   ["list", "common.layout.list"],
   ["loading", "common.states.loading"],
+  ["chartPending", "catalog.pageData.chartPending"],
   ["unavailable", "common.states.unavailable"],
   ["retry", "common.actions.retry"],
   ["empty", "common.states.empty"],

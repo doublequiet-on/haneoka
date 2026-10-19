@@ -4,6 +4,8 @@
 // Pos: [Map](L2-2.md)；集合与实体资料的 Lit 协调枢纽。
 // Effects/Dependencies: DOM、事件、HTTP／资源加载和页面状态；部分渲染被构建期 SSR 复用。
 import { withUiMarksProjection } from "../lib/ui-marks";
+import { CatalogPageRefresh } from "../lib/catalog-page-refresh";
+import { validPageSelector } from "../lib/catalog-page-contract";
 import { catalogLabelPath } from "../config/catalog-labels";
 import { relativeTimeWindow, relativeTimestamp, TIME_REGIONS, type TimeRegion } from "../lib/relative-time";
 import {
@@ -1033,7 +1035,7 @@ export class CatalogScreen extends LitElement {
       serverMark: { image: serverAvailabilityImage(exclusive), label },
     };
   }
-  private pinnedUnionAsset(source: string, identity: CrossCatalogIdentity): string {
+  private pinnedUnionAsset(source: string, identity: { server: string; releaseId: string }): string {
     if (!source) return source;
     const url = new URL(source, "https://asset.invalid");
     if (!/^\/(?:assets|runtime|objects)\//u.test(url.pathname)) return source;
@@ -1772,6 +1774,63 @@ export class CatalogScreen extends LitElement {
     return this;
   }
   private disposeSongDisplay?: () => void;
+  private pageRefreshTimer?: ReturnType<typeof setInterval>;
+  private pageChartState?: "pending" | "ready";
+  private pageRefresh = new CatalogPageRefresh({
+    location: () => navigationDocumentUrl().href,
+    selector: () => {
+      const selector = { server: this.dataServer(), locale: this.settings.locale, resource: this.settings.resource,
+        ...(this.settings.entityContext ? { id: this.selectedId } : {}) };
+      return !this.isProvider() && canUseStaticCatalogScope() && validPageSelector(selector) ? selector : undefined;
+    },
+    active: () => this.isConnected && document.visibilityState === "visible" && !this.settings.chartPage && !this.detailVideoPlaying && this.phase !== "loading",
+    fetch: (url, init) => fetch(url, init),
+    prepare: async (page) => {
+      const config = JSON.stringify(this.settings);
+      const apply = page.selector.id === undefined
+        ? () => this.prepareCollection(page.payload as CatalogCollectionPayload, config)
+        : await this.stageEntity(page.payload as EntityPayload, config, true);
+      return () => {
+        this.catalogRequests.cancel();
+        this.detailRequests.cancel();
+        this.unionRequests.cancel();
+        apply();
+        this.resultCache = undefined;
+        this.syncEntityChrome();
+        this.requestUpdate();
+      };
+    },
+    absent: () => {
+      this.catalogRequests.cancel();
+      this.detailRequests.cancel();
+      this.unionRequests.cancel();
+      this.selected = undefined;
+      this.payload = undefined;
+      this.items = [];
+      this.phase = "error";
+      this.setEntityReady(false);
+      this.syncEntityChrome();
+      this.requestUpdate();
+    },
+    computed: (state, value) => {
+      this.pageChartState = state;
+      if (value) {
+        const table = value.table as unknown as import("../lib/chart-rates").ChartRateTable;
+        if (this.settings.entityContext && this.selected) {
+          const musicId = String(this.selected.musicId);
+          const charts = Object.fromEntries(Object.entries(table.charts).filter(([key]) => key.split(":")[0] === musicId).map(([key, rates]) => [key.split(":")[1], rates]));
+          this.detailAux = { ...this.detailAux, chartRates: { greatFactor: table.greatFactor, charts } };
+        } else this.chartRates = { ...this.chartRates, [value.pin.server]: table };
+      }
+      this.syncEntityChrome();
+      this.requestUpdate();
+    },
+    report: (state, error) => {
+      this.dataset.pageRefresh = state;
+      if (error) console.warn("Catalog page refresh failed", error);
+    },
+  });
+  private refreshVisiblePage = () => { if (document.visibilityState === "visible") void this.pageRefresh.check(); else this.pageRefresh.cancel(); };
   private disposeDifficultyDisplay?: () => void;
   private onLocale = () => {
     this.settings = { ...this.settings, locale: preferredLocale() };
@@ -1875,9 +1934,14 @@ export class CatalogScreen extends LitElement {
     this.activeMedia = params.get("media") || "full";
     this.characterSection = params.get("section") || "profile";
     if (!this.hasAttribute("data-page-data")) this.ensureSongMeta();
-    void this.load();
+    void this.load().finally(() => this.pageRefresh.check());
+    this.pageRefreshTimer = setInterval(this.refreshVisiblePage, 60_000);
+    document.addEventListener("visibilitychange", this.refreshVisiblePage);
   }
   disconnectedCallback() {
+    this.pageRefresh.cancel();
+    clearInterval(this.pageRefreshTimer);
+    document.removeEventListener("visibilitychange", this.refreshVisiblePage);
     window.clearTimeout(this.relativeTimeClock);
     this.relativeTimeClock = 0;
     this.relativeTimeDeadline = 0;
@@ -1953,6 +2017,7 @@ export class CatalogScreen extends LitElement {
         this.entityAppBarOwner,
         html`
           ${this.renderDetailLeading(item)}
+          ${this.settings.resource === "songs" && this.pageChartState === "pending" ? html`<span class="chip" role="status">${this.label("chartPending", "")}</span>` : nothing}
         `,
         this,
       );
@@ -2364,87 +2429,95 @@ export class CatalogScreen extends LitElement {
       this.characters = asItems(payload.characters);
       this.bands = asItems(payload.bands);
       this.gameMarks = new Map(Object.entries(payload.marks).map(([name, path]) => [
-        name, `/runtime/${this.dataServer()}/${path.replace(/^runtime\//u, "")}`,
+        name, this.pinnedUnionAsset(`/runtime/${this.dataServer()}/${path.replace(/^runtime\//u, "")}`, payload.identity),
       ]));
       this.phase = "ready";
     }
     this.ensureBandSelection();
   }
   async prepareEntity(payload: EntityPayload, config: string = this.config, signal?: AbortSignal): Promise<void> {
-    this.unionRequests.cancel();
-    this.unionCatalog = undefined;
-    this.unionCharacters = {};
-    this.unionBands = {};
-    this.unionMarks = {};
-    for (const tokens of Object.values(this.unionFacetKeys)) tokens.clear();
-    this.unionItems = new WeakMap();
-    this.nativeReferenceRequests.cancel();
-    this.nativeReference = undefined;
-    this.settings = JSON.parse(config || "{}") as Config;
-
-    this.profile = profiles[this.settings.resource] ?? fallbackProfile;
-    this.selectedId = String(payload.id);
-    this.payload = payload;
-    this.nativeCatalogPin = nativeMetaIdentity(payload);
-    this.catalogDocument = payload.document || {};
-    this.items = [payload.item];
-    this.characters = payload.characters || [];
-    this.bands = payload.bands || [];
-    this.gameItems = payload.gameItems || [];
-    this.songMeta = payload.songMeta || {};
-    this.songMetaPin =
-      payload.server && payload.releaseId
-        ? { server: payload.server, releaseId: payload.releaseId, sourceId: payload.sourceId }
-        : undefined;
-    this.songMetaProvision = Promise.resolve();
-    this.detailAux = { ...(payload.aux || {}) };
-    this.unionDetail = undefined;
-    const cross = this.detailAux.crossServer as
-      (Awaited<ReturnType<typeof fetchCrossServerDetail>> & { exclusive?: OfficialCatalogServer | null }) | undefined;
-    if (
-      cross?.schema === "haneoka-cross-server-detail-v1" &&
-      cross.activeServer === payload.server &&
-      cross.identity.server === payload.server &&
-      cross.identity.releaseId === payload.releaseId &&
-      (!payload.sourceId || cross.identity.sourceId === payload.sourceId) &&
-      cross.fullSources.includes(cross.activeServer)
-    ) {
-      this.unionDetail = cross;
-      this.items = [{ ...payload.item, ...this.unionDetailRow(cross) }];
-    }
-    this.gameMarks.clear();
-    for (const [logical, path] of Object.entries(payload.marks || {}))
-      this.gameMarks.set(logical, `/runtime/${this.dataServer()}/${path.replace(/^runtime\//u, "")}`);
-    this.selected = this.items[0];
-    const card = ["member", "support"].includes(this.profile.presentation);
+    const commit = await this.stageEntity(payload, config);
+    if (signal && (!this.isConnected || !this.catalogRequests.current(signal))) return;
+    commit();
+    if (signal) this.restoreDetailQuery();
+    if (this.settings.chartPage && typeof window !== "undefined" && this.isConnected) await this.ensureChartPlayer();
+  }
+  async stageEntity(payload: EntityPayload, config: string = this.config, preserveInput = false): Promise<() => void> {
+    const settings = JSON.parse(config || "{}") as Config;
+    const profile = profiles[settings.resource] ?? fallbackProfile;
+    const card = ["member", "support"].includes(profile.presentation);
     const [skill, cards, rewards, systems] = await Promise.all([
       card ? import("./shared/skill-text") : undefined,
       card ? import("./card-detail") : undefined,
-      this.profile.presentation === "song" ? import("./song-detail-rewards") : undefined,
-      this.profile.presentation === "system" ? import("./game-system-detail") : undefined,
-      this.profile.presentation === "character" ? import("./character-detail-archive") : undefined,
+      profile.presentation === "song" ? import("./song-detail-rewards") : undefined,
+      profile.presentation === "system" ? import("./game-system-detail") : undefined,
+      profile.presentation === "character" ? import("./character-detail-archive") : undefined,
     ]);
-    if (this.settings.chartPage && typeof window !== "undefined" && this.isConnected) await this.ensureChartPlayer();
-    if (signal && (!this.isConnected || !this.catalogRequests.current(signal))) return;
-    this.skillText = skill;
-    this.cardDetail = cards;
-    this.songDetailRewards = rewards;
-    this.gameSystemDetail = systems;
-    this.gameSystemDetail?.initializeGameSystemDetail(this, payload.item);
-    this.initializeCardDetailState(payload.item);
-    if (this.profile.presentation === "band-item")
-      this.detailLevel = Math.max(
-        1,
-        ...(Array.isArray(payload.item.levels) ? (payload.item.levels as Item[]) : []).map((row) =>
-          Number(row.level || 1),
-        ),
-      );
-    if (signal) this.restoreDetailQuery();
-    this.phase = "ready";
-    this.detailReady = true;
-    if (typeof window !== "undefined" && this.isConnected && this.settings.nativeMetaReference)
-      void this.loadNativeMetaReference(this.settings.nativeMetaReference);
-    if (typeof window !== "undefined") void this.ensureUnionDetail(payload);
+    return () => {
+      this.unionRequests.cancel();
+      this.unionCatalog = undefined;
+      this.unionCharacters = {};
+      this.unionBands = {};
+      this.unionMarks = {};
+      for (const tokens of Object.values(this.unionFacetKeys)) tokens.clear();
+      this.unionItems = new WeakMap();
+      this.nativeReferenceRequests.cancel();
+      this.nativeReference = undefined;
+      this.settings = JSON.parse(config || "{}") as Config;
+
+      this.profile = profiles[this.settings.resource] ?? fallbackProfile;
+      this.selectedId = String(payload.id);
+      this.payload = payload;
+      this.nativeCatalogPin = nativeMetaIdentity(payload);
+      this.catalogDocument = payload.document || {};
+      this.items = [payload.item];
+      this.characters = payload.characters || [];
+      this.bands = payload.bands || [];
+      this.gameItems = payload.gameItems || [];
+      this.songMeta = payload.songMeta || {};
+      this.songMetaPin =
+        payload.server && payload.releaseId
+          ? { server: payload.server, releaseId: payload.releaseId, sourceId: payload.sourceId }
+          : undefined;
+      this.songMetaProvision = Promise.resolve();
+      this.detailAux = { ...(payload.aux || {}) };
+      this.unionDetail = undefined;
+      const cross = this.detailAux.crossServer as
+        (Awaited<ReturnType<typeof fetchCrossServerDetail>> & { exclusive?: OfficialCatalogServer | null }) | undefined;
+      if (
+        cross?.schema === "haneoka-cross-server-detail-v1" &&
+        cross.activeServer === payload.server &&
+        cross.identity.server === payload.server &&
+        cross.identity.releaseId === payload.releaseId &&
+        (!payload.sourceId || cross.identity.sourceId === payload.sourceId) &&
+        cross.fullSources.includes(cross.activeServer)
+      ) {
+        this.unionDetail = cross;
+        this.items = [{ ...payload.item, ...this.unionDetailRow(cross) }];
+      }
+      this.gameMarks.clear();
+      for (const [logical, path] of Object.entries(payload.marks || {}))
+        this.gameMarks.set(logical, this.pinnedUnionAsset(`/runtime/${this.dataServer()}/${path.replace(/^runtime\//u, "")}`, payload));
+      this.selected = this.items[0];
+      this.skillText = skill;
+      this.cardDetail = cards;
+      this.songDetailRewards = rewards;
+      this.gameSystemDetail = systems;
+      this.gameSystemDetail?.initializeGameSystemDetail(this, payload.item);
+      if (!preserveInput) this.initializeCardDetailState(payload.item);
+      if (this.profile.presentation === "band-item")
+        this.detailLevel = Math.max(
+          1,
+          ...(Array.isArray(payload.item.levels) ? (payload.item.levels as Item[]) : []).map((row) =>
+            Number(row.level || 1),
+          ),
+        );
+      this.phase = "ready";
+      this.detailReady = true;
+      if (typeof window !== "undefined" && this.isConnected && this.settings.nativeMetaReference)
+        void this.loadNativeMetaReference(this.settings.nativeMetaReference);
+      if (typeof window !== "undefined") void this.ensureUnionDetail(payload);
+    };
   }
   get contentLocale() {
     return this.settings.locale;
@@ -2505,7 +2578,7 @@ export class CatalogScreen extends LitElement {
     }
     if (inline?.schema === "haneoka-collection-payload-v1" &&
         "identity" in inline && inline.resource === this.settings.resource && inline.identity.server === this.dataServer() &&
-        canUseStaticCatalogScope()) {
+        canUseStaticCatalogScope() && !this.settings.entityContext) {
       this.prepareCollection(inline, this.config);
       this.restoreLocationState();
       return;

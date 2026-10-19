@@ -379,6 +379,7 @@
     }
   },
   "catalog": {
+    "pageData": { "chartPending": "채보 계산 대기 중" },
     "fields": {
       "bands": "밴드",
       "band": "밴드",
