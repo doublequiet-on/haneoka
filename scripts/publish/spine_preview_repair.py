@@ -162,7 +162,7 @@ def project(base: dict, read_entry, staging: Path, config, producer: dict, diagn
                         renderRecipePreviewRenderedCount=rendered_recipes,
                         renderRecipePreviewUnavailableCount=len(recipes) - rendered_recipes)
         metadata["browserRuntime"]["preview"].pop("reason", None)
-        metadata["browserRuntime"]["preview"]["status"] = "rendered"
+        metadata["browserRuntime"]["preview"].update(status="rendered", schema=PREVIEW_SCHEMA)
         if graph(metadata) != graph(original):
             raise ValueError("Spine preview repair changed the inherited model graph")
         write_json(root / SPINE, metadata, pretty=True)
