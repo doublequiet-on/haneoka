@@ -987,9 +987,10 @@ class _UnityResolver:
     in memory.
     """
 
-    def __init__(self, layout: Any, index: dict[str, Any], ensure_archive: Any = None):
+    def __init__(self, layout: Any, index: dict[str, Any], ensure_archive: Any = None, delta: Any = None):
         self.layout = layout
         self.index = index
+        self.delta = delta
         self.store = UnityObjectStore(layout, index, ensure_archive=ensure_archive)
         self.serialized_files = index.get("serializedFiles", {})
         self.records_cache: OrderedDict[str, dict[str, dict[str, Any]]] = OrderedDict()
@@ -1098,10 +1099,23 @@ class _UnityResolver:
                 )
             ]
         output = sorted(candidates, key=lambda candidate: (str(candidate.get("role") or ""), str(candidate.get("type") or "")))[0]
-        output_path = str(output.get("path") or "")
-        if not (self.layout.root / Path(*PurePosixPath(output_path).parts)).is_file():
-            return None, [_reason("media-output-absent", f"materialized output is absent: {output_path}")]
+        target = self.materialize(output)
+        if not target.is_file():
+            return None, [_reason("media-output-absent", f"materialized output is absent: {output['path']}")]
         return output, []
+
+    def materialize(self, output: dict[str, Any]) -> Path:
+        output_path = str(output["path"])
+        target = self.layout.root / Path(*PurePosixPath(output_path).parts)
+        if not target.is_file() and self.delta is not None:
+            entry = self.delta.require_entry(output_path)
+            if (
+                str(entry.get("sha256") or "") != str(output.get("sha256") or "")
+                or int(entry.get("bytes", -1)) != int(output.get("bytes", -1))
+            ):
+                raise ValueError(f"Spine dependency differs from its pinned release: {output_path}")
+            self.delta.fetch_release_path(output_path, target)
+        return target
 
     def source_output(self, source_path: str) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
         candidates = self.outputs_by_source.get(source_path, [])
@@ -2666,8 +2680,8 @@ def build_spine(
 
     Delta mode adopts a candidate source's model documents wholesale from the
     base release when its selected bundle is reusable and no local media under
-    the source directory changed; the resolver otherwise fetches a reusable
-    bundle's archive on demand.
+    the source directory changed; the resolver fetches reusable object archives
+    and render dependencies from the pinned release on demand.
     """
 
     layout = build_layout(config.id, build_id)
@@ -2688,6 +2702,7 @@ def build_spine(
             if delta is not None
             else None
         ),
+        delta=delta,
     )
     base_models_by_source: dict[str, list[dict[str, Any]]] = {}
     if delta is not None and isinstance(base_document, dict):
@@ -2704,7 +2719,8 @@ def build_spine(
     )
 
     def adoptable(source_path: str) -> bool:
-        if not base_models_by_source.get(source_path):
+        base_models = base_models_by_source.get(source_path)
+        if not base_models or any(model.get("runtime", {}).get("status") != "ready" for model in base_models):
             return False
         source = (index.get("sources") or {}).get(source_path)
         if not isinstance(source, dict):
@@ -2725,6 +2741,12 @@ def build_spine(
     for source_path in _candidate_paths(index):
         if delta is not None and adoptable(source_path):
             adopted = [deepcopy(model) for model in base_models_by_source[source_path]]
+            for model in adopted:
+                resolver.materialize(model["runtime"]["json"])
+                for atlas in model["atlases"]:
+                    resolver.materialize(atlas["atlas"])
+                    for page in atlas["pages"]:
+                        resolver.materialize(page)
             models.extend(adopted)
             adopted_model_count += len(adopted)
             continue
