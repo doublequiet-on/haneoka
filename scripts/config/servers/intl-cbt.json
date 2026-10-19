@@ -1,5 +1,7 @@
 {
   "$schema": "../server.schema.json",
   "id": "intl-cbt",
-  "configurationEnv": "RESOURCE_PIPELINE_CONFIG"
+  "configurationEnv": "RESOURCE_PIPELINE_CONFIG",
+  "pipelineClass": "retained",
+  "dailyScheduled": false
 }

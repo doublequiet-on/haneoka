@@ -9,16 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       server:
-        description: Server configuration id ("all" runs all current servers)
+        description: Production server ("all" runs jp and intl)
         required: true
         default: intl
         type: choice
         options:
           - intl
-          - intl-test
           - jp
-          - jp-cbt
-          - intl-cbt
           - all
       tgw_mode:
         description: Manual current TGW projection; normal keeps the resource build path
@@ -136,58 +133,6 @@ jobs:
       secret_writer_gh_token: ${{ secrets.SECRET_WRITER_GH_TOKEN }}
       jp_version_subscription: ${{ secrets.JP_VERSION_SUBSCRIPTION }}
 
-  pipeline_intl_test:
-    name: Build and publish Intl test resources
-    if: ${{ github.event_name == 'workflow_dispatch' && (!inputs.tgw_mode || inputs.tgw_mode == 'normal') && (inputs.server == 'intl-test' || inputs.server == 'all') }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/resource-pipeline-run.yml
-    with:
-      github_environment: ${{ github.event_name == 'schedule' && 'resource-intl-test' || inputs.github_environment || 'resource-intl-test' }}
-      server: intl-test
-      package_r2_key: ${{ inputs.package_r2_key }}
-      source_id: ${{ inputs.source_id }}
-      resume_stage_run_id: ${{ inputs.resume_stage_run_id }}
-      # On schedule events the inputs context is empty, which would feed ''
-      # into boolean-typed callee inputs and fail input validation.
-      ktx2: ${{ github.event_name == 'schedule' || inputs.ktx2 || false }}
-      basis_reencode: ${{ inputs.basis_reencode || false }}
-      force: ${{ inputs.force || false }}
-      no_reuse: ${{ inputs.no_reuse || false }}
-    secrets:
-      RESOURCE_PIPELINE_CONFIG: ${{ secrets.RESOURCE_PIPELINE_CONFIG }}
-      cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
-      r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      resource_cdn_authorization: ${{ secrets.RESOURCE_CDN_AUTHORIZATION }}
-      secret_writer_gh_token: ${{ secrets.SECRET_WRITER_GH_TOKEN }}
-      jp_version_subscription: ${{ secrets.JP_VERSION_SUBSCRIPTION }}
-
-  pipeline_manual:
-    name: Build and publish manually selected resources
-    if: ${{ github.event_name == 'workflow_dispatch' && (!inputs.tgw_mode || inputs.tgw_mode == 'normal') && inputs.server != 'intl' && inputs.server != 'jp' && inputs.server != 'intl-test' && inputs.server != 'all' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/resource-pipeline-run.yml
-    with:
-      github_environment: ${{ inputs.github_environment || format('resource-{0}', inputs.server) }}
-      server: ${{ inputs.server }}
-      package_r2_key: ${{ inputs.package_r2_key }}
-      source_id: ${{ inputs.source_id }}
-      resume_stage_run_id: ${{ inputs.resume_stage_run_id }}
-      ktx2: ${{ inputs.ktx2 || false }}
-      basis_reencode: ${{ inputs.basis_reencode || false }}
-      force: ${{ inputs.force || false }}
-      no_reuse: ${{ inputs.no_reuse || false }}
-    secrets:
-      RESOURCE_PIPELINE_CONFIG: ${{ secrets.RESOURCE_PIPELINE_CONFIG }}
-      cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
-      r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      resource_cdn_authorization: ${{ secrets.RESOURCE_CDN_AUTHORIZATION }}
-      secret_writer_gh_token: ${{ secrets.SECRET_WRITER_GH_TOKEN }}
-      jp_version_subscription: ${{ secrets.JP_VERSION_SUBSCRIPTION }}
-
   current_tgw_projection:
     name: Prepare or publish reviewed current TGW entities
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.tgw_mode && inputs.tgw_mode != 'normal' }}
@@ -210,6 +155,11 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Validate the production resource audience
+        env:
+          PYTHONPATH: scripts
+          RESOURCE_SERVER: ${{ inputs.server }}
+        run: python -m core.server_policy --server "$RESOURCE_SERVER" --audience production
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
