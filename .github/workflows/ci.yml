@@ -12,8 +12,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend:
+    name: Verify complete frontend
+    uses: ./.github/workflows/static-frontend.yml
+    with:
+      verification_only: true
   build:
     name: Build
+    needs: frontend
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -77,11 +83,10 @@ jobs:
           key: ci-provider-snapshot-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ci-provider-snapshot-v1-${{ runner.os }}-${{ github.run_id }}-
 
-      - name: Generate production application
-        timeout-minutes: 330
-        run: pnpm build
-        env:
-          HANEOKA_CUBISM_RUNTIME_POLICY: optional
+      - name: Check compiled frontend sources
+        run: |
+          pnpm build:packages
+          pnpm lint:frontend
 
       - name: Save verified provider HTTP responses
         if: always() && steps.provider-http-cache.outputs.cache-primary-key != '' && steps.provider-http-cache.outputs.cache-hit != 'true'

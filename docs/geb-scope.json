@@ -179,6 +179,7 @@
     "scripts/build/build-performance.mjs",
     "scripts/verify/static-render-transport.mjs",
     "src/server/catalog-page-projector.ts",
+    "src/server/cubism-model-metadata.ts",
     "scripts/verify/catalog-page-projector.mjs",
     "scripts/verify/frozen-entity-projection.mjs",
     "scripts/core/build_metrics.py",

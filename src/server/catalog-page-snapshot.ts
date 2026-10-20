@@ -129,6 +129,12 @@ export async function publishPageSnapshot(
   context: PageContext,
 ): Promise<void> {
   const manifest = await verifyPageSnapshot(source, ready, context);
+  const completed = await target.read(pageReadyKey(ready.snapshotId));
+  if (completed) {
+    if (new TextDecoder().decode(completed) !== canonicalPageJson(ready)) throw new PageDataError("page_data_incomplete", 503);
+    await verifyPageSnapshot(target, ready, context);
+    return;
+  }
   const refs = new Map<string, PageRef>([[ready.manifest.sha256, ready.manifest]]);
   for (const [key, ref] of Object.entries(manifest.indexes)) {
     refs.set(ref.sha256, ref);
@@ -142,7 +148,10 @@ export async function publishPageSnapshot(
     const body = await source.read(pageBlobKey(ref));
     if (!body || body.byteLength !== ref.bytes || (await pageDigest(body)) !== ref.sha256)
       throw new PageDataError("page_data_incomplete", 503);
-    await target.create(pageBlobKey(ref), body);
+    const previous = await target.read(pageBlobKey(ref));
+    if (previous) {
+      if (previous.byteLength !== ref.bytes || (await pageDigest(previous)) !== ref.sha256) throw new PageDataError("page_data_incomplete", 503);
+    } else await target.create(pageBlobKey(ref), body);
   }
   await verifyPageSnapshot(target, ready, context);
   await target.create(pageReadyKey(ready.snapshotId), new TextEncoder().encode(canonicalPageJson(ready)));

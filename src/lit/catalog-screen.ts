@@ -5,6 +5,7 @@
 // Effects/Dependencies: DOM、事件、HTTP／资源加载和页面状态；部分渲染被构建期 SSR 复用。
 import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import { withUiMarksProjection } from "../lib/ui-marks";
+import catalogPageRollout from "../../config/catalog-page-rollout.json";
 import { CatalogPageRefresh } from "../lib/catalog-page-refresh";
 import { validPageSelector } from "../lib/catalog-page-contract";
 import { catalogLabelPath } from "../config/catalog-labels";
@@ -1888,7 +1889,7 @@ export class CatalogScreen extends LitElement {
     selector: () => {
       const selector = { server: this.dataServer(), locale: this.settings.locale, resource: this.settings.resource,
         ...(this.settings.entityContext ? { id: this.selectedId } : {}) };
-      return !this.isProvider() && canUseStaticCatalogScope() && validPageSelector(selector) ? selector : undefined;
+      return (catalogPageRollout.enabledKinds as readonly string[]).includes(selector.resource) && !this.isProvider() && canUseStaticCatalogScope() && validPageSelector(selector) ? selector : undefined;
     },
     active: () => this.isConnected && document.visibilityState === "visible" && !this.settings.chartPage && !this.detailVideoPlaying && this.phase !== "loading",
     fetch: (url, init) => fetch(url, init),
@@ -1911,7 +1912,7 @@ export class CatalogScreen extends LitElement {
       this.catalogRequests.cancel();
       this.detailRequests.cancel();
       this.unionRequests.cancel();
-      this.selected = undefined;
+      this.selected = null;
       this.payload = undefined;
       this.items = [];
       this.phase = "error";
@@ -2044,7 +2045,7 @@ export class CatalogScreen extends LitElement {
     this.characterSection = params.get("section") || "profile";
     if (!this.hasAttribute("data-page-data")) this.ensureSongMeta();
     void this.load().finally(() => this.pageRefresh.check());
-    this.pageRefreshTimer = setInterval(this.refreshVisiblePage, 60_000);
+    if (catalogPageRollout.enabledKinds.length) this.pageRefreshTimer = setInterval(this.refreshVisiblePage, 60_000);
     document.addEventListener("visibilitychange", this.refreshVisiblePage);
   }
   disconnectedCallback() {
@@ -2612,7 +2613,7 @@ export class CatalogScreen extends LitElement {
       }
       this.gameMarks.clear();
       for (const [logical, path] of Object.entries(payload.marks || {}))
-        this.gameMarks.set(logical, this.pinnedUnionAsset(`/runtime/${this.dataServer()}/${path.replace(/^runtime\//u, "")}`, payload));
+        this.gameMarks.set(logical, payload.server && payload.releaseId ? this.pinnedUnionAsset(`/runtime/${this.dataServer()}/${path.replace(/^runtime\//u, "")}`, { server: payload.server, releaseId: payload.releaseId }) : `/runtime/${this.dataServer()}/${path.replace(/^runtime\//u, "")}`);
       this.selected = this.items[0];
       this.skillText = skill;
       this.cardDetail = cards;

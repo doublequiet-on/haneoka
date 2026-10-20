@@ -9,6 +9,11 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { r2PageStore } from "./catalog-page-store.mjs";
+const rollout = JSON.parse(await fs.readFile("config/catalog-page-rollout.json", "utf8"));
+if (!process.argv.includes("--verify-only") && !rollout.enabledKinds.includes("songs")) {
+  console.log(JSON.stringify({ mode: "publish", records: 0, disabled: true }));
+  process.exit(0);
+}
 const root = process.env.STATIC_BUILD_INPUT_ROOT;
 if (!root) throw new Error("Set STATIC_BUILD_INPUT_ROOT");
 const manifest = JSON.parse(await fs.readFile(path.join(root, "capture.json"), "utf8"));

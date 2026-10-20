@@ -7,6 +7,7 @@ import { semanticOwnersConflict } from "../src/lib/cross-server/content";
 import { handleContentAccessRequest } from "./content-access";
 import { publicStampManifest } from "../src/lib/stamp-maker/public-manifest";
 import { projectUiMarks, withUiMarksProjection } from "../src/lib/ui-marks.ts";
+import catalogPageRollout from "../config/catalog-page-rollout.json";
 import { handlePageData, type PageDataBindings } from "./catalog-page-data";
 import { PageDataError, type PageSource } from "../src/lib/catalog-page-contract";
 import { fnv1a32Shard } from "../src/lib/hash-partition.ts";
@@ -2295,11 +2296,16 @@ function catalogPageBindings(env: Env, request: Request): PageDataBindings {
   return {
     read: async (key) => {
       try {
+        if (key.startsWith("catalog-pages/v1/objects/")) {
+          const compressed = await env.ASSET_BUCKET.get(`${key}.gz`);
+          if (compressed) return new Uint8Array(await new Response(compressed.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+        }
         const object = await env.ASSET_BUCKET.get(key);
         return object ? new Uint8Array(await object.arrayBuffer()) : null;
       } catch { throw new PageDataError("page_data_incomplete", 503); }
     },
     producer: async () => {
+      if (!catalogPageRollout.enabledKinds.length) return { ...catalogPageRollout };
       const response = await env.ASSETS.fetch(new Request(new URL("/catalog-page-producer.json", request.url)));
       return response.ok && response.headers.get("content-type")?.includes("application/json") ? response.json() : null;
     },
@@ -3896,7 +3902,7 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
       if (redirect) return redirect;
       let pageReady = false;
       const pageRoute = parseResourceRoute(url.pathname);
-      if (pageRoute?.id && ["jp", "intl"].includes(pageRoute.server) && ["cards", "support-cards", "events", "songs"].includes(pageRoute.kind)) {
+      if (catalogPageRollout.enabledKinds.length && pageRoute?.id && ["jp", "intl"].includes(pageRoute.server) && ["cards", "support-cards", "events", "songs"].includes(pageRoute.kind)) {
         const query = new URL(`/api/v1/servers/${pageRoute.server}/release`, url);
         query.search = new URLSearchParams({ projection: "page-data", contract: "catalog-page-v1", locale: pageRoute.locale, resource: pageRoute.kind, id: pageRoute.id }).toString();
         const lookup = await handlePageData(new Request(query), catalogPageBindings(env, request));

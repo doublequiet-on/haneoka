@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: Pinned MOC sources, locked Cubism Core and runtime policy.
+// Output: Authored model parameters and parts, or no metadata when optional Core is absent.
+// Pos: [Map](L2-2.md); native Cubism metadata extraction and local cache.
+// Effects/Dependencies: Reads Core and MOC bytes; caches metadata locally.
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -173,6 +178,8 @@ export async function cubismModelMetadata(
   const runtime =
     model.runtime && typeof model.runtime === "object" ? (model.runtime as Record<string, unknown>) : model;
   if (typeof runtime.moc !== "string" || !runtime.moc) return undefined;
+  if (process.env.HANEOKA_CUBISM_RUNTIME_POLICY === "optional" &&
+      !fs.existsSync(path.join(process.cwd(), "public/Core/live2dcubismcore.js"))) return undefined;
   const source = await mocSource(runtime.moc, pin),
     coreSha = lockedCore().sha256;
   const key = `${producerSha256}:${coreSha}:${source.entry.sha256}`;

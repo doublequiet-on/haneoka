@@ -43,6 +43,10 @@ const producer = {
   computationRecipe: "chart-rates-v6",
   enabledKinds: rollout.enabledKinds,
 };
+if (!process.argv.includes("--register") && !rollout.enabledKinds.length) {
+  console.log(JSON.stringify({ stage: "catalog-pages", published: false, disabled: true }));
+  process.exit(0);
+}
 if (git("status", "--porcelain", "--untracked-files=all", "--ignore-submodules"))
   throw new Error("Page production requires a clean committed checkout");
 const output = path.resolve(process.env.CATALOG_PAGE_OUTPUT || ".output/catalog-pages");

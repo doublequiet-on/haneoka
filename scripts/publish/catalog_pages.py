@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import gzip
+import io
 import json
 import os
 import re
@@ -77,8 +79,21 @@ def stage(store, output):
     return {"roots": roots, "resourceVector": captured}
 
 
+def page_body(store, key):
+    if "/objects/" in key:
+        compressed = store.get_bytes(key + ".gz")
+        if compressed is not None:
+            with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as stream:
+                body = stream.read(64 * 1024 * 1024 + 1)
+            if len(body) > 64 * 1024 * 1024:
+                raise ValueError("page object exceeds byte limit")
+            return body
+    return store.get_bytes(key)
+
+
 def bridge(store):
     pattern = re.compile(r"catalog-pages/v1/(?:(?:objects|ready)/[a-f0-9]{64}|computed/(?:jp|intl)/r-[a-f0-9]{20}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[a-f0-9]{40}/chart-rates-v6)\.json\Z")
+    absent = set()
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -86,7 +101,9 @@ def bridge(store):
             if not pattern.fullmatch(key):
                 raise ValueError("invalid immutable page key")
             if request["operation"] == "read":
-                body = store.get_bytes(key)
+                body = page_body(store, key)
+                if body is None:
+                    absent.add(key)
                 result = {"body": None if body is None else base64.b64encode(body).decode("ascii")}
             elif request["operation"] == "create":
                 body = base64.b64decode(request["body"], validate=True)
@@ -94,11 +111,21 @@ def bridge(store):
                     raise ValueError("page object exceeds byte limit")
                 if "/objects/" in key and hashlib.sha256(body).hexdigest() != key.rsplit("/", 1)[1][:-5]:
                     raise ValueError("page object hash mismatch")
+                existing = None if key in absent else page_body(store, key)
+                if existing is not None:
+                    if existing != body:
+                        raise ValueError("conflicting immutable page object")
+                    result = {"created": False}
+                    print(json.dumps(result), flush=True)
+                    continue
+                object_key = key + ".gz" if "/objects/" in key else key
+                stored = gzip.compress(body, compresslevel=9, mtime=0) if object_key != key else body
                 try:
-                    store.client.put_object(Bucket=store.bucket, Key=key, Body=body, ContentType="application/json", CacheControl=IMMUTABLE_CACHE, IfNoneMatch="*")
+                    store.client.put_object(Bucket=store.bucket, Key=object_key, Body=stored, ContentType="application/gzip" if object_key != key else "application/json", CacheControl=IMMUTABLE_CACHE, IfNoneMatch="*")
                 except ClientError as error:
-                    if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412 or store.get_bytes(key) != body:
+                    if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412 or page_body(store, key) != body:
                         raise
+                absent.discard(key)
                 result = {"created": True}
             else:
                 raise ValueError("unknown page bridge operation")

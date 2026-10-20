@@ -459,3 +459,13 @@ success.
 Haneoka-authored pipeline files are licensed under [MPL-2.0](../LICENSE).
 Inputs, generated resources, and third-party tools retain their own terms; see
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
+### 页面快照的成本与启用
+
+`config/catalog-page-rollout.json` 默认 `enabledKinds: []`。默认整站构建、资源更新和 PR 验证不发布页面快照或计算 receipt，不产生这条链路的 R2 写入与新增存储。PR CI 复用五语分片构建，使用 `verification_only`，不读取生产 R2 凭据，也不生成可部署 Worker publication。生产构建继续保留授权 runtime 与 publication 校验。
+
+快照需要显式配置启用的核心类型。发布前先复用同一版本的完整 ready；已存在的内容对象只读验证，不重复 PUT，也不列举 bucket。新增正文以确定性 gzip 写入 `.json.gz`，摘要仍绑定解压后的原始 JSON；旧 `.json` 保持可读。先上传内容并远端回读，最后写入 ready。
+
+新资源向量或投影版本仍可能使整批快照更新，压缩不会减少首次发布的对象数量。启用前应以实际输入测量新增 PUT 数和压缩字节数；当前保持关闭。重复完整发布不新增对象；本地验证不向生产 R2 写入对象。
+
+PR 的公开完整前端校验使用 optional Cubism 策略；没有 Core 时跳过原生模型 metadata 提取，生产部署仍要求完整授权运行时。
