@@ -7,7 +7,9 @@ import { gekisouMission } from "../lib/gekisou";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
 import { icon } from "./ui/icon";
 import "./song-skill-points";
-import { roomRequiredScore } from "../lib/chart-rates";
+import { byScoreRank, isSongScoreRank, roomRequiredScore, scoreRankName } from "../lib/chart-rates";
+import { clientText } from "../i18n/client";
+import { scoreRankIcon } from "./shared/score-rank";
 import "./song-room-calculator";
 import "./song-score-targets";
 import type { ChartRates } from "../lib/chart-rates";
@@ -24,6 +26,8 @@ export interface SongRewardRenderOptions {
   /** This song's chart rates by difficulty, and the song analysis address. */
   chartRates?: { greatFactor: number; charts: Record<string, ChartRates> };
   analysisHref?: string;
+  /** The Gekisou stage pattern, grouped with the room scores of the same mode. */
+  gekisou?: Item;
 }
 
 export interface SongSummaryRenderOptions {
@@ -33,8 +37,8 @@ export interface SongSummaryRenderOptions {
   difficulty: Item[];
   selectedDifficulty: number;
   locale: string;
-  /** Gekisou (撃奏) summary: song-level mission pattern merged with the
-   * per-difficulty segment metrics from the song-meta entry. */
+  /** Gekisou (撃奏) summary: song-level mission pattern and the per-difficulty
+   * segment metrics from the song-meta entry. */
   gekisou: Item;
   metaView?: { mode: string; tier: string; band: number };
   /** False for a game without BanG Dream scoring: only level and note count apply. */
@@ -113,31 +117,26 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
       ? Number(officialLevel).toLocaleString(locale, { maximumFractionDigits: 20 })
       : "—",
   ];
+  // Chart figures follow the difficulty picker; the picker already shows the
+  // level, so repeating it here would be one figure twice over one control.
   const metrics: Array<[string, string, string]> = !scoring
     ? [level, ["metaN", "Note Count", decimal(meta.n ?? difficulty[selectedDifficulty]?.noteCount)]]
     : [
-        [
-          "metaOfficialLevel",
-          "Official level",
-          officialLevel !== null && officialLevel !== undefined && Number.isFinite(Number(officialLevel))
-            ? Number(officialLevel).toLocaleString(locale, { maximumFractionDigits: 20 })
-            : "—",
-        ],
         ...(estimatedLevel === undefined
           ? []
-          : ([["difficultyEstimateBeta", "Estimated difficulty · Beta", estimatedLevel]] as Array<
+          : ([["difficultyEstimatedConstant", "Estimated constant", estimatedLevel]] as Array<
               [string, string, string]
             >)),
         ["metaTime", "Song Duration", duration(meta.time)],
+        ["metaBpm", "Beats per Minute", bpm],
+        ["metaN", "Note Count", decimal(meta.n ?? difficulty[selectedDifficulty]?.noteCount)],
+        ["metaNps", "Notes per Second", decimal(meta.nps, 1)],
+        ["metaSr", "Skill Coverage Rate", percentage(estimated ? undefined : selected.sr)],
+        ["metaScoreFactor", "Factor", percentage(selected.score)],
+        ["metaEff", "Efficiency", percentage(selected.eff)],
         ...(nativeScore === undefined
           ? []
           : ([["metaNativeScore", "Score", decimal(nativeScore, 2)]] as Array<[string, string, string]>)),
-        ["metaScoreFactor", label("metaScore", "Factor"), percentage(selected.score)],
-        ["metaEff", "Score Efficiency per Minute", percentage(selected.eff)],
-        ["metaBpm", "Beats per Minute", bpm],
-        ["metaN", "Note Count", decimal(meta.n)],
-        ["metaNps", "Notes per Second", decimal(meta.nps, 1)],
-        ["metaSr", "Skill Coverage", percentage(estimated ? undefined : selected.sr)],
       ];
   const facts: Array<{ key: string; value: string }> = ["composer", "lyricist", "arranger", "publishedAt"].flatMap(
     (key) => {
@@ -145,73 +144,48 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
       const timestamp = Number(Array.isArray(raw) ? raw.find((entry) => Number(entry) > 0) : raw || 0);
       const value =
         key === "publishedAt" && timestamp
-          ? new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }).format(
-              new Date(timestamp),
-            )
+          ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(timestamp))
           : fieldValue(item, key);
       return value ? [{ key, value }] : [];
     },
   );
-  const itemGekisou = (item.gekisou as Item | undefined) || {};
-  const missionPattern = Array.isArray(gekisou.missionPattern)
-    ? gekisou.missionPattern
-    : Array.isArray(itemGekisou.missionPattern)
-      ? itemGekisou.missionPattern
-      : [];
-  const missionTypes = Array.isArray(gekisou.missionTypes)
-    ? gekisou.missionTypes
-    : Array.isArray(itemGekisou.missionTypes)
-      ? itemGekisou.missionTypes
-      : missionPattern;
-  const missionIcons = (gekisou.icons || itemGekisou.icons || {}) as Record<string, string>;
-  const segments = Array.isArray(gekisou.segments) ? (gekisou.segments as Item[]) : [];
-  const stageCount = Math.max(missionTypes.length, missionPattern.length, segments.length);
-  const stageTypes = Array.from({ length: stageCount }, (_, index) => missionTypes[index] ?? missionPattern[index]);
-  const gekisouCells = stageTypes.flatMap((type, index) => {
-    const mission = gekisouMission(type);
-    if (!mission) return [];
-    const image = missionIcons[mission.icon];
-    return html`
-      <li>
-        ${
-          image
-            ? html`
-                <span
-                  class="song-gekisou-stage__icon"
-                  style=${`mask-image:url("${image}");-webkit-mask-image:url("${image}")`}
-                  aria-hidden="true"
-                ></span>
-              `
-            : nothing
-        }
-        <span>
-          <small>${label("gekisouSegment", "Gekisou stage")} ${index + 1}</small>
-          <strong>${label(mission.key, mission.fallback)}</strong>
-        </span>
-      </li>
-    `;
-  });
   return html`
-    <section class="detail-section song-detail-section song-detail-summary">
-      ${renderDetailSectionHeading(label("details", "Details"), "details")}
-      ${difficulty.length ? difficultyPicker({ rows: difficulty, selected: difficultyKey(difficulty[selectedDifficulty] || {}, selectedDifficulty), locale, onSelect: (_key, index) => selectDifficulty(index) }) : nothing}
+    ${
+      facts.length
+        ? html`
+            <section class="detail-section song-detail-section song-detail-summary">
+              ${renderDetailSectionHeading(label("details", "Details"), "details")}
+              <dl class="spec-list spec-list--split">
+                ${facts.map(
+                  ({ key, value }) => html`
+                    <div>
+                      <dt>${detailLabel(key)}</dt>
+                      <dd lang=${resolveLocalizedText(item[key], locale).locale}>${value}</dd>
+                    </div>
+                  `,
+                )}
+              </dl>
+            </section>
+          `
+        : nothing
+    }
+    <section class="detail-section song-detail-section song-detail-chart">
+      ${renderDetailSectionHeading(label("chart", "Chart"), "difficulty")}
+      ${
+        difficulty.length
+          ? difficultyPicker({
+              rows: difficulty,
+              selected: difficultyKey(difficulty[selectedDifficulty] || {}, selectedDifficulty),
+              locale,
+              onSelect: (_key, index) => selectDifficulty(index),
+            })
+          : nothing
+      }
       <dl class="song-data-grid song-meta-strip">
         ${metrics.map(
           ([key, fallback, value]) => html`
             <div>
-              <dt title=${key === "difficultyEstimateBeta" ? nothing : label(key, fallback)}>
-                ${label(key, fallback)}
-              </dt>
-              <dd lang=${resolveLocalizedText(item[key], locale).locale}>${value}</dd>
-            </div>
-          `,
-        )}
-      </dl>
-      <dl class="song-data-grid song-detail-facts">
-        ${facts.map(
-          ({ key, value }) => html`
-            <div>
-              <dt>${detailLabel(key)}</dt>
+              <dt>${label(key, fallback)}</dt>
               <dd lang=${resolveLocalizedText(item[key], locale).locale}>${value}</dd>
             </div>
           `,
@@ -228,45 +202,44 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
           `
         : nothing
     }
-    ${
-      gekisouCells.length
-        ? html`
-            <section class="detail-section song-detail-section song-gekisou-section">
-              ${renderDetailSectionHeading(label("gekisouStages", "Gekisou stages"), "effects")}
-              <ol class="song-gekisou-stages">
-                ${gekisouCells}
-              </ol>
-            </section>
-          `
-        : nothing
-    }
   `;
 }
 
-export function renderSongRewards({ item, chart, server, label, localized, locale, chartRates, analysisHref }: SongRewardRenderOptions) {
+export function renderSongRewards({
+  item,
+  chart,
+  server,
+  label,
+  localized,
+  locale,
+  chartRates,
+  analysisHref,
+  gekisou,
+}: SongRewardRenderOptions) {
   const rates = chartRates?.charts[String(chart.difficulty ?? "")] ?? null;
   const targets = rates
     ? html`
         <song-score-targets
           .rates=${rates}
           .greatFactor=${chartRates!.greatFactor}
+          server=${server}
           locale=${locale}
           href=${analysisHref ?? ""}
         ></song-score-targets>
       `
     : nothing;
-  const ranks = (Array.isArray(item.scoreRanks) ? (item.scoreRanks as Item[]) : []).filter(
-    (rank) => Number(rank.scoreRank || 0) >= 3,
+  const ranks = byScoreRank(
+    (Array.isArray(item.scoreRanks) ? (item.scoreRanks as Item[]) : []).filter((rank) =>
+      isSongScoreRank(Number(rank.scoreRank || 0)),
+    ),
+    (rank) => Number(rank.scoreRank),
   );
-  const scoreRewards = [...(Array.isArray(item.scoreRewards) ? (item.scoreRewards as Item[]) : [])].sort(
-    (left, right) => Number(left.liveScoreRank || 99) - Number(right.liveScoreRank || 99),
+  const scoreRewards = byScoreRank(
+    Array.isArray(item.scoreRewards) ? (item.scoreRewards as Item[]) : [],
+    (reward) => Number(reward.liveScoreRank || 99),
   );
   const comboRewards = item.comboRewards && typeof item.comboRewards === "object" ? (item.comboRewards as Item) : {};
-  if (!ranks.length && !scoreRewards.length && !Object.keys(comboRewards).length) return targets;
-  const names = ["", "E", "D", "C", "B", "A", "S", "SS"];
   const active = String(chart.difficultyName || "").toLowerCase();
-  const rankIcon = (rank: string) =>
-    `/assets/${server}/Assets/AddressableResources/UI/Texture/BandRank/ImgScorerank_${rank}.png`;
   const rewardValue = (reward: Item) => {
     const resolved = (reward.resolved as Item | undefined) || {};
     return {
@@ -278,12 +251,17 @@ export function renderSongRewards({ item, chart, server, label, localized, local
   const combo = Object.entries(comboRewards)
     .filter(([difficulty]) => !active || difficulty.toLowerCase() === active)
     .flatMap(([, value]) => (Array.isArray(value) ? (value as Item[]) : []));
-  const scoreRankIds = [
-    ...new Set([
-      ...ranks.map((rank) => Number(rank.scoreRank)),
-      ...scoreRewards.map((reward) => Number(reward.liveScoreRank)),
-    ]),
-  ].sort((a, b) => a - b);
+  const scoreRankIds = byScoreRank(
+    [
+      ...new Set([
+        ...ranks.map((rank) => Number(rank.scoreRank)),
+        ...scoreRewards.map((reward) => Number(reward.liveScoreRank)),
+      ]),
+    ].filter(isSongScoreRank),
+    (rank) => rank,
+  );
+  const scoreLabel = clientText(locale, "catalog.analysis.fields.rankScore", "Score");
+  const comboLabel = clientText(locale, "catalog.items.combo", "Combo");
   const renderReward = (reward: Item) => {
     const value = rewardValue(reward);
     // The icon slot is always present (26dp) so reward names form one
@@ -307,72 +285,26 @@ export function renderSongRewards({ item, chart, server, label, localized, local
     `;
   };
   const comboPercentages = [25, 50, 75, 100];
-  const roomRanks = ranks.filter((rank) => Number(rank.battleLiveRequiredScore || 0) > 0);
+  const roomRanks = byScoreRank(
+    ranks.filter((rank) => Number(rank.battleLiveRequiredScore || 0) > 0),
+    (rank) => Number(rank.scoreRank),
+  );
   const players = [1, 2, 3, 4, 5];
-  const rooms = roomRanks.length
+  const hasScore = scoreRankIds.length > 0;
+  const hasCombo = combo.length > 0;
+  const scoreList = hasScore
     ? html`
-        <section class="detail-section song-detail-section song-room-section">
-          ${renderDetailSectionHeading(label("catalog.analysis.fields.gekisouRoomScores", "Gekisou room scores"), "characters")}
-          <div class="table-scroll" role="region" tabindex="0" aria-label=${label("catalog.analysis.fields.gekisouRoomScores", "Gekisou room scores")} data-scroll-region>
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">${label("catalog.analysis.fields.deckRank", "Target rank")}</th>
-                  ${players.map(
-                    (count) => html`
-                      <th scope="col" class="is-numeric">
-                        ${(count === 1 ? label("catalog.analysis.fields.roomPlayer", "1 player") : label("catalog.analysis.fields.roomPlayers", "{count} players")).replace("{count}", String(count))}
-                      </th>
-                    `,
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                ${roomRanks.map((rank) => {
-                  const rankName = names[Number(rank.scoreRank)] || "—";
-                  return html`
-                    <tr>
-                      <th scope="row">
-                        <img src=${rankIcon(rankName)} alt=${rankName} width="28" height="28" decoding="async" />
-                      </th>
-                      ${players.map(
-                        (count) => html`
-                          <td class="is-numeric tabular">${roomRequiredScore(Number(rank.battleLiveRequiredScore), count).toLocaleString()}</td>
-                        `,
-                      )}
-                    </tr>
-                  `;
-                })}
-              </tbody>
-            </table>
-          </div>
-          <song-room-calculator
-            .ranks=${roomRanks.map((rank) => [Number(rank.scoreRank), Number(rank.battleLiveRequiredScore)] as [number, number])}
-            locale=${locale}
-          ></song-room-calculator>
-        </section>
-      `
-    : nothing;
-  return html`
-    ${targets}
-    <section class="detail-section song-detail-section song-rewards-section">
-      ${renderDetailSectionHeading(label("rewards", "Rewards"), "rewards", {
-        count: ranks.length + scoreRewards.length + combo.length,
-      })}
-      <div class="song-detail-section__body detail-columns">
         <div class="stack stack--tight">
-          <h3 class="song-detail-subheading">${label("score", "Score")}</h3>
+          <h4 class="song-detail-subheading">${scoreLabel}</h4>
           <ul class="song-reward-list">
             ${scoreRankIds.map((rankId) => {
-              const rankName = names[rankId] || "—";
               const rank = ranks.find((entry) => Number(entry.scoreRank) === rankId);
               const rewards = scoreRewards.filter((entry) => Number(entry.liveScoreRank) === rankId);
               return html`
                 <li>
-                  <img src=${rankIcon(rankName)} alt=${rankName} width="28" height="28" decoding="async" />
+                  ${scoreRankIcon(server, rankId)}
                   <span class="song-reward-list__condition">
-                    <strong>${rank ? Number(rank.requiredScore || 0).toLocaleString() : rankName}</strong>
-                    <small>${label("score", "Score")}</small>
+                    <strong>${rank ? Number(rank.requiredScore || 0).toLocaleString() : scoreRankName(rankId)}</strong>
                   </span>
                   <div>${rewards.map(renderReward)}</div>
                 </li>
@@ -380,8 +312,12 @@ export function renderSongRewards({ item, chart, server, label, localized, local
             })}
           </ul>
         </div>
+      `
+    : nothing;
+  const comboList = hasCombo
+    ? html`
         <div class="stack stack--tight">
-          <h3 class="song-detail-subheading">${label("combo", "Combo")}</h3>
+          <h4 class="song-detail-subheading">${comboLabel}</h4>
           <ul class="song-reward-list song-combo-list">
             ${combo.map((reward) => {
               const value = rewardValue(reward);
@@ -415,8 +351,114 @@ export function renderSongRewards({ item, chart, server, label, localized, local
             })}
           </ul>
         </div>
-      </div>
-    </section>
-    ${rooms}
+      `
+    : nothing;
+  const rooms = roomRanks.length
+    ? html`
+        <section class="detail-section song-detail-section song-room-section">
+          ${renderDetailSectionHeading(label("catalog.analysis.fields.gekisouRoomScores", "Gekisou room scores"), "characters")}
+          <div class="table-scroll" role="region" tabindex="0" aria-label=${label("catalog.analysis.fields.gekisouRoomScores", "Gekisou room scores")} data-scroll-region>
+            <table class="data-table song-room-table">
+              <thead>
+                <tr>
+                  <th scope="col">${label("catalog.analysis.fields.deckRank", "Target rank")}</th>
+                  ${players.map(
+                    (count) => html`
+                      <th scope="col" class="is-numeric">
+                        ${(count === 1 ? label("catalog.analysis.fields.roomPlayer", "1 player") : label("catalog.analysis.fields.roomPlayers", "{count} players")).replace("{count}", String(count))}
+                      </th>
+                    `,
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                ${roomRanks.map((rank) => {
+                  return html`
+                    <tr>
+                      <th scope="row">${scoreRankIcon(server, Number(rank.scoreRank))}</th>
+                      ${players.map(
+                        (count) => html`
+                          <td class="is-numeric tabular">${roomRequiredScore(Number(rank.battleLiveRequiredScore), count).toLocaleString()}</td>
+                        `,
+                      )}
+                    </tr>
+                  `;
+                })}
+              </tbody>
+            </table>
+          </div>
+          <song-room-calculator
+            .ranks=${roomRanks.map((rank) => [Number(rank.scoreRank), Number(rank.battleLiveRequiredScore)] as [number, number])}
+            server=${server}
+            locale=${locale}
+          ></song-room-calculator>
+        </section>
+      `
+    : nothing;
+  const itemGekisou = (item.gekisou as Item | undefined) || {};
+  const gekisouData = gekisou || {};
+  const missionPattern = Array.isArray(gekisouData.missionPattern)
+    ? gekisouData.missionPattern
+    : Array.isArray(itemGekisou.missionPattern)
+      ? itemGekisou.missionPattern
+      : [];
+  const missionTypes = Array.isArray(gekisouData.missionTypes)
+    ? gekisouData.missionTypes
+    : Array.isArray(itemGekisou.missionTypes)
+      ? itemGekisou.missionTypes
+      : missionPattern;
+  const missionIcons = (gekisouData.icons || itemGekisou.icons || {}) as Record<string, string>;
+  const segments = Array.isArray(gekisouData.segments) ? (gekisouData.segments as Item[]) : [];
+  const stageCount = Math.max(missionTypes.length, missionPattern.length, segments.length);
+  const stageTypes = Array.from({ length: stageCount }, (_, index) => missionTypes[index] ?? missionPattern[index]);
+  const gekisouCells = stageTypes.flatMap((type, index) => {
+    const mission = gekisouMission(type);
+    if (!mission) return [];
+    const image = missionIcons[mission.icon];
+    return html`
+      <li>
+        ${
+          image
+            ? html`
+                <span
+                  class="song-gekisou-stage__icon"
+                  style=${`mask-image:url("${image}");-webkit-mask-image:url("${image}")`}
+                  aria-hidden="true"
+                ></span>
+              `
+            : nothing
+        }
+        <span>
+          <small>${label("gekisouSegment", "Gekisou stage")} ${index + 1}</small>
+          <strong>${label(mission.key, mission.fallback)}</strong>
+        </span>
+      </li>
+    `;
+  });
+  const stages = gekisouCells.length
+    ? html`
+        <section class="detail-section song-detail-section song-gekisou-section">
+          ${renderDetailSectionHeading(label("gekisouStages", "Gekisou stages"), "effects")}
+          <ol class="song-gekisou-stages">${gekisouCells}</ol>
+        </section>
+      `
+    : nothing;
+  return html`
+    ${targets}
+    ${
+      hasScore || hasCombo
+        ? html`
+            <section class="detail-section song-detail-section song-rewards-section">
+              ${renderDetailSectionHeading(label("rewards", "Rewards"), "rewards", {
+                count: scoreRankIds.length + combo.length,
+              })}
+              <div class=${`song-detail-section__body${hasScore && hasCombo ? " detail-columns" : ""}`}>
+                ${scoreList}${comboList}
+              </div>
+            </section>
+          `
+        : nothing
+    }
+    ${stages}${rooms}
   `;
 }

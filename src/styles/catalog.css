@@ -177,14 +177,37 @@
     font: var(--md-sys-typescale-emphasized-title-large-weight) var(--md-sys-typescale-title-large-size) / var(--md-sys-typescale-title-large-line-height) var(--app-font);
     font-variant-numeric: tabular-nums;
   }
-  .song-detail-facts {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
-    padding-block: 16px;
-  }
   .song-detail-subheading {
     margin: 12px 0 4px;
     color: var(--md-sys-color-on-surface-variant);
     font: var(--md-sys-typescale-title-small-weight) var(--md-sys-typescale-title-small-size) / var(--md-sys-typescale-title-small-line-height) var(--app-font);
+  }
+  /* Every score ladder uses the game's emblem in the same 28dp slot. */
+  .score-rank-icon {
+    display: block;
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+  }
+  .song-rank-table tbody th {
+    width: 44px;
+    padding-inline-end: 4px;
+    text-align: start;
+  }
+  .score-rank-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .score-rank-value .score-rank-icon {
+    width: 28px;
+    height: 28px;
+  }
+  /* Six numeric columns share one pane; the table's own scroll stays for
+     narrow screens, while the desktop column fits without clipping. */
+  .song-rank-table :where(th, td),
+  .song-room-table :where(th, td) {
+    padding-inline: 8px;
   }
   .event-calc {
     display: grid;
@@ -201,7 +224,7 @@
   }
   .song-reward-list > li {
     display: grid;
-    grid-template-columns: 28px minmax(80px, max-content) minmax(0, 1fr);
+    grid-template-columns: 32px minmax(80px, max-content) minmax(0, 1fr);
     gap: 12px;
     align-items: center;
     min-height: 64px;
@@ -211,8 +234,8 @@
     border-top: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 50%, transparent);
   }
   .song-reward-list > li > img {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     object-fit: contain;
   }
   .song-reward-list__condition {

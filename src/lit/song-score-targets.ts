@@ -1,6 +1,8 @@
 import { LitElement, html, nothing } from "lit";
 import { clientText } from "../i18n/client";
 import {
+  byScoreRank,
+  isSongScoreRank,
   liveWeights,
   slotOrderRates,
   slotPowerNeeded,
@@ -9,30 +11,39 @@ import {
   type DeckSlot,
 } from "../lib/chart-rates";
 import { DEFAULT_DECK, rememberDeck, rememberedDeck, type Deck } from "../lib/deck-state";
+import { accordion } from "./ui/accordion";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
+import { scoreRankIcon } from "./shared/score-rank";
 
 /** The selected chart's score ranks in a Live: the score each needs and the power a deck needs for it. */
 export class SongScoreTargets extends LitElement {
   static properties = {
     rates: { attribute: false },
     greatFactor: { attribute: false },
+    server: { type: String },
     locale: { type: String },
     href: { type: String },
     deck: { state: true },
+    deckOpen: { state: true },
   };
   declare rates: ChartRates | null;
   declare greatFactor: number;
+  /** Release server whose rank emblems and assets the page shows. */
+  declare server: string;
   declare locale: string;
   /** Song analysis, where the same deck scores every chart. */
   declare href: string;
   declare deck: Deck;
+  declare deckOpen: boolean;
   constructor() {
     super();
     this.rates = null;
     this.greatFactor = 0.8;
+    this.server = "intl";
     this.locale = "ja";
     this.href = "";
     this.deck = DEFAULT_DECK;
+    this.deckOpen = false;
   }
   createRenderRoot() {
     return this;
@@ -72,23 +83,44 @@ export class SongScoreTargets extends LitElement {
     const rates = this.rates;
     if (!rates) return nothing;
     const deck = this.deck;
-    const names = ["", "E", "D", "C", "B", "A", "S", "SS"];
+    const heading = this.text("powerNeeded", "Power needed");
     const number = new Intl.NumberFormat(this.locale);
     const percent = new Intl.NumberFormat(this.locale, { style: "percent", maximumFractionDigits: 1 });
     const orders = slotOrderRates(liveWeights(rates, deck.great / 100, this.greatFactor), deck.slots);
     const slot = (index: number, change: Partial<DeckSlot>) =>
       this.set({ slots: deck.slots.map((entry, at) => (at === index ? { ...entry, ...change } : entry)) });
-    const ranks = rates.ranks.filter(([rank]) => rank >= 3).reverse();
+    const ranks = byScoreRank(
+      rates.ranks.filter(([rank]) => isSongScoreRank(rank)),
+      ([rank]) => rank,
+    );
+    const deckFields = html`
+      <div class="detail-fold__body">
+        <div class="filter-range">
+          ${this.number(deck.power, this.text("deckPower", "Power"), 99999999, "1", (value) => value >= 1 && this.set({ power: Math.round(value) }))}
+          ${this.number(deck.great, this.text("deckGreat", "Great (%)"), 100, "1", (value) => this.set({ great: Math.round(value) }))}
+        </div>
+        <h4 class="song-detail-subheading">${this.text("deckSkills", "Score skills (%)")}</h4>
+        <div class="filter-range filter-range--five">
+          ${deck.slots.map((entry, index) =>
+            this.number(entry.score + entry.perfect, String(index + 1), 1000, "any", (value) =>
+              slot(index, entry.perfect && !entry.score ? { perfect: value } : { score: value, perfect: 0 }),
+            ),
+          )}
+        </div>
+        <h4 class="song-detail-subheading">${this.text("deckExtension", "Snap skill extension (s)")}</h4>
+        <div class="filter-range filter-range--five">
+          ${deck.slots.map((entry, index) =>
+            this.number(entry.extensionMs / 1000, String(index + 1), 6, "0.25", (value) =>
+              slot(index, { extensionMs: Math.round(value * 4) * 250 }),
+            ),
+          )}
+        </div>
+      </div>
+    `;
     return html`
-      ${renderDetailSectionHeading(this.text("powerNeeded", "Power needed"), "stats")}
-      <div
-        class="table-scroll"
-        role="region"
-        tabindex="0"
-        aria-label=${this.text("powerNeeded", "Power needed")}
-        data-scroll-region
-      >
-        <table class="data-table">
+      ${renderDetailSectionHeading(heading, "stats")}
+      <div class="table-scroll" role="region" tabindex="0" aria-label=${heading} data-scroll-region>
+        <table class="data-table song-rank-table">
           <thead>
             <tr>
               <th scope="col">${this.text("deckRank", "Target rank")}</th>
@@ -104,7 +136,7 @@ export class SongScoreTargets extends LitElement {
               const need = slotPowerNeeded(required, orders, rates.notes);
               return html`
                 <tr>
-                  <th scope="row">${names[rank]}</th>
+                  <th scope="row">${scoreRankIcon(this.server, rank)}</th>
                   <td class="is-numeric tabular">${number.format(required)}</td>
                   <td class="is-numeric tabular">${number.format(need.mean)}</td>
                   <td class="is-numeric tabular">${number.format(need.every)}</td>
@@ -118,27 +150,17 @@ export class SongScoreTargets extends LitElement {
           </tbody>
         </table>
       </div>
-      <h3 class="song-detail-subheading">${this.text("deck", "Deck")}</h3>
-      <div class="filter-range">
-        ${this.number(deck.power, this.text("deckPower", "Power"), 99999999, "1", (value) => value >= 1 && this.set({ power: Math.round(value) }))}
-        ${this.number(deck.great, this.text("deckGreat", "Great (%)"), 100, "1", (value) => this.set({ great: Math.round(value) }))}
-      </div>
-      <p class="song-detail-subheading">${this.text("deckSkills", "Score skills (%)")}</p>
-      <div class="filter-range filter-range--five">
-        ${deck.slots.map((entry, index) =>
-          this.number(entry.score + entry.perfect, String(index + 1), 1000, "any", (value) =>
-            slot(index, entry.perfect && !entry.score ? { perfect: value } : { score: value, perfect: 0 }),
-          ),
-        )}
-      </div>
-      <p class="song-detail-subheading">${this.text("deckExtension", "Snap skill extension (s)")}</p>
-      <div class="filter-range filter-range--five">
-        ${deck.slots.map((entry, index) =>
-          this.number(entry.extensionMs / 1000, String(index + 1), 6, "0.25", (value) =>
-            slot(index, { extensionMs: Math.round(value * 4) * 250 }),
-          ),
-        )}
-      </div>
+      ${accordion({
+        id: "song-score-deck",
+        label: this.text("deck", "Deck"),
+        expanded: this.deckOpen,
+        onExpandedChange: (expanded) => {
+          this.deckOpen = expanded;
+        },
+        headingLevel: 3,
+        className: "detail-fold song-deck",
+        content: deckFields,
+      })}
       ${
         this.href
           ? html`
