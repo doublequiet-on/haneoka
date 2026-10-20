@@ -5,6 +5,31 @@
 /** Skill window lengths (ms): five seconds plus every snap extension, 0–6 s in 0.25 s steps (stacked support skills
  * reach 5 s). */
 export const SKILL_WINDOWS = Array.from({ length: 25 }, (_, index) => 5000 + index * 250);
+
+/** The game's score-rank letters, by its numeric rank. Ranks 0–2 never score a chart. */
+const SCORE_RANK_NAMES = ["", "E", "D", "C", "B", "A", "S", "SS"] as const;
+
+/** The score ranks a song ladder lists: C to SS, low to high, like the analysis table. */
+export const SONG_SCORE_RANKS = [3, 4, 5, 6, 7] as const;
+
+/** Whether a numeric score rank is one a song ladder lists. */
+export const isSongScoreRank = (rank: number): boolean => (SONG_SCORE_RANKS as readonly number[]).includes(rank);
+
+export function scoreRankName(rank: number): string {
+  return SCORE_RANK_NAMES[rank] || "";
+}
+
+/** The release server's own emblem for a score rank, or "" outside the scored ranks. */
+export function scoreRankIconUrl(server: string, rank: number): string {
+  const name = scoreRankName(rank);
+  return name ? `/assets/${server}/Assets/AddressableResources/UI/Texture/BandRank/ImgScorerank_${name}.png` : "";
+}
+
+/** One order for every score ladder: low to high, so ranks never read backwards. */
+export function byScoreRank<T>(rows: readonly T[], rank: (row: T) => number): T[] {
+  return [...rows].sort((left, right) => rank(left) - rank(right));
+}
+
 export interface ChartRates {
   /** Score per unit of power without skills, All Perfect. */
   base: number;

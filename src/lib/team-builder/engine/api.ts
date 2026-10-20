@@ -101,6 +101,8 @@ export type Goal =
       accuracy: Accuracy;
       /** Assumed placement in every range (1 for solo Mission lives). */
       rank: number;
+      /** Minimum team COMBO BONUS multiplier on charts with COMBO missions. */
+      minComboBonus?: number;
       /** Opponents' scores in each range; when given they decide the placements instead of `rank`. */
       opponents?: number[][];
       /** Luck ranges: 0 takes the exact nominal lottery expectation; n > 0 averages n native lottery seeds instead. */
@@ -166,6 +168,7 @@ export interface HitScore {
   ranks: Record<string, number>;
 }
 export interface EngineHit {
+  comboBonus?: number | null;
   gekiso?: { just: GekisoJustSummary; luckSamples: number; sampled: boolean; rank: 1 };
   song: SongRef | null;
   /** Leader first. */

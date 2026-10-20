@@ -29,7 +29,7 @@ import {
 } from "./shared/catalog";
 import { resolveLocalizedText } from "../lib/localized-text";
 import { openDetailLocation, closeDetailLocation, observeDetailLocation } from "../lib/detail-navigation";
-import type { ReleaseServer } from "../lib/release-server";
+import { isPublicReleaseServer, type ReleaseServer } from "../lib/release-server";
 import { resourceCollectionHref } from "../lib/resource-route";
 import type { Locale } from "@haneoka/i18n";
 import { OutfitStage } from "./runtime/outfit-stage";
@@ -148,6 +148,8 @@ export class AnonTokyoWorkspace extends LitElement {
   private unionDocument?: CrossCatalogDocuments;
   private loadRequest?: AbortController;
   private referenceData?: Value;
+  private referenceDataServer = "";
+  private referenceSource = "";
   private sourceServer?: ReleaseServer;
   private outfitStage?: OutfitStage;
   private outfitRecipeKey = "";
@@ -215,6 +217,8 @@ export class AnonTokyoWorkspace extends LitElement {
     this.loadRequest = undefined;
     referenceDocuments.clear();
     this.referenceData = undefined;
+    this.referenceDataServer = "";
+    this.referenceSource = "";
     this.unionDocument = undefined;
     this.document = null;
     this.bands = [];
@@ -267,11 +271,11 @@ export class AnonTokyoWorkspace extends LitElement {
     history.replaceState(history.state, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
   }
   private async loadReferenceData() {
-    if (this.referenceData) {
+    const server = this.referenceSource || this.server();
+    if (this.referenceData && this.referenceDataServer === server) {
       this.requestUpdate();
       return;
     }
-    const server = this.server();
     const controller = this.loadRequest;
     let request = referenceDocuments.get(server);
     if (!request) {
@@ -284,8 +288,9 @@ export class AnonTokyoWorkspace extends LitElement {
     }
     try {
       const data = await request;
-      if (this.isConnected && this.server() === server && this.loadRequest === controller) {
+      if (this.isConnected && (this.referenceSource || this.server()) === server && this.loadRequest === controller) {
         this.referenceData = data;
+        this.referenceDataServer = server;
         this.requestUpdate();
       }
     } catch {
@@ -300,15 +305,50 @@ export class AnonTokyoWorkspace extends LitElement {
     params.set("item", this.selectedItem);
     openDetailLocation(`${location.pathname}?${params}`);
   }
+  /**
+   * A public peer keeps its own page. A restricted edition has none, so its
+   * item opens here and the detail reads that edition's own document.
+   */
   private openForeignItem(item: Value, parameter: "item" | "character"): boolean {
     const source = this.sourceFor(item);
-    if (!source || source.identity.server === this.server()) return false;
-    const target = resourceCollectionHref(`/catalog/anon-tokyo/${this.mode}`, source.identity.server, this.locale as Locale);
+    const server = source?.identity.server;
+    if (!server || server === this.server()) {
+      this.useReferenceSource("");
+      return false;
+    }
+    if (!isPublicReleaseServer(server)) {
+      this.useReferenceSource(server);
+      this.selectForeignItem(item, parameter);
+      return true;
+    }
+    const target = resourceCollectionHref(`/catalog/anon-tokyo/${this.mode}`, server, this.locale as Locale);
     if (!target) return false;
     const params = new URLSearchParams(location.search);
     params.set(parameter, String(item.id));
     openDetailLocation(`${target}?${params}`);
     return true;
+  }
+  private useReferenceSource(server: string) {
+    if (this.referenceSource === server) return;
+    this.referenceSource = server;
+    this.referenceData = undefined;
+    this.referenceDataServer = "";
+  }
+  /** The in-page selection a foreign public source would have opened on its own page. */
+  private selectForeignItem(item: Value, parameter: "item" | "character") {
+    const params = new URLSearchParams(location.search);
+    params.set(parameter, String(item.id));
+    if (parameter === "item") {
+      params.delete("character");
+      this.selectedItem = String(item.id);
+      void this.loadReferenceData();
+    } else {
+      params.delete("item");
+      this.selectedCharacter = String(item.id);
+      this.selectedItem = "";
+      this.outfitSelections = {};
+    }
+    openDetailLocation(`${location.pathname}?${params}`);
   }
   private sourceFor(item: Value) {
     return this.unionDocument?.entries.get(item) || this.unionDocument?.byId.get(`${this.server()}:${item.id}`);
@@ -320,7 +360,14 @@ export class AnonTokyoWorkspace extends LitElement {
   private rowForId(rows: Value[], id: string): Value | undefined {
     return this.ownRow(rows.filter(row => String(row.id) === id));
   }
+  /** The source whose document a restored in-page selection must read. */
+  private selectedRestrictedSource(): string {
+    const selected = this.rowForId(this.collection(), this.selectedItem);
+    const server = selected ? this.sourceFor(selected)?.identity.server : undefined;
+    return server && !isPublicReleaseServer(server) ? server : "";
+  }
   private closeItem() {
+    this.useReferenceSource("");
     const params = new URLSearchParams(location.search);
     params.delete("item");
     closeDetailLocation(`${location.pathname}${params.size ? `?${params}` : ""}`);
@@ -442,7 +489,10 @@ export class AnonTokyoWorkspace extends LitElement {
       if (this.mode === "tasks") await this.loadReferenceData();
       if (controller.signal.aborted || this.loadRequest !== controller) return;
       this.phase = "ready";
-      if (this.selectedItem && this.mode !== "outfits") void this.loadReferenceData();
+      if (this.selectedItem && this.mode !== "outfits") {
+        this.useReferenceSource(this.selectedRestrictedSource());
+        void this.loadReferenceData();
+      }
       if (this.mode === "fever") {
         const response = await fetch(catalogUrl("bands"), { signal: controller.signal });
         const bands = response.ok ? values(await response.json()) : [];
@@ -776,6 +826,7 @@ export class AnonTokyoWorkspace extends LitElement {
   }
   private selectCharacter(character: Value) {
     if (this.openForeignItem(character, "character")) return;
+    this.useReferenceSource("");
     const id = String(character.id);
     this.selectedCharacter = id;
     this.selectedItem = "";

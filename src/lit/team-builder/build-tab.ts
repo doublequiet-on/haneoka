@@ -23,6 +23,14 @@ const GOALS = [
   { id: "potential", icon: "auto_awesome" },
 ] as const;
 
+export function comboBonusControl(host: TeamBuilder): TemplateResult {
+  return html`<md-outlined-text-field type="number" min="1" step="1" inputmode="numeric"
+    label=${host.t("minComboBonus", "Minimum COMBO BONUS")} prefix-text="×"
+    .value=${live(String(host.settings.minComboBonus))}
+    @change=${(event: Event) => host.updateSettings({ minComboBonus: Math.max(1, Math.floor(Number((event.target as HTMLInputElement).value) || 1)) })}
+  ></md-outlined-text-field>`;
+}
+
 function goalText(host: TeamBuilder, goal: GoalKind): string {
   switch (goal) {
     case "score":
@@ -40,7 +48,7 @@ function goalText(host: TeamBuilder, goal: GoalKind): string {
   }
 }
 
-function songList(
+export function songList(
   host: TeamBuilder,
   songs: SongRef[],
   change: (songs: SongRef[]) => void,
@@ -91,8 +99,7 @@ function songList(
   `;
 }
 
-function eventSection(host: TeamBuilder): TemplateResult {
-  const s = host.searchSettings;
+export function eventSection(host: TeamBuilder, s = host.searchSettings): TemplateResult {
   const catalog = host.catalog!;
   const events = catalog.events();
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
@@ -153,8 +160,7 @@ function eventSection(host: TeamBuilder): TemplateResult {
   `;
 }
 
-function playSection(host: TeamBuilder): TemplateResult {
-  const s = host.searchSettings;
+export function playSection(host: TeamBuilder, s = host.searchSettings): TemplateResult {
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
   const slider = (label: string, key: "great" | "good" | "miss", max: number) => html`
     <div class="tb-field">
@@ -508,6 +514,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
           ${
             s.goal === "gekiso"
               ? html`
+                  ${comboBonusControl(host)}
                   ${segmented({
                     label: host.t("gekisoRank", "Placement in each range"),
                     value: String(s.gekisoRank),

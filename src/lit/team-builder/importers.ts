@@ -867,13 +867,9 @@ export class ImportController {
       return renderScreenshotImportDialog(this.screenshot, {
         appDownload: this.appDownload(),
         text: (key, fallback) =>
-          key.startsWith("existing")
+          key.startsWith("existing") || key === "close" || key === "cancel"
             ? this.text(key, fallback)
-            : clientText(
-                host.locale,
-                ["close", "cancel"].includes(key) ? key : `tools.teamBuilder.screenshotImport.${key}`,
-                fallback,
-              ),
+            : clientText(host.locale, `tools.teamBuilder.screenshotImport.${key}`, fallback),
         card: (kind, id) => host.catalog!.cardOptions(kind === "members" ? "members" : "snaps", id),
         levels: (kind, id) => practiceRanges(host.data!, kind, id).level ?? [],
         files: (files) => void this.stageImages(files),

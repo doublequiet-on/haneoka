@@ -21,6 +21,7 @@ import { OFFICIAL_CATALOG_SERVERS, type OfficialCatalogServer } from "../lib/cro
 import { catalogServerBadge } from "./shared/server-availability";
 import { syncEntityNavigation, updateEntityHeading } from "../lib/detail-navigation";
 import { entityHref, parseResourceRoute, type ReleaseServer } from "../lib/resource-route";
+import { isPublicReleaseServer } from "../lib/release-server";
 import {
   catalogUrl,
   currentReleaseServer,
@@ -62,8 +63,10 @@ export class TgwCardWorkspace extends LitElement {
     tiers: { state: true },
     pointName: { state: true },
     selectedRank: { state: true },
+    selectedSource: { state: true },
   };
   declare selectedRank: number;
+  declare selectedSource: string;
   declare locale: string;
   declare entityId: string;
   declare phase: "loading" | "ready" | "error";
@@ -86,6 +89,7 @@ export class TgwCardWorkspace extends LitElement {
     this.tiers = [];
     this.pointName = [];
     this.selectedRank = 0;
+    this.selectedSource = "";
   }
   createRenderRoot() {
     return this;
@@ -122,6 +126,7 @@ export class TgwCardWorkspace extends LitElement {
   private applyTiers(entities: Tier[], pointName: unknown, hash: string) {
     this.tiers = entities;
     this.pointName = pointName;
+    this.selectedSource = "";
     const hashed = Number(/^#tgw-rank-(\d+)$/u.exec(hash)?.[1] || 0);
     this.selectedRank = entities.some((tier) => tier.rank === hashed) ? hashed : entities[0]?.rank || 0;
     this.phase = "ready";
@@ -175,12 +180,22 @@ export class TgwCardWorkspace extends LitElement {
   }
   private selectedTier(): Tier | undefined {
     const matches = this.tiers.filter(tier => tier.rank === this.selectedRank);
+    if (this.selectedSource) {
+      const chosen = matches.filter(tier => this.tierServer(tier) === this.selectedSource);
+      if (chosen.length === 1) return chosen[0];
+    }
     const own = matches.filter(tier => this.tierEntry(tier)?.perServer[this.server]);
     return own.length === 1 ? own[0] : matches.length === 1 ? matches[0] : undefined;
   }
+  private tierServer(tier: Tier) {
+    return this.tierEntry(tier)?.displayServer || this.server;
+  }
+  /** A restricted edition has no page of its own; its picker selects in place. */
   private entityLink(tier: Tier) {
+    const server = this.tierServer(tier);
+    if (!isPublicReleaseServer(server)) return undefined;
     return entityHref({
-      server: this.tierEntry(tier)?.displayServer || this.server,
+      server,
       locale: this.locale as Locale,
       kind: "tgw-card",
       id: tier.id,
@@ -391,10 +406,42 @@ export class TgwCardWorkspace extends LitElement {
   private select(event: MouseEvent, tier: Tier) {
     // Plain clicks select in place; modified clicks keep the link behaviour.
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    if ((this.tierEntry(tier)?.displayServer || this.server) !== this.server) return;
+    const server = this.tierServer(tier);
+    // A public peer keeps its own page; a restricted edition can only open here.
+    if (server !== this.server && isPublicReleaseServer(server)) return;
     event.preventDefault();
     this.selectedRank = tier.rank;
+    this.selectedSource = server;
     history.replaceState(history.state, "", `${location.pathname}${location.search}#tgw-rank-${tier.rank}`);
+  }
+  /** Public ranks stay links to their own page; restricted ranks are in-place buttons. */
+  private rankButton(tier: Tier, rank: string) {
+    const label = this.name(tier.title);
+    const current = tier === this.selectedTier();
+    const href = this.entityLink(tier);
+    return href
+      ? html`
+          <a
+            class="tgw-rank-button tabular"
+            href=${href}
+            aria-current=${current ? "true" : nothing}
+            aria-label=${label}
+            @click=${(event: MouseEvent) => this.select(event, tier)}
+          >
+            ${rank}
+          </a>
+        `
+      : html`
+          <button
+            type="button"
+            class="tgw-rank-button tabular"
+            aria-pressed=${current}
+            aria-label=${label}
+            @click=${(event: MouseEvent) => this.select(event, tier)}
+          >
+            ${rank}
+          </button>
+        `;
   }
   private picker() {
     const groups = new Map<ReturnType<TgwCardWorkspace["cardTier"]>, Tier[]>();
@@ -418,19 +465,7 @@ export class TgwCardWorkspace extends LitElement {
                 <small class="tabular">${pad(first.rank)}–${pad(last.rank)}</small>
               </header>
               <div class="tgw-tier__ranks">
-                ${tiers.map(
-                  (tier) => html`
-                    <a
-                      class="tgw-rank-button tabular"
-                      href=${this.entityLink(tier)}
-                      aria-current=${tier === this.selectedTier() ? "true" : nothing}
-                      aria-label=${this.name(tier.title)}
-                      @click=${(event: MouseEvent) => this.select(event, tier)}
-                    >
-                      ${pad(tier.rank)}
-                    </a>
-                  `,
-                )}
+                ${tiers.map((tier) => this.rankButton(tier, pad(tier.rank)))}
               </div>
             </section>
           `;

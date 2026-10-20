@@ -1883,6 +1883,10 @@
       "native-normal-complete-member-order-domain": "比较所有技能顺序",
       "explicit-personal-solo-score-domain": "个人 Solo 分数",
       "previousResult": "上次结果",
+      "importFlow": {
+        "characterMemory": "角色回忆加成",
+        "musicMemory": "歌曲回忆加成"
+      },
       "importExisting": {
         "keep": "全部保留现有值",
         "overwrite": "全部覆盖现有值",
@@ -2341,6 +2345,8 @@
       "criterion": "分数目标",
       "criterionMean": "平均分",
       "criterionMin": "最低分（保底）",
+      "comboBonus": "COMBO BONUS",
+      "minComboBonus": "最低 COMBO BONUS",
       "gekisoRank": "每个区间的名次",
       "gekisoRankSolo": "第 1（任务）",
       "window": "参考时间窗",
@@ -2433,10 +2439,12 @@
       "evaluating": "评估中",
       "loadTeam": "在编辑器中打开",
       "deletedTeam": "已删除队伍",
+      "delete": "删除",
       "noSavedTeams": "保存搜索结果或手动组的队伍后会显示在这里。已保存的队伍会随账号同步。",
       "useInSearch": "用于组队搜索",
       "markOwned": "标记为已拥有",
       "required": "必须使用",
+      "requiredOnePerCharacter": "同一角色仅限一张必选卡",
       "showCards": "显示",
       "showOwned": "已拥有",
       "showAll": "全部",
@@ -2510,7 +2518,8 @@
         "calculateAll": "计算全部歌曲",
         "fiveCharacters": "至少需要五名不同角色",
         "eventTables": "活动消耗档位",
-        "requiredMembers": "必带成员角色重复",
+        "requiredMembers": "必带成员中「{character}」重复",
+        "requiredMemberCount": "必带成员超过五人",
         "photoBindings": "留影重复绑定",
         "correctionHelp": "正在修改活动收益所需的输入",
         "back": "返回"

@@ -58,14 +58,13 @@ import { dialogueRow } from "./ui/dialogue-row";
 import { characterPair } from "./ui/character-pair";
 import {
   entityHref,
-  isReleaseServer,
   isStoryMode,
   legacyCollectionRedirectTarget,
   parseEntitySelection,
   parseResourceRoute,
   returnStateFromLocation,
 } from "../lib/resource-route";
-import { readReleaseServer } from "../lib/release-server";
+import { isPublicReleaseServer } from "../lib/release-server";
 import { fetchCrossServerCatalogs } from "../lib/cross-server/fetch";
 import { crossCatalogPresentation, pinCrossCatalogValue, type CrossCatalogPresentation } from "../lib/cross-server/presentation";
 import { OFFICIAL_CATALOG_SERVERS, type OfficialCatalogServer } from "../lib/cross-server/catalog";
@@ -254,6 +253,8 @@ export class StoryWorkspace extends LitElement {
   private catalogRequests = new RequestScope();
   private unionStories?: CrossCatalogPresentation;
   private unionChapters = new Map<OfficialCatalogServer, Map<string, JsonRecord>>();
+  /** Source of the variant shown in the detail pane; empty means the page's source. */
+  private detailSource = "";
   private readonly appBarOwner = `story-workspace-${++storyWorkspaceOwnerId}`;
   private pageServer = "";
   private appBarRegistered = false;
@@ -364,6 +365,7 @@ export class StoryWorkspace extends LitElement {
     super.update(changed);
   }
   public prepareEntity(payload: StoryPayload, locale: string): void {
+    this.detailSource = "";
     this.transcriptQuery = "";
     this.transcriptSpeakers = [];
     this.locale = locale;
@@ -383,6 +385,7 @@ export class StoryWorkspace extends LitElement {
     this.phase = "ready";
   }
   public prepareCollection(payload: WorkspaceCollectionPayload, locale: string, mode = "band"): void {
+    this.detailSource = "";
     this.locale = locale;
     this.pageServer = payload.server;
     this.mode = mode as ReleaseMode;
@@ -448,6 +451,9 @@ export class StoryWorkspace extends LitElement {
   private dataServer(): string {
     return this.pageServer || currentReleaseServer();
   }
+  private detailServer(): string {
+    return this.detailSource || this.dataServer();
+  }
   private storyCommentFocus(): string {
     const url = navigationDocumentUrl();
     const query = url.searchParams.get("commentId")?.trim();
@@ -467,7 +473,7 @@ export class StoryWorkspace extends LitElement {
     );
   }
   private storyCommentsTarget(episode: JsonRecord) {
-    const server = this.dataServer(),
+    const server = this.detailServer(),
       id = episode.advId;
     if (
       this.origin !== "release" ||
@@ -1529,12 +1535,14 @@ export class StoryWorkspace extends LitElement {
     }
     void this.openScenario(id, source);
   }
-  private async openScenario(id: string, source?: JsonRecord) {
+  private async openScenario(id: string, source?: JsonRecord, variantSource?: string) {
     const resolved = source || this.episodeForId(id);
     if (!source && this.unionStories && this.episodeCandidates(id).length && !resolved) return;
     const sourceEntry = resolved ? this.episodeEntry(resolved) : undefined;
-    const sourceServer = sourceEntry?.displayServer || this.dataServer();
-    if (!this.isProvider() && (id !== this.entityId || sourceServer !== this.dataServer())) {
+    const sourceServer = variantSource || sourceEntry?.displayServer || this.dataServer();
+    // A restricted edition has no page of its own, so it opens in this pane.
+    if (!this.isProvider() && isPublicReleaseServer(sourceServer) &&
+        (id !== this.entityId || sourceServer !== this.dataServer())) {
       openDetailLocation(
         entityHref({
           server:
@@ -1555,6 +1563,7 @@ export class StoryWorkspace extends LitElement {
       params.set("story", id);
       openDetailLocation(`${location.pathname}?${params}`);
     }
+    this.detailSource = sourceServer;
     const signal = this.detailRequests.begin();
     this.sourceChoicesOpen = false;
     if (!this.detailEpisode || this.episodeId(this.detailEpisode) !== id) {
@@ -1579,7 +1588,7 @@ export class StoryWorkspace extends LitElement {
     this.sync();
     try {
       const payload = this.isProvider() ? await this.providerEntity("stories", id, signal) : undefined;
-      const detail = payload ? payload.detail : await fetchJson<JsonRecord>(this.isProvider() ? `${this.providerBase()}/stories/${encodeURIComponent(id)}?lang=${encodeURIComponent(this.locale)}` : catalogUrl("stories", id), { signal });
+      const detail = payload ? payload.detail : await fetchJson<JsonRecord>(this.isProvider() ? `${this.providerBase()}/stories/${encodeURIComponent(id)}?lang=${encodeURIComponent(this.locale)}` : catalogUrl("stories", id, this.detailServer()), { signal });
       if (this.detailRequests.current(signal)) {
         this.detailEpisode = { ...(known || {}), ...detail };
         const entry = sourceEntry || this.unionStories?.byId.get(`${sourceServer}:${id}`);
@@ -1627,6 +1636,7 @@ export class StoryWorkspace extends LitElement {
   }
   /** One step back: a scenario returns to its card, a card to the collection. */
   private closeDetail() {
+    this.detailSource = "";
     this.detailRequests.cancel();
     this.stopStoryPlayback();
     const params = new URLSearchParams(location.search);
@@ -1680,7 +1690,7 @@ export class StoryWorkspace extends LitElement {
     const chapter = this.chapterOf(current);
     const candidates = chapter ? this.chapterEpisodes(chapter) : this.allEpisodes();
     const group = this.episodeGroup(current);
-    const sourceServer = this.episodeEntry(current)?.displayServer || this.dataServer();
+    const sourceServer = this.detailServer();
     const sequence = candidates.filter((episode) => this.episodeGroup(episode) === group &&
       (!this.episodeEntry(episode) || this.episodeEntry(episode)!.perServer[sourceServer]));
     const index = sequence.findIndex((episode) => this.episodeKey(episode) === this.episodeKey(current));
@@ -1688,10 +1698,12 @@ export class StoryWorkspace extends LitElement {
     const next = sequence[index + 1];
     if (!next) return;
     const id = this.episodeId(next);
-    if (this.entityId && !this.isProvider()) {
+    const nextServer = this.episodeEntry(next)?.displayServer || sourceServer;
+    // A restricted edition continues in this pane; a public page keeps its own URL.
+    if (this.entityId && !this.isProvider() && isPublicReleaseServer(nextServer)) {
       openDetailLocation(
         entityHref({
-          server: this.episodeEntry(next)?.displayServer || sourceServer,
+          server: nextServer,
           locale: preferredLocale(this.locale) as Locale,
           kind: "stories",
           id,
@@ -1704,7 +1716,7 @@ export class StoryWorkspace extends LitElement {
     const params = new URLSearchParams(location.search);
     params.set("story", id);
     history.replaceState(history.state, "", `${location.pathname}?${params}`);
-    await this.openScenario(id, next);
+    await this.openScenario(id, next, sourceServer);
     if (this.episodeId(this.detailEpisode || {}) === id) await this.openVegaPlayer();
   }
 
@@ -2334,21 +2346,18 @@ export class StoryWorkspace extends LitElement {
   private renderSourceChoices(episode: JsonRecord) {
     const entry = this.episodeEntry(episode);
     return catalogSourceChoices(entry, this.locale, {
-      activeSource: this.dataServer(),
-      href: (source) => {
-        const variant = entry?.perServer[source];
-        return variant && entityHref({
-          server: source,
-          locale: preferredLocale(this.locale) as Locale,
-          kind: "stories",
-          id: variant.id,
-          query: { mode: this.mode, ...(this.detailMode === "play" ? { playback: "play" } : {}) },
-          returnTo: this.entityId
-            ? navigationDocumentUrl().searchParams.get("return") || undefined
-            : returnStateFromLocation(location.pathname, location.search, "stories"),
-        });
-      },
+      activeSource: this.detailServer(),
+      onSelect: (source) => void this.selectDetailSource(source),
     });
+  }
+  /** Every choice is a restricted edition, so the pane switches variants in place. */
+  private async selectDetailSource(source: string) {
+    const episode = this.detailEpisode;
+    const entry = episode ? this.episodeEntry(episode) : undefined;
+    const variant = entry?.perServer[source];
+    if (!entry || !variant) return;
+    this.sourceChoicesOpen = false;
+    await this.openScenario(variant.id, variant.row, source);
   }
   private renderDetailActions() {
     const choices = this.detailMode === "play" && this.detailEpisode ? this.renderSourceChoices(this.detailEpisode) : nothing;
@@ -2357,7 +2366,7 @@ export class StoryWorkspace extends LitElement {
         aria-label=${uiText(this.locale, "common.fields.source")}
         title=${uiText(this.locale, "common.fields.source")}
         @click=${() => { this.sourceChoicesOpen = true; }}>
-        <img src=${serverAvailabilityImage(this.dataServer())} alt="" width="24" height="24" />
+        <img src=${serverAvailabilityImage(this.detailServer())} alt="" width="24" height="24" />
       </button>`}${this.renderDetailModes()}`;
   }
   private renderSourceDialog(episode: JsonRecord) {
@@ -2429,9 +2438,12 @@ export class StoryWorkspace extends LitElement {
       const identity = html`
         ${name ? localizedContent(name, this.locale) : nothing}${name ? " · " : ""}${kind === "episode" ? `${uiText(this.locale, "story.labels.episode")} ${number}` : `${uiText(this.locale, "catalog.cards.fields.rank")} ${rank}`}
       `;
-      const returnTo = this.entityId
+      // A restricted edition's references have no pages of their own.
+      const server = this.detailServer();
+      const linkable = isPublicReleaseServer(server);
+      const returnTo = this.entityId && linkable
         ? entityHref({
-            server: this.dataServer() as ReturnType<typeof readReleaseServer>,
+            server,
             locale: this.locale as Locale,
             kind: "stories",
             id: this.entityId,
@@ -2440,11 +2452,11 @@ export class StoryWorkspace extends LitElement {
       return [
         {
           label,
-          value: canLink
+          value: canLink && linkable
             ? html`
                 <a
                   href=${entityHref({
-                    server: this.dataServer() as ReturnType<typeof readReleaseServer>,
+                    server,
                     locale: this.locale as Locale,
                     kind: reference.resource as "stories" | "characters",
                     id: String(reference.id),
@@ -2499,7 +2511,7 @@ export class StoryWorkspace extends LitElement {
                         <vega-story-stage
                           .story=${episode}
                           .providerBase=${this.isProvider() ? this.providerBase() : ""}
-                          server=${this.dataServer()}
+                          server=${this.detailServer()}
                           .locale=${this.locale}
                           @open-text=${() => {
                             this.storyCommentsTextChoice = true;
@@ -2753,7 +2765,7 @@ export class StoryWorkspace extends LitElement {
     const targets = Array.isArray(command.targets) ? (command.targets as JsonRecord[]) : [];
     const images =
       iconAsset && ["message", "stamp"].includes(entry.kind)
-        ? [storySourceUrl(`Assets/AddressableResources/Adv/Chat/Icon/${iconAsset}.png`, this.dataServer())]
+        ? [storySourceUrl(`Assets/AddressableResources/Adv/Chat/Icon/${iconAsset}.png`, this.detailServer())]
         : targets
             .map((target) => String(target.faceImage || this.character(Number(target.characterId))?.faceImage || ""))
             .filter(Boolean);
@@ -2841,12 +2853,12 @@ export class StoryWorkspace extends LitElement {
         const part = speaker.parts[index * 2];
         return part?.text === name.text && part.lang === name.lang;
       });
-    const server = this.dataServer();
+    const server = this.detailServer();
     const content = speaker.parts.map((part, index) => {
       const target = aligned && index % 2 === 0 ? members[index / 2]?.target : undefined;
       const id = Number(target?.characterId);
       const href =
-        !this.isProvider() && isReleaseServer(server) && Number.isSafeInteger(id) && id > 0 && this.character(id)
+        !this.isProvider() && isPublicReleaseServer(server) && Number.isSafeInteger(id) && id > 0 && this.character(id)
           ? entityHref({ server, locale: this.locale as Locale, kind: "characters", id: String(id) })
           : "";
       // Preserve the authored separator without adding template whitespace.

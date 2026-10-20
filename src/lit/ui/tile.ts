@@ -97,6 +97,11 @@ export interface TileOptions {
   /** `contain` for logos and items that must not be cropped. */
   fit?: "cover" | "contain" | "fill";
   /**
+   * A tile with no destination to open — a restricted-source row on the home
+   * dashboard. It presents the same anatomy as a card, not a control.
+   */
+  static?: boolean;
+  /**
    * `tab` when the tile is one of a set that switches what an adjacent region
    * shows — a chapter in the pane rail, a band in the roster rail. Pair it
    * with `controls` (the region's id) and `tabIndex` for roving focus.
@@ -237,6 +242,19 @@ export function tile(options: TileOptions): TemplateResult {
       }
     </span>
   `;
+  if (options.static)
+    return html`
+      <div
+        id=${options.id || nothing}
+        class=${classes.replace(" tile--interactive", "")}
+        role=${options.role ?? nothing}
+        aria-controls=${options.controls ?? nothing}
+        aria-selected=${options.selected === undefined ? nothing : String(options.selected)}
+        style=${options.style || nothing}
+      >
+        ${media}
+      </div>
+    `;
   if (options.href)
     return html`
       <a

@@ -1883,6 +1883,10 @@
       "native-normal-complete-member-order-domain": "모든 스킬 순서 비교",
       "explicit-personal-solo-score-domain": "개인 Solo 점수",
       "previousResult": "이전 결과",
+      "importFlow": {
+        "characterMemory": "캐릭터 메모리 보너스",
+        "musicMemory": "곡 메모리 보너스"
+      },
       "importExisting": {
         "keep": "기존 값 모두 유지",
         "overwrite": "기존 값 모두 덮어쓰기",
@@ -2341,6 +2345,8 @@
       "criterion": "점수 목표",
       "criterionMean": "평균 점수",
       "criterionMin": "최저 점수 (안정)",
+      "comboBonus": "COMBO BONUS",
+      "minComboBonus": "최소 COMBO BONUS",
       "gekisoRank": "각 구간 순위",
       "gekisoRankSolo": "1위 (미션)",
       "window": "기준 시간",
@@ -2433,10 +2439,12 @@
       "evaluating": "평가 중",
       "loadTeam": "편집기에서 열기",
       "deletedTeam": "팀 삭제됨",
+      "delete": "삭제",
       "noSavedTeams": "검색 결과나 수동 편성을 저장하면 여기에 표시됩니다. 저장한 팀은 계정과 동기화됩니다.",
       "useInSearch": "팀 검색에 사용",
       "markOwned": "보유로 표시",
       "required": "항상 포함",
+      "requiredOnePerCharacter": "캐릭터당 필수 카드 1장",
       "showCards": "표시",
       "showOwned": "보유",
       "showAll": "전체",
@@ -2510,7 +2518,8 @@
         "calculateAll": "모든 곡 계산",
         "fiveCharacters": "서로 다른 캐릭터 5명 이상이 필요합니다",
         "eventTables": "이벤트 소모 테이블",
-        "requiredMembers": "필수 멤버의 캐릭터가 중복됩니다",
+        "requiredMembers": "필수 카드에서 {character} 캐릭터가 중복됩니다",
+        "requiredMemberCount": "필수 멤버가 5명을 넘습니다",
         "photoBindings": "스냅이 중복 장착되었습니다",
         "correctionHelp": "이벤트 보상 입력 수정 중",
         "back": "뒤로"

@@ -22,7 +22,7 @@ import {
 import { improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
 import { PtCheckpoint } from "../../lib/team-builder/pt-checkpoint";
 import { compareTable, renderHit } from "./results";
-import { renderBuildTab, renderCandidates } from "./build-tab";
+import { renderBuildTab, renderCandidates, comboBonusControl } from "./build-tab";
 import { sectionHeading } from "./catalog";
 import { boostControl } from "./boost-control";
 import type { SongPickerState } from "./song-picker";
@@ -114,7 +114,7 @@ export class PtController {
       consumption: s.boosts,
       play: { great: 0, good: 0, bad: 0, miss: 0 },
       ...(s.ptMode === "gekiso"
-        ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const } }
+        ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const, minComboBonus: s.minComboBonus } }
         : {}),
     });
     if (!request) return null;
@@ -308,10 +308,16 @@ function inputLabel(host: TeamBuilder, target: string): string {
     minBonus: host.t("minBonus", "Minimum event bonus (%)"),
     member: host.t("members", "Members"),
     snap: host.t("snapshots", "Snapshots"),
-    "required-members": host.t("pt.requiredMembers", "Required members share a character"),
+    "required-member-count": host.t("pt.requiredMemberCount", "More than five required members"),
     "photo-bindings": host.t("pt.photoBindings", "A snapshot is bound twice"),
   };
   if (titles[target]) return titles[target];
+  if (key === "required-members" && field) {
+    const characterId = Number(field);
+    return host.t("pt.requiredMembers", "Two required cards share {character}", {
+      character: catalog.characterName(characterId) || `#${characterId}`,
+    });
+  }
   const fields: Record<string, string> = {
     level: host.t("level", "Level"),
     awake: host.t("training", "Training"),
@@ -356,6 +362,9 @@ function renderSetup(host: TeamBuilder): TemplateResult {
   const s = host.settings;
   const catalog = host.catalog!;
   const master = host.master!;
+  const events = catalog.events();
+  const eventId = s.eventId !== null && events.some((event) => event.id === s.eventId) ? s.eventId : (events[0]?.id ?? null);
+  if (eventId !== null && eventId !== s.eventId) queueMicrotask(() => host.updateSettings({ eventId }));
   const picker = (songs: SongRef[], change: (songs: SongRef[]) => void, extra: Partial<SongPickerState> = {}) => {
     host.songPicker = {
       songs: songs.filter((song) => !extra.allowedSongIds || extra.allowedSongIds.includes(song.songId)),
@@ -396,10 +405,10 @@ function renderSetup(host: TeamBuilder): TemplateResult {
           html`
             <md-outlined-select
               label=${host.t("event", "Event")}
-              .value=${s.eventId === null ? "" : String(s.eventId)}
+              .value=${eventId === null ? "" : String(eventId)}
               @change=${(e: Event) => host.updateSettings({ eventId: Number((e.target as HTMLInputElement).value), planChallengeSongs: [] })}
             >
-              ${catalog.events().map(
+              ${events.map(
               (event) => html`
                 <md-select-option value=${String(event.id)}><div slot="headline">${event.name}</div></md-select-option>
               `,
@@ -415,6 +424,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
         ${
           s.ptMode === "gekiso"
             ? html`
+                ${comboBonusControl(host)}
                 ${ptField(
                 host,
                 "gekiso-input",

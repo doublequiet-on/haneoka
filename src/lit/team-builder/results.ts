@@ -19,7 +19,8 @@ import type { TeamBuilder } from "../team-builder";
 import type { BuildSettings } from "./types";
 import { resultSettings, SCORE_GOALS, scoreGoal, scoreProof, scoreText } from "./score-goal";
 import { resolveBox } from "../../lib/team-builder/engine/box";
-import { resolveSlotSkill } from "../../lib/team-builder/engine/skills";
+import { effectPercent, resolveSlotSkill } from "../../lib/team-builder/engine/skills";
+import { memberEventPercent, snapEventPercent } from "../../lib/team-builder/engine/power";
 import { resourceCollectionHref } from "../../lib/resource-route";
 import type { ReleaseServer } from "../../lib/release-server";
 import type { Locale } from "../../i18n/locales";
@@ -84,6 +85,7 @@ function chips(host: TeamBuilder, hit: EngineHit): TemplateResult[] {
     const top = ranks[0];
     if (top) out.push(chip(RANK_NAMES[top[0]] ?? top[0], `${format(host, (top[1] / 120) * 100, top[1] === 120 ? 0 : 1)}%`, icon("workspace_premium", 16)));
   }
+  if (hit.comboBonus != null) out.push(chip(host.t("comboBonus", "COMBO BONUS"), `×${format(host, hit.comboBonus)}`));
   if (hit.event) {
     out.push(chip(host.t("eventBonus", "Event bonus"), `+${format(host, Math.floor(hit.event.bonusPercent), 0)}%`, icon("trending_up", 16)));
     if (s.goal === "event" && s.weighted) {
@@ -91,6 +93,8 @@ function chips(host: TeamBuilder, hit: EngineHit): TemplateResult[] {
       out.push(chip(host.t("pointsPerPlay", "Event points per play"), format(host, points, 1)));
       out.push(chip(host.t("itemsPerPlay", "Items per play"), format(host, items, 1)));
     }
+    if (s.goal === "event" && !s.weighted && s.measure !== "challenge-points" && hit.event.otherMean != null)
+      out.push(chip(s.measure === "items" ? host.t("pointsPerPlay", "Event points per play") : host.t("itemsPerPlay", "Items per play"), format(host, hit.event.otherMean, 1)));
     if (hit.event.challengePoints && s.measure !== "challenge-points") out.push(chip(host.t("cpPerPlay", "Challenge points per play"), format(host, hit.event.challengePoints, 1)));
   }
   const placements = s.goal === "gekiso" ? host.results?.results.find((result) => result.song?.songId === hit.song?.songId && result.song?.difficulty === hit.song?.difficulty)?.placements : undefined;
@@ -471,21 +475,28 @@ function songMetaHref(host: TeamBuilder, hit: EngineHit): string | null {
     inputs.snaps.filter((row) => hit.snaps.includes(row.key)),
     inputs.unknownPolicy,
   );
-  const slots = hit.members.map((key, slot) => {
-    const member = box.members.find((item) => item.key === key);
+  const members = hit.members.map((key) => box.members.find((item) => item.key === key));
+  const snaps = hit.snaps.map((key) => (key ? (box.snaps.find((item) => item.key === key) ?? null) : null));
+  const slots = members.map((member, slot) => {
     if (!member) return "0:0:0";
-    const snapKey = hit.snaps[slot];
-    const snap = snapKey ? (box.snaps.find((item) => item.key === snapKey) ?? null) : null;
-    const skill = resolveSlotSkill(master, member, snap);
-    const percent = (type: number) => skill.effects.filter((effect) => effect.type === type).reduce((sum, effect) => sum + effect.delta / 1000, 0);
-    return `${percent(2000)}:${percent(2004)}:${skill.extensionMs}`;
+    const skill = resolveSlotSkill(master, member, snaps[slot] ?? null);
+    return `${effectPercent(skill, 2000)}:${effectPercent(skill, 2004)}:${skill.extensionMs}`;
   });
   const query = new URLSearchParams({ deckPower: String(hit.power), deckSlots: slots.join(",") });
   const settings = resultSettings(host);
-  if (hit.event && settings.goal === "event" && settings.route === "live") {
-    query.set(settings.measure === "items" ? "deckItemBonus" : "deckPointBonus", String(Math.floor(hit.event.bonusPercent)));
-    if (settings.eventId) query.set("deckEvent", String(settings.eventId));
-    if (settings.boosts) query.set("deckBoosts", String(settings.boosts));
+  const event = settings.eventId !== null ? master.events.get(settings.eventId) : undefined;
+  if (hit.event && settings.goal === "event" && settings.route !== "challenge" && event) {
+    const bonus = (type: number) =>
+      Math.floor(
+        (members.reduce((sum, member) => sum + (member ? memberEventPercent(event.effects, member, type) : 0), 0) +
+          snaps.reduce((sum, snap) => sum + (snap ? snapEventPercent(event.effects, snap, type) : 0), 0)) /
+          100,
+      );
+    // An event live earns both bonuses; `hit.event.bonusPercent` only carries the ranked measure's one.
+    query.set("deckPointBonus", String(bonus(0)));
+    query.set("deckItemBonus", String(bonus(1)));
+    query.set("deckEvent", String(settings.eventId));
+    query.set("deckBoosts", String(settings.boosts));
   }
   return resourceCollectionHref(`catalog/song-meta?${query}`, host.server as ReleaseServer, host.locale as Locale) ?? null;
 }
@@ -506,9 +517,9 @@ export function renderHit(host: TeamBuilder, hit: EngineHit, index: number, opti
         </div>
         <div class="tb-hit__actions">
           ${iconButton({ icon: "bookmark_add", label: host.t("saveTeam", "Save team"), disabled: options.stale ?? host.stale, onClick: () => saveTeam(host, hit.members.map(cardIdOf), hit.snaps.map((snap) => (snap ? cardIdOf(snap) : null)), hit.song) })}
-          <button class="button button--text" type="button" ?disabled=${options.stale ?? host.stale} @click=${() => {
+          ${resultSettings(host).scope === "theoretical" ? nothing : html`<button class="button button--text" type="button" ?disabled=${options.stale ?? host.stale} @click=${() => {
             host.openSongComparison({ members: hit.members.map(cardIdOf), snaps: hit.snaps.map(snap => snap ? cardIdOf(snap) : null), leader: 0 });
-          }}>${host.t("sc.useTeam", "Compare songs with this team")}</button>
+          }}>${host.t("sc.useTeam", "Compare songs with this team")}</button>`}
           ${iconButton({ icon: "compare_arrows", label: host.t("compare", "Compare"), toggle: true, pressed: compared, onClick: () => {
             host.compare = compared ? host.compare.filter((item) => item !== key) : [...host.compare, key].slice(-3);
             host.requestUpdate();
@@ -561,7 +572,7 @@ export function compareTable(host: TeamBuilder, hits: EngineHit[]): TemplateResu
     <section class="surface stack tb-compare">
       <div class="row row--between"><strong class="tb-subtitle">${host.t("comparison", "Comparison")}</strong>
         <button class="button button--text button--small" type="button" @click=${() => { host.compare = []; host.requestUpdate(); }}>${host.common("common.actions.clear", "Clear")}</button></div>
-      <div class="scroll-x"><table class="table tb-compare__table">
+      <div class="table-scroll" role="region" tabindex="0" aria-label=${host.t("comparison", "Comparison")}><table class="data-table tb-compare__table">
         <thead><tr><th></th>${picked.map((hit) => html`<th>#${hits.indexOf(hit) + 1}</th>`)}</tr></thead>
         <tbody>${rows.map(([label, value]) => {
           const values = picked.map(value);

@@ -12,7 +12,7 @@ import { createPerformerRegistry, resolveSongPerformer, type PerformerRegistry }
 import { loadPlaylistCatalogSource } from "../lib/playlist-tracks";
 import { songPerformerAdornment } from "./shared/song-performer-adornment";
 import type { Locale } from "../i18n/locales";
-import type { ReleaseServer } from "../lib/release-server";
+import { isPublicReleaseServer, type ReleaseServer } from "../lib/release-server";
 import type { EventTrackerDto, EventChallengeDto, GameRecordsRegion, RankingCardCatalog } from "../lib/game-records";
 import {
   catalogUrl,
@@ -347,31 +347,41 @@ export class EventTracker extends LitElement {
     const pointsReadable =
       event.pointRankingEnabled && !["pending", "missed", "disabled", "unknown"].includes(event.pointRankingStatus);
     const marks = this.musicTypeMarks[this.sourceServer()] || new Map<string, string>();
+    // A CBT edition has no public event page; its art stays a picture here.
+    const eventHref = isPublicReleaseServer(this.infoServer)
+      ? resourcePath({ server: this.infoServer, locale: this.locale as Locale, kind: "events", id: event.id })
+      : "";
+    const eventArt =
+      this.info?.image || this.info?.logo
+        ? html`
+            <img
+              class="browse__heading-art"
+              src=${localizedAssetUrl(String(this.info.logo || this.info.image), this.locale)}
+              alt=""
+              width="460"
+              height="240"
+              decoding="async"
+              @error=${nextImageCandidate}
+            />
+          `
+        : nothing;
     return html`
       <div class="song-ranking-page song-ranking__content">
         <div class="row row--start">
           <header class="browse__heading grow">
-            <a
-              class="browse__heading-art-link"
-              href=${resourcePath({ server: this.infoServer, locale: this.locale as Locale, kind: "events", id: event.id })}
-              aria-label=${`${this.label("event", "Event")} · ${this.eventTitle()}`}
-            >
-              ${
-                this.info?.image || this.info?.logo
-                  ? html`
-                      <img
-                        class="browse__heading-art"
-                        src=${localizedAssetUrl(String(this.info.logo || this.info.image), this.locale)}
-                        alt=""
-                        width="460"
-                        height="240"
-                        decoding="async"
-                        @error=${nextImageCandidate}
-                      />
-                    `
-                  : nothing
-              }
-            </a>
+            ${
+              eventHref
+                ? html`
+                    <a
+                      class="browse__heading-art-link"
+                      href=${eventHref}
+                      aria-label=${`${this.label("event", "Event")} · ${this.eventTitle()}`}
+                    >
+                      ${eventArt}
+                    </a>
+                  `
+                : html`<span class="browse__heading-art-link">${eventArt}</span>`
+            }
             <div class="browse__heading-copy">
               <h2 lang=${resolveLocalizedText(this.info?.title, this.locale).locale}>${this.eventTitle()}</h2>
               <p>

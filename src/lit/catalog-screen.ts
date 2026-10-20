@@ -43,8 +43,8 @@ import {
   type OfficialCatalogServer,
 } from "../lib/cross-server/catalog";
 import { fetchCrossServerCatalogs } from "../lib/cross-server/fetch";
-import { isCrossCatalogResource } from "../lib/cross-server/definitions";
-import { canUseStaticCatalogScope, showRestrictedContent } from "../lib/content-visibility";
+import { crossCatalogRows, isCrossCatalogResource } from "../lib/cross-server/definitions";
+import { canUseStaticCatalogScope, isRestrictedContentSource, showRestrictedContent } from "../lib/content-visibility";
 import { crossServerPublicCache } from "../lib/cross-server/cache";
 import { fetchCrossServerDetail } from "../lib/cross-server/detail";
 import { specList } from "./ui/spec";
@@ -169,7 +169,7 @@ import {
   returnStateFromLocation,
   type ResourceKind,
 } from "../lib/resource-route";
-import { normalizeReleaseServer, type ReleaseServer } from "../lib/release-server";
+import { isPublicReleaseServer, normalizeReleaseServer, type ReleaseServer } from "../lib/release-server";
 import { LOCALES, type Locale } from "../i18n/locales";
 import { metaScatter } from "./shared/meta-scatter";
 
@@ -953,6 +953,8 @@ export class CatalogScreen extends LitElement {
   private unionDetail?: Awaited<ReturnType<typeof fetchCrossServerDetail>> & {
     exclusive?: OfficialCatalogServer | null;
   };
+  /** Browse summary the active in-page union detail was opened from. */
+  private unionDetailBase?: Item;
   private unionRequests = new RequestScope();
   private unionResource(): CrossCatalogResource | undefined {
     const resource = this.profile.collection || this.settings.resource;
@@ -1172,6 +1174,9 @@ export class CatalogScreen extends LitElement {
     if (restoring && this.isConnected) {
       this.restoreFacets(navigationDocumentUrl().searchParams);
       this.restoreLocationState();
+      const restored = this.selectedId && !this.selected ? this.itemForNativeId(this.selectedId) : undefined;
+      // A restricted item has no static page; reopen its in-page detail after reload.
+      if (restored && !this.itemEntityLink(restored)) void this.open(restored);
     }
     this.ensureSongMeta();
     if (this.settings.nativeMetaReference) void this.loadNativeMetaReference(this.settings.nativeMetaReference);
@@ -1190,28 +1195,39 @@ export class CatalogScreen extends LitElement {
     for (const server of OFFICIAL_CATALOG_SERVERS) {
       const identity = dto.identities[server];
       if (!identity) continue;
-        const ownCharacters = new Map<number, Item>(),
-          ownBands = new Map<number, Item>();
-        for (const entry of catalogs.characters?.entries || []) {
+      const ownCharacters = new Map<number, Item>(),
+        ownBands = new Map<number, Item>();
+      const addRows = (
+        resource: "characters" | "bands",
+        catalog: CrossCatalogDTO | undefined,
+        target: Map<number, Item>,
+      ) => {
+        // A restricted variant shared with a formal source is deduplicated out of
+        // the merged entries, but that source's cards still need its own
+        // character/band rows; the raw per-source document keeps every row.
+        const document = catalog?.documents?.[server];
+        if (document !== undefined) {
+          for (const [id, row] of Object.entries(crossCatalogRows(resource, document))) {
+            const numeric = Number(id);
+            if (Number.isSafeInteger(numeric) && numeric >= 0)
+              target.set(numeric, this.pinUnionRow(row as Item, identity));
+          }
+          return;
+        }
+        for (const entry of catalog?.entries || []) {
           const variant = entry.perServer[server];
           if (
             variant &&
             variant.identity.releaseId === identity.releaseId &&
             variant.identity.sourceId === identity.sourceId
           )
-            ownCharacters.set(Number(variant.id), this.unionDetailRow(crossServerDetail(entry, server)));
+            target.set(Number(variant.id), this.unionDetailRow(crossServerDetail(entry, server)));
         }
-        for (const entry of catalogs.bands?.entries || []) {
-          const variant = entry.perServer[server];
-          if (
-            variant &&
-            variant.identity.releaseId === identity.releaseId &&
-            variant.identity.sourceId === identity.sourceId
-          )
-            ownBands.set(Number(variant.id), this.unionDetailRow(crossServerDetail(entry, server)));
-        }
-        characters[server] = ownCharacters;
-        bands[server] = ownBands;
+      };
+      addRows("characters", catalogs.characters, ownCharacters);
+      addRows("bands", catalogs.bands, ownBands);
+      characters[server] = ownCharacters;
+      bands[server] = ownBands;
     }
     const itemEntries = new WeakMap<Item, CrossCatalogEntry>();
     const items = dto.entries.map((entry) => this.unionPrimaryRow(entry, itemEntries));
@@ -1337,8 +1353,62 @@ export class CatalogScreen extends LitElement {
     const detail = this.unionDetail;
     return catalogSourceChoices(detail, this.settings.locale, {
       activeSource: detail?.activeServer,
-      href: source => detail?.perServer[source]?.href,
+      onSelect: (source) => void this.selectUnionSource(source),
     });
+  }
+  /**
+   * Restricted editions have no canonical page of their own, so switching to one
+   * loads its detail in place instead of navigating to a hidden-server URL.
+   */
+  private async selectUnionSource(source: string) {
+    if (!this.unionResource() || !this.isConnected) return;
+    const current = this.unionDetail;
+    const active = current?.perServer[current.activeServer];
+    const target = current?.perServer[source];
+    const base = this.unionDetailBase ?? this.selected;
+    if (!current || !active || !target || !base || isPublicReleaseServer(target.identity.server)) return;
+    const matches = (candidate: CrossCatalogEntry) => {
+      const variant = candidate.perServer[current.activeServer];
+      return Boolean(
+        variant &&
+          variant.id === active.id &&
+          variant.identity.releaseId === active.identity.releaseId &&
+          (!active.identity.sourceId || variant.identity.sourceId === active.identity.sourceId),
+      );
+    };
+    const signal = this.unionRequests.begin();
+    try {
+      const resource = this.unionResource()!;
+      let dto = this.unionCatalog?.resource === resource ? this.unionCatalog : undefined;
+      if (!dto) {
+        const catalogs = await fetchCrossServerCatalogs(
+          [resource],
+          this.dataServer() as OfficialCatalogServer,
+          this.settings.locale,
+          { signal },
+        );
+        if (!this.unionRequests.current(signal)) return;
+        dto = catalogs[resource];
+        if (!dto) return;
+        this.unionCatalog = dto;
+      }
+      const entry = dto.entries.find(matches);
+      if (!entry) return;
+      const detail = await fetchCrossServerDetail(entry, source, { signal });
+      if (!this.unionRequests.current(signal) || this.unionDetail !== current) return;
+      if (!detail.fullSources.includes(source)) return;
+      const row = { ...base, ...this.unionDetailRow(detail) };
+      this.unionItems.set(row, entry);
+      this.unionDetail = { ...detail, exclusive: entry.exclusive };
+      this.unionDetailBase = base;
+      this.selected = row;
+      this.detailAux = {};
+      this.resultCache = undefined;
+      this.restoreDetailQuery();
+      this.requestUpdate();
+    } catch {
+      /* Keep the current variant when the restricted source cannot be read. */
+    }
   }
   private viewingServerNotice() {
     const detail = this.unionDetail;
@@ -1396,8 +1466,12 @@ export class CatalogScreen extends LitElement {
       )
         return;
       this.unionDetail = { ...detail, exclusive: entry.exclusive };
-      this.items = [{ ...payload.item, ...this.unionDetailRow(detail) }];
-      this.selected = this.items[0];
+      this.unionDetailBase = payload.item;
+      this.unionCatalog = dto;
+      const row = { ...payload.item, ...this.unionDetailRow(detail) };
+      this.unionItems.set(row, entry);
+      this.items = [row];
+      this.selected = row;
       this.resultCache = undefined;
       this.requestUpdate();
     } catch {
@@ -1424,6 +1498,28 @@ export class CatalogScreen extends LitElement {
     const url = new URL(source, "https://route.invalid");
     url.searchParams.set("release", releaseId);
     return url.pathname + url.search;
+  }
+  /** Per-source song meta for a detail opened from another source's row. */
+  private ensureDetailSongMeta(identity: CrossCatalogIdentity): Promise<void> {
+    const key = JSON.stringify(identity);
+    const existing = this.unionSongMetaReads.get(key);
+    if (existing) return existing;
+    const read = crossServerPublicCache().readCollection("song-meta", identity).then(
+      (value) => {
+        this.unionSongMeta.set(key, value as Item);
+        while (this.unionSongMeta.size > 12) this.unionSongMeta.delete(this.unionSongMeta.keys().next().value!);
+        this.expandedCache = undefined;
+        this.resultCache = undefined;
+        this.requestUpdate();
+      },
+      () => {
+        this.unionSongMetaReads.delete(key);
+      },
+    );
+    this.unionSongMetaReads.set(key, read);
+    while (this.unionSongMetaReads.size > 12)
+      this.unionSongMetaReads.delete(this.unionSongMetaReads.keys().next().value!);
+    return read;
   }
   private async readSongMeta(response: Response): Promise<void> {
     this.songMeta = response.ok ? ((await response.json()) as Item) : {};
@@ -2264,7 +2360,10 @@ export class CatalogScreen extends LitElement {
     const entry = this.unionEntry(item);
     const variant = entry?.perServer[entry.displayServer];
     const id = variant?.id || (this.profile.perDifficulty ? String(item.musicId || "") : "") || this.itemId(item);
-    return this.entityLink(id, difficulty, variant?.identity.server || this.dataServer());
+    const server = variant?.identity.server || this.dataServer();
+    // Restricted sources have no static entity page; open their detail in place.
+    if (!isPublicReleaseServer(server)) return undefined;
+    return this.entityLink(id, difficulty, server as ReleaseServer);
   }
   private label(key: string, fallback: string) {
     const alias = this.settings.labelAliases?.[key] || catalogLabelPath(key) || key;
@@ -2496,6 +2595,7 @@ export class CatalogScreen extends LitElement {
       this.songMetaProvision = Promise.resolve();
       this.detailAux = { ...(payload.aux || {}) };
       this.unionDetail = undefined;
+      this.unionDetailBase = undefined;
       const cross = this.detailAux.crossServer as
         (Awaited<ReturnType<typeof fetchCrossServerDetail>> & { exclusive?: OfficialCatalogServer | null }) | undefined;
       if (
@@ -2507,6 +2607,7 @@ export class CatalogScreen extends LitElement {
         cross.fullSources.includes(cross.activeServer)
       ) {
         this.unionDetail = cross;
+        this.unionDetailBase = payload.item;
         this.items = [{ ...payload.item, ...this.unionDetailRow(cross) }];
       }
       this.gameMarks.clear();
@@ -2563,6 +2664,8 @@ export class CatalogScreen extends LitElement {
     this.unionRequests.cancel();
     this.unionCatalog = undefined;
     this.unionDetail = undefined;
+    this.unionDetailBase = undefined;
+    this.detailModulesProvision = undefined;
     this.unionCharacters = {};
     this.unionBands = {};
     this.unionMarks = {};
@@ -4349,38 +4452,118 @@ export class CatalogScreen extends LitElement {
     }
     void this.loadEntityDetail(item);
   }
+  private detailModulesProvision?: Promise<void>;
+  /**
+   * Kind-specific detail modules must exist before the pane's first render: a
+   * custom element created before its definition keeps its pre-upgrade state,
+   * and the body renderers would otherwise run with no module at all.
+   */
+  private ensureDetailModules(): Promise<void> {
+    if (this.detailModulesProvision) return this.detailModulesProvision;
+    let failed = false;
+    const provision = (async () => {
+      const card = ["member", "support"].includes(this.profile.presentation);
+      try {
+        const [skillText, cardDetail, songDetailRewards, gameSystemDetail] = await Promise.all([
+          card ? import("./shared/skill-text") : undefined,
+          card ? import("./card-detail") : undefined,
+          this.profile.presentation === "song" ? import("./song-detail-rewards") : undefined,
+          this.profile.presentation === "system" ? import("./game-system-detail") : undefined,
+          this.profile.presentation === "character" ? import("./character-detail-archive") : undefined,
+        ]);
+        this.skillText = skillText;
+        this.cardDetail = cardDetail;
+        if (songDetailRewards) this.songDetailRewards = songDetailRewards;
+        if (gameSystemDetail) this.gameSystemDetail = gameSystemDetail;
+        this.requestUpdate();
+      } catch {
+        // The pane still renders the summary and its source notice; let the
+        // next detail attempt retry a failed chunk.
+        failed = true;
+      }
+    })();
+    this.detailModulesProvision = provision;
+    void provision.then(() => {
+      if (failed && this.detailModulesProvision === provision) this.detailModulesProvision = undefined;
+    });
+    return provision;
+  }
   private async loadEntityDetail(summary: Item) {
     if (!this.isConnected) return;
     const signal = this.detailRequests.begin();
     const id = this.itemId(summary);
+    const modulesReady = this.ensureDetailModules();
+    const unionEntry = this.unionEntry(summary);
+    const unionVariant = unionEntry?.perServer[unionEntry.displayServer];
+    let loadedActualDetail = false;
+    if (unionEntry && unionVariant && !isPublicReleaseServer(unionVariant.identity.server)) {
+      try {
+        const detail = await fetchCrossServerDetail(unionEntry, unionEntry.displayServer, { signal });
+        if (!this.detailRequests.current(signal) || this.selectedId !== id) return;
+        if (detail.fullSources.includes(unionEntry.displayServer)) {
+          await modulesReady;
+          if (!this.detailRequests.current(signal) || this.selectedId !== id) return;
+          const row = { ...summary, ...this.unionDetailRow(detail) };
+          // The opened row is a new object; pin it to its entry so artwork,
+          // characters, song meta and comments keep reading the variant source.
+          this.unionItems.set(row, unionEntry);
+          this.unionDetail = { ...detail, exclusive: unionEntry.exclusive };
+          this.unionDetailBase = summary;
+          this.selected = row;
+          this.detailAux = {};
+          this.resultCache = undefined;
+          loadedActualDetail = true;
+        }
+      } catch {
+        /* Fall back to the pinned collection summary below. */
+      }
+    }
+    // Only the detail opened for this row may scope the reads below; a failed
+    // load must not reuse the previous entity's source.
+    const detailPin =
+      unionEntry && this.unionDetailBase && this.unionEntry(this.unionDetailBase) === unionEntry
+        ? this.unionDetail?.perServer[this.unionDetail.activeServer]?.identity
+        : undefined;
+    const sourcePin = detailPin && !isPublicReleaseServer(detailPin.server) ? detailPin : undefined;
+    const detailSourceUrl = (resource: string, entity = "") => {
+      if (!sourcePin) return this.sourceUrl(resource, entity);
+      const url = new URL(catalogUrl(resource, entity, sourcePin.server), location.origin);
+      url.searchParams.set("release", sourcePin.releaseId);
+      return url.pathname + url.search;
+    };
     const growth = !this.isProvider() && ["member", "support", "band-item"].includes(this.profile.presentation);
-    const growthPin = growth && this.nativeCatalogPin?.server === this.dataServer() ? this.nativeCatalogPin : undefined;
+    const growthPin =
+      sourcePin ??
+      (growth && this.nativeCatalogPin?.server === this.dataServer() ? this.nativeCatalogPin : undefined);
     const growthSourceUrl = (resource: string, entity = "") => {
-      const source = this.sourceUrl(resource, entity);
+      const source = detailSourceUrl(resource, entity);
       if (!growthPin?.releaseId) return source;
       const url = new URL(source, location.origin);
       url.searchParams.set("release", growthPin.releaseId);
       return url.pathname + url.search;
     };
-    let loadedActualDetail = false;
     if (this.profile.presentation === "song") {
       const rewards = this.songDetailRewards
         ? Promise.resolve()
         : import("./song-detail-rewards").then((module) => {
             this.songDetailRewards = module;
           });
-      this.songMetaProvision ??= fetch(this.songMetaUrl(), { headers: { accept: "application/json" } }).then(
-        async (response) => {
-          await this.readSongMeta(response);
-          this.resultCache = undefined;
-        },
-        () => {
-          this.songMeta = {};
-        },
-      );
-      void Promise.all([rewards, this.songMetaProvision]).then(() => this.requestUpdate());
+      const meta = sourcePin
+        ? this.ensureDetailSongMeta(sourcePin)
+        : (this.songMetaProvision ??= fetch(this.songMetaUrl(), { headers: { accept: "application/json" } }).then(
+            async (response) => {
+              await this.readSongMeta(response);
+              this.resultCache = undefined;
+            },
+            () => {
+              this.songMeta = {};
+            },
+          ));
+      void Promise.all([rewards, meta]).then(() => this.requestUpdate());
     }
     const payload = this.payload && String(this.payload.id) === id ? this.payload : undefined;
+    await modulesReady;
+    if (!this.detailRequests.current(signal) || this.selectedId !== id) return;
     if (this.profile.presentation === "song" && !(payload?.item.gekisou as Item | undefined)?.icons)
       this.ensureMissionIcons();
     if (payload) {
@@ -4392,7 +4575,7 @@ export class CatalogScreen extends LitElement {
         if (!this.detailRequests.current(signal) || this.selectedId !== id) return;
       }
       this.setEntityReady(true);
-    } else
+    } else if (!loadedActualDetail)
       try {
         // Meta rows identify as `<musicId>-<difficulty>` but fetch the song
         // they belong to, so the detail keeps the full difficulty picker.
@@ -4432,7 +4615,9 @@ export class CatalogScreen extends LitElement {
     // is unavailable. A summary row is a browse projection, not a usable
     // replacement for the page's detail payload.
     if (this.settings.entityContext && !loadedActualDetail) {
-      if (this.isProvider()) this.phase = "error";
+      // A server-first entity shell has no built article to keep: leaving the
+      // page blank would hide both the failure and its retry.
+      this.phase = "error";
       return;
     }
     const views: string[] = [];
@@ -4469,7 +4654,9 @@ export class CatalogScreen extends LitElement {
                   "character-missions",
                 ].map(async (resource) => {
                   const response = await fetch(
-                    resource === "voices" ? this.sourceUrl("voices/relations/character", id) : this.sourceUrl(resource),
+                    resource === "voices"
+                      ? detailSourceUrl("voices/relations/character", id)
+                      : detailSourceUrl(resource),
                     { signal },
                   );
                   const value = response.ok ? await response.json() : {};
@@ -4536,6 +4723,8 @@ export class CatalogScreen extends LitElement {
   private close() {
     this.resetCommentsActivation();
     this.detailRequests.cancel();
+    this.unionDetail = undefined;
+    this.unionDetailBase = undefined;
     this.selected = null;
     this.selectedId = "";
     this.setEntityReady(false);
@@ -4623,7 +4812,10 @@ export class CatalogScreen extends LitElement {
           () => void this.load(),
         );
       // GBP details load on demand; canonical archive pages retain SSR content.
-      if (this.isProvider()) return loadingState(this.label("loading", "Loading"));
+      // A server-first shell has no SSR content, so it shows the state instead
+      // of an empty page while its release documents arrive.
+      if (this.isProvider() || isRestrictedContentSource(this.dataServer()))
+        return loadingState(this.label("loading", "Loading"));
       return nothing;
     }
     const appliedCount = Object.values(this.facets).reduce((sum, values) => sum + values.length, 0);
@@ -5720,16 +5912,18 @@ export class CatalogScreen extends LitElement {
     return rows[this.detailDifficulty] || rows.find((row) => row.file) || {};
   }
   private songChartMeta(item: Item) {
-    if (!this.songMetaCompatible()) return {};
-    const song = this.songMeta[String(item.musicId || "")] as Item | undefined;
+    const meta = this.itemSongMeta(item);
+    if (!meta) return {};
+    const song = meta[String(item.musicId || "")] as Item | undefined;
     const difficulty = song?.[String(this.detailDifficulty)] as Item | undefined;
     return (difficulty?.chart as Item | undefined) || {};
   }
   /** Song-level gekisou mission pattern merged with the selected difficulty's
    * per-segment metrics (both live in the song-meta entry). */
   private songGekisouMeta(item: Item) {
-    if (!this.songMetaCompatible()) return {};
-    const song = this.songMeta[String(item.musicId || "")] as Item | undefined;
+    const meta = this.itemSongMeta(item);
+    if (!meta) return {};
+    const song = meta[String(item.musicId || "")] as Item | undefined;
     const difficulty = song?.[String(this.detailDifficulty)] as Item | undefined;
     return {
       icons: this.missionIcons,
@@ -6709,6 +6903,9 @@ export class CatalogScreen extends LitElement {
     };
   }
   private renderCharacterArchive(item: Item, fields: Array<{ key: string; value: string }>) {
+    // An undefined custom element would keep its constructor defaults after
+    // upgrade, so the archive only mounts once its definition exists.
+    if (typeof customElements !== "undefined" && !customElements.get("character-detail-archive")) return nothing;
     return html`
       <character-detail-archive
         .controller=${this}

@@ -1883,6 +1883,10 @@
       "native-normal-complete-member-order-domain": "すべてのスキル順を比較",
       "explicit-personal-solo-score-domain": "個人Soloスコア",
       "previousResult": "前回の結果",
+      "importFlow": {
+        "characterMemory": "キャラクターメモリーボーナス",
+        "musicMemory": "楽曲メモリーボーナス"
+      },
       "importExisting": {
         "keep": "既存の値をすべて保持",
         "overwrite": "既存の値をすべて上書き",
@@ -2341,6 +2345,8 @@
       "criterion": "スコアの目標",
       "criterionMean": "平均スコア",
       "criterionMin": "最低スコア（安定）",
+      "comboBonus": "COMBO BONUS",
+      "minComboBonus": "COMBO BONUS の下限",
       "gekisoRank": "各区間の順位",
       "gekisoRankSolo": "1位（ミッション）",
       "window": "基準時間",
@@ -2433,10 +2439,12 @@
       "evaluating": "評価中",
       "loadTeam": "エディターで開く",
       "deletedTeam": "編成を削除しました",
+      "delete": "削除",
       "noSavedTeams": "検索結果や手動編成を保存するとここに表示されます。保存した編成はアカウントと同期されます。",
       "useInSearch": "編成検索に使う",
       "markOwned": "所持にする",
       "required": "必ず含める",
+      "requiredOnePerCharacter": "必須カードはキャラクターごとに1枚",
       "showCards": "表示",
       "showOwned": "所持",
       "showAll": "すべて",
@@ -2510,7 +2518,8 @@
         "calculateAll": "全楽曲を計算",
         "fiveCharacters": "異なるキャラクターが 5 人以上必要です",
         "eventTables": "イベント消費テーブル",
-        "requiredMembers": "必須メンバーのキャラクターが重複しています",
+        "requiredMembers": "必須カードで{character}が重複しています",
+        "requiredMemberCount": "必須メンバーが5人を超えています",
         "photoBindings": "スナップが重複しています",
         "correctionHelp": "イベント報酬の入力を編集中",
         "back": "戻る"

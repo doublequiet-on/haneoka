@@ -1,6 +1,7 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { clientText } from "../../i18n/client";
 import { resourceKindForCollection, type ResourceKind } from "../../lib/resource-route";
+import { isPublicReleaseServer } from "../../lib/release-server";
 import type { ItemRelations, ItemRelation, ItemOccurrence } from "../../server/item-relations";
 import { renderDetailSectionHeading } from "./detail-section-heading";
 import { accordion } from "../ui/accordion";
@@ -181,9 +182,12 @@ export function renderItemRelations(c: ItemRelationsController, data: ItemRelati
 
   const entityTitle = (entry: ItemRelation) =>
     c.localized(entry.entity.name) || `${sourceLabel(entry.entity.resource)} ${entry.entity.id}`;
+  // A detail previewed from a restricted edition has no pages for the
+  // entities it names: the rows stay readable, without hidden-server links.
+  const linkable = isPublicReleaseServer(c.dataServer());
   const entityHref = (entry: ItemRelation) => {
     const kind = resourceKindForCollection(entry.entity.resource);
-    return kind ? c.relatedEntityHref(kind, entry.entity.id) : "";
+    return linkable && kind ? c.relatedEntityHref(kind, entry.entity.id) : "";
   };
   const artwork = (entry: ItemRelation) => {
     const image = typeof entry.entity.image === "string" ? entry.entity.image : "";

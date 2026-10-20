@@ -135,3 +135,15 @@ export function resolveSlotSkill(
 
 /** Window length of an effect: ceil(seconds·1000 + extension) in binary32. */
 export const windowMs = (seconds: number, extensionMs: number) => Math.ceil(f(f(f(seconds) * f(1000)) + extensionMs));
+
+/** One slot's effective score-up percentage of a type. Conditional branches (for example a LIFE threshold)
+ * replace one another rather than stack; the higher branch is the one a full-life deck reaches. A Perfect
+ * score-up counts only when it raises Perfect notes, as the score model does. */
+export function effectPercent(skill: SlotSkill, type: 2000 | 2004): number {
+  let percent = 0;
+  for (const effect of skill.effects) {
+    if (effect.type !== type || (type === 2004 && !effect.judgements.includes(5))) continue;
+    percent = Math.max(percent, effect.delta / 1000);
+  }
+  return percent;
+}

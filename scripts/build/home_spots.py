@@ -1112,8 +1112,12 @@ def build_home_spots(
                 outputs.add(str((adopted_scene.get("output") or {}).get("path") or ""))
                 outputs.add(str((adopted_scene.get("preview") or {}).get("path") or ""))
                 continue
-        background_source = _source_path(row, "_backgroundAssetPath", identity)
-        situation_source = _source_path(row, "_situationAssetPath", identity)
+        try:
+            background_source = _source_path(row, "_backgroundAssetPath", identity)
+            situation_source = _source_path(row, "_situationAssetPath", identity)
+        except (KeyError, ValueError) as error:
+            sys.stderr.write(f"warning: skipping home spot {identity}; unavailable content: {error}\n")
+            continue
         if background_source not in index.get("sources", {}) or situation_source not in index.get("sources", {}):
             sys.stderr.write(
                 f"warning: skipping home spot {identity}; source absent from the Unity index "

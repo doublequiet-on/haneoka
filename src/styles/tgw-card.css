@@ -67,6 +67,8 @@
     min-width: 0;
     min-height: 40px;
     place-items: center;
+    border: 0;
+    padding: 0;
     border-radius: var(--md-sys-shape-corner-small);
     color: var(--md-sys-color-on-surface);
     background: var(--md-sys-color-surface-container-highest);
@@ -89,7 +91,8 @@
   .tgw-rank-button:hover {
     background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-surface-container-highest));
   }
-  .tgw-rank-button[aria-current="true"] {
+  .tgw-rank-button[aria-current="true"],
+  .tgw-rank-button[aria-pressed="true"] {
     border-radius: var(--md-sys-shape-corner-full);
     color: var(--md-sys-color-on-primary);
     background: var(--md-sys-color-primary);

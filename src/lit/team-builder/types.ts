@@ -57,6 +57,7 @@ export interface BuildSettings {
   /** Gekisou: share of Just-eligible notes hit Just (percent) and the assumed range placement (1 for Mission). */
   just: number;
   gekisoRank: number;
+  minComboBonus: number;
   /** Opponents' scores per range as typed (numbers separated by spaces or commas). */
   gekisoOpponents: [string, string, string];
 }
@@ -106,6 +107,7 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   timeLimit: null,
   just: 100,
   gekisoRank: 1,
+  minComboBonus: 1,
   gekisoOpponents: ["", "", ""],
 };
 export interface BoxFilters {

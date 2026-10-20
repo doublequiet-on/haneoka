@@ -62,7 +62,11 @@ class EngineWorker {
       this.pending.clear();
       this.reset();
     };
-    this.ready = this.call({ type: "init", id: 0, data: this.data }) as Promise<void>;
+    this.ready = (this.call({ type: "init", id: 0, data: this.data }) as Promise<void>).catch((error) => {
+      // A failed release compile must not pin the Worker to its rejected ready promise.
+      this.reset();
+      throw error;
+    });
     return this.ready;
   }
   private call(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<unknown> {

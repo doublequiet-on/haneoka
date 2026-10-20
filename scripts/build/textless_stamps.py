@@ -262,8 +262,13 @@ def catalog_image_variants(entry: dict, server: str) -> dict[str, str]:
 
 
 def catalog_inventory(catalog: Path, build: Path, assets: Path, server: str = 'intl', *, stamp_ids: set[str] | None = None,
-                      allow_unavailable: bool = False) -> dict:
-    """Read existing per-bundle metadata and Sprite headers; never re-extract assets."""
+                      allow_unavailable: bool = False, restore_input=None) -> dict:
+    """Read existing per-bundle metadata and Sprite headers; never re-extract assets.
+
+    ``restore_input`` may materialize an unchanged delta-build input that lives
+    in the pinned base release instead of the local build tree; the restored
+    bytes still pass every length and hash check below.
+    """
     entities = {}
     for path in sorted(catalog.glob("*.json")) if catalog.is_dir() else [catalog]:
         entities.update(json.loads(path.read_text()))
@@ -293,17 +298,27 @@ def catalog_inventory(catalog: Path, build: Path, assets: Path, server: str = 'i
                 if relative not in wanted:
                     continue
                 file = build/texture["path"]
+                if restore_input is not None:
+                    restore_input(texture["path"])
                 if not file.is_file():
                     raise FileNotFoundError(f'missing current stamp original: {relative}')
                 if file.stat().st_size != texture['bytes'] or digest(file) != texture['sha256']:
                     raise ValueError(f'stamp original hash mismatch: {relative}')
                 archive = build/meta['objectArchive']['path']
+                if restore_input is not None:
+                    restore_input(meta['objectArchive']['path'])
+                if not archive.is_file():
+                    raise FileNotFoundError(f"missing current stamp object archive: {meta['objectArchive']['path']}")
                 if archive.stat().st_size != meta['objectArchive']['bytes'] or digest(archive) != meta['objectArchive']['sha256']:
                     raise ValueError('stamp object archive hash mismatch')
                 if not sprites:
                     continue
                 sprite = sprites[0]
                 sprite_file = build/sprite['path']
+                if restore_input is not None:
+                    restore_input(sprite['path'])
+                if not sprite_file.is_file():
+                    raise FileNotFoundError(f"missing current stamp sprite: {sprite['path']}")
                 if sprite_file.stat().st_size != sprite['bytes'] or digest(sprite_file) != sprite['sha256']:
                     raise ValueError('stamp Sprite image hash mismatch')
                 with gzip.open(archive, "rt") as stream:
