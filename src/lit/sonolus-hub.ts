@@ -4,6 +4,8 @@ import { hydrateWorkspace } from "./shared/hydrate-workspace";
 import { readPageData } from "../lib/page-data";
 import type { SonolusHubPageData } from "../server/tool-page-data";
 import { SONOLUS_SERVER_LINK } from "../config/sonolus";
+import { communityChartPath } from "../lib/chart-creation/community-types";
+import { readReleaseServer } from "../lib/release-server";
 import { preferredLocale, uiText } from "./shared/catalog";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
 import { tile } from "./ui/tile";
@@ -165,6 +167,7 @@ export class SonolusHub extends LitElement {
             <a class="button sonolus-hub__open" href=${SONOLUS_SERVER_LINK} target="_blank" rel="noreferrer">
               ${icon("open_in_new", 18)}${this.text("open", "Open in Sonolus")}
             </a>
+            <a class="button button--tonal" href=${communityChartPath(readReleaseServer(), this.locale)}>${clientText(this.locale, "community.charts.title")}</a>
           </div>
         </header>
         ${this.levels === null

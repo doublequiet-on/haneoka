@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: 歌曲与社区谱面的音轨、队列和播放操作。
+// Output: 全站持久音频播放器与统一队列。
+// Pos: [Map](L2-2.md)；音频播放及 ensure 单例入口。
+// Effects/Dependencies: DOM、Audio、MediaSession 和本地播放状态；关闭清空队列并释放播放。
 import { audioTrackKey } from "../../lib/audio-track-key";
 import { audioTrackDetailPath } from "../../lib/audio-track-link";
 import { observeSongDisplay, songTitle } from "../../lib/song-display";
@@ -88,6 +93,16 @@ const normalizedTrack = (value: AudioTrack, occurrence = 0): AudioTrack | null =
 };
 
 export class AudioDock extends LitElement {
+  static ensure(): AudioDock {
+    let dock = document.querySelector<AudioDock>("audio-dock");
+    if (!dock) {
+      dock = new AudioDock();
+      dock.setAttribute("data-astro-transition-persist", "haneoka-audio");
+      document.body.append(dock);
+    }
+    return dock;
+  }
+
   private uiLanguage = preferredLocale();
   private readonly onLocale = () => {
     this.uiLanguage = preferredLocale();

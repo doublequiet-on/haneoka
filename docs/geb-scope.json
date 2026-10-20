@@ -194,7 +194,20 @@
     "src/lib/catalog-page-computed.ts",
     "src/server/catalog-page-producer.ts",
     "src/server/catalog-page-snapshot.ts",
-    "worker/catalog-page-data.ts"
+    "worker/catalog-page-data.ts",
+    "src/lib/chart-difficulty.ts",
+    "src/lib/chart-creation/analysis.ts",
+    "src/lit/ui/song-summary.ts",
+    "src/lib/chart-creation/community-types.ts",
+    "src/lib/chart-creation/community.ts",
+    "src/lib/chart-creation/storage.ts",
+    "src/lit/chart-publication.ts",
+    "src/lit/community-charts.ts",
+    "src/lit/ui/song-actions.ts",
+    "src/lit/runtime/chart-simulator.ts",
+    "src/lit/runtime/audio-dock.ts",
+    "worker/community-charts.ts",
+    "worker/community-chart-media.ts"
   ],
   "entry_documents": [
     "AGENTS.md",

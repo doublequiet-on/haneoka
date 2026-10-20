@@ -1,0 +1,8 @@
+@layer pages {
+  .community-charts .detail-layout__content {
+    overflow-wrap: anywhere;
+  }
+  .community-charts .dialog__actions {
+    flex-wrap: wrap;
+  }
+}

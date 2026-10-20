@@ -22,6 +22,28 @@ interactive workspaces in `src/lit`, and the Material Design 3 styles in
 - ADV story playback and authoring
 - Sonolus-compatible play, watch, preview, and tutorial engines
 - Accounts and community features
+- Community chart publishing, cloud drafts, version history, remixes, and Sonolus play
+
+The chart editor saves local revisions automatically and reopens the latest local
+project. Its Publish dialog selects audio and cover independently: upload your
+own files or reuse Our Notes and Bestdori song resources. Our Notes references
+retain their release identity. Reused audio and covers are copied into deduplicated
+community snapshots, so release cleanup does not break published charts. Uploaded audio is prepared as stereo PCM WAV;
+uploaded covers use the community media and moderation pipeline.
+
+Cloud drafts stay private while the previous published version remains playable.
+Publish publicly or by link, choose remix availability, then open the chart in
+Sonolus from its community page. Community details share song playback, chart,
+and Sonolus actions with official songs. The chart child page uses the same 2D
+overview, 3D player, settings, and image download. Playback remains available when
+remixes are closed. Community charts also share the official chart summary and
+FC operation-load difficulty model. Authors set their own level; the recommended
+level, note count, duration, BPM, and density are computed by the server for each
+immutable revision. Saved cloud drafts can open their private detail page before
+publication. The Sonolus server has a separate Community Charts section;
+community levels do not enter the default official list. Withdrawal removes
+public chart and media access; deleted chart payloads are retained for 30 days before cleanup. Project backups include audio,
+cover and publication settings, and import as a new local project.
 
 ## Development
 

@@ -28,6 +28,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return entry ? Response.json(readProviderEntityPayload(entry), { headers: { "Cache-Control": "no-cache", ETag: `"${entry.sha256}"` } }) : new Response("Not found", { status: 404 });
   }
   if (import.meta.env.DEV) {
+    const chart = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/[0-9a-f-]{36}(?:\/chart)?\/?$/u.exec(context.url.pathname);
+    if (chart) return context.rewrite(new URL(`/${chart[1]}/${chart[2]}/charts/_/${context.url.search}`, context.url));
     const selected = providerEntityFromUrl(context.url);
     if (selected && fs.existsSync(path.join(providerEntityRoot(), "manifest.json"))) {
       const entry = providerEntityManifestEntry(providerEntityHtmlPath(selected), true);

@@ -1,3 +1,4 @@
+import { songDetailSection, songChartSummary } from "./ui/song-summary";
 import { difficultyKey, difficultyPicker } from "./ui/difficulty-picker";
 import { resolveLocalizedText } from "../lib/localized-text";
 import { html, nothing } from "lit";
@@ -151,10 +152,12 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
     ${
       facts.length
         ? html`
-            <section class="detail-section song-detail-section song-detail-summary">
-              ${renderDetailSectionHeading(label("details", "Details"), "details")}
-              <dl class="spec-list spec-list--split">
-                ${facts.map(
+            ${songDetailSection(
+              label("details", "Details"),
+              "details",
+              html`
+                <dl class="spec-list spec-list--split">
+                  ${facts.map(
                   ({ key, value }) => html`
                     <div>
                       <dt>${detailLabel(key)}</dt>
@@ -162,34 +165,28 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
                     </div>
                   `,
                 )}
-              </dl>
-            </section>
+                </dl>
+              `,
+            )}
           `
         : nothing
     }
-    <section class="detail-section song-detail-section song-detail-chart">
-      ${renderDetailSectionHeading(label("chart", "Chart"), "difficulty")}
-      ${
-        difficulty.length
-          ? difficultyPicker({
-              rows: difficulty,
-              selected: difficultyKey(difficulty[selectedDifficulty] || {}, selectedDifficulty),
-              locale,
-              onSelect: (_key, index) => selectDifficulty(index),
-            })
-          : nothing
-      }
-      <dl class="song-data-grid song-meta-strip">
-        ${metrics.map(
-          ([key, fallback, value]) => html`
-            <div>
-              <dt>${label(key, fallback)}</dt>
-              <dd lang=${resolveLocalizedText(item[key], locale).locale}>${value}</dd>
-            </div>
-          `,
-        )}
-      </dl>
-    </section>
+    ${songChartSummary({
+      title: label("chart", "Chart"),
+      difficulty: difficulty.length
+        ? difficultyPicker({
+            rows: difficulty,
+            selected: difficultyKey(difficulty[selectedDifficulty] || {}, selectedDifficulty),
+            locale,
+            onSelect: (_key, index) => selectDifficulty(index),
+          })
+        : nothing,
+      metrics: metrics.map(([key, fallback, value]) => ({
+        label: label(key, fallback),
+        value,
+        lang: resolveLocalizedText(item[key], locale).locale,
+      })),
+    })}
     ${renderGekisouStages({ item, gekisou, label })}
     ${
       scoring
@@ -203,7 +200,6 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
     }
   `;
 }
-
 
 /** The song-level Gekisou stage pattern, shown after the chart figures. */
 export function renderGekisouStages({
@@ -259,7 +255,9 @@ export function renderGekisouStages({
     ? html`
         <section class="detail-section song-detail-section song-gekisou-section">
           ${renderDetailSectionHeading(label("gekisouStages", "Gekisou stages"), "effects")}
-          <ol class="song-gekisou-stages">${cells}</ol>
+          <ol class="song-gekisou-stages">
+            ${cells}
+          </ol>
         </section>
       `
     : nothing;
@@ -293,9 +291,8 @@ export function renderSongRewards({
     ),
     (rank) => Number(rank.scoreRank),
   );
-  const scoreRewards = byScoreRank(
-    Array.isArray(item.scoreRewards) ? (item.scoreRewards as Item[]) : [],
-    (reward) => Number(reward.liveScoreRank || 99),
+  const scoreRewards = byScoreRank(Array.isArray(item.scoreRewards) ? (item.scoreRewards as Item[]) : [], (reward) =>
+    Number(reward.liveScoreRank || 99),
   );
   const comboRewards = item.comboRewards && typeof item.comboRewards === "object" ? (item.comboRewards as Item) : {};
   const active = String(chart.difficultyName || "").toLowerCase();
@@ -416,7 +413,13 @@ export function renderSongRewards({
     ? html`
         <section class="detail-section song-detail-section song-room-section">
           ${renderDetailSectionHeading(label("catalog.analysis.fields.gekisouRoomScores", "Gekisou room scores"), "characters")}
-          <div class="table-scroll" role="region" tabindex="0" aria-label=${label("catalog.analysis.fields.gekisouRoomScores", "Gekisou room scores")} data-scroll-region>
+          <div
+            class="table-scroll"
+            role="region"
+            tabindex="0"
+            aria-label=${label("catalog.analysis.fields.gekisouRoomScores", "Gekisou room scores")}
+            data-scroll-region
+          >
             <table class="data-table song-room-table">
               <thead>
                 <tr>
@@ -437,7 +440,9 @@ export function renderSongRewards({
                       <th scope="row">${scoreRankIcon(server, Number(rank.scoreRank))}</th>
                       ${players.map(
                         (count) => html`
-                          <td class="is-numeric tabular">${roomRequiredScore(Number(rank.battleLiveRequiredScore), count).toLocaleString()}</td>
+                          <td class="is-numeric tabular">
+                            ${roomRequiredScore(Number(rank.battleLiveRequiredScore), count).toLocaleString()}
+                          </td>
                         `,
                       )}
                     </tr>

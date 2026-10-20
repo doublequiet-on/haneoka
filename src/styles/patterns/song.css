@@ -1,0 +1,56 @@
+@layer patterns {
+  .detail-section.song-detail-section {
+    --md-comp-detail-block-gap: 12px;
+
+    min-width: 0;
+    gap: var(--md-comp-detail-block-gap);
+    padding-block: 16px;
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .song-detail-section:first-child {
+    padding-top: 4px;
+    border-top: 0;
+  }
+  .song-detail-section .detail-section-title {
+    min-height: 32px;
+    margin: 0;
+  }
+  .song-detail-section__body {
+    display: grid;
+    min-width: 0;
+    gap: var(--md-comp-detail-block-gap);
+  }
+  .song-data-grid {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr));
+    gap: 20px 16px;
+    padding: 8px 0;
+    margin: 0;
+  }
+  .song-data-grid > div {
+    display: grid;
+    min-width: 0;
+    align-content: start;
+    gap: 6px;
+  }
+  .song-data-grid dt {
+    margin: 0;
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-small-weight) var(--md-sys-typescale-body-small-size) /
+      var(--md-sys-typescale-body-small-line-height) var(--app-font);
+  }
+  .song-data-grid dd {
+    margin: 0;
+    min-width: 0;
+    font: var(--md-sys-typescale-title-medium-weight) var(--md-sys-typescale-title-medium-size) /
+      var(--md-sys-typescale-title-medium-line-height) var(--app-font);
+    overflow-wrap: anywhere;
+  }
+  .song-meta-strip dd {
+    font: var(--md-sys-typescale-emphasized-title-large-weight) var(--md-sys-typescale-title-large-size) /
+      var(--md-sys-typescale-title-large-line-height) var(--app-font);
+    font-variant-numeric: tabular-nums;
+  }
+}

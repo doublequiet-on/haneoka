@@ -159,6 +159,7 @@ export const featureNamespaceForRoute = (route = "/"): MainI18nNamespace => {
   if (pathname === "/team-builder" || pathname.startsWith("/team-builder/")) return TEAM_BUILDER_I18N_NAMESPACE;
   if (/^\/(?:catalog\/)?events\/tracker(?:\/|$)/u.test(pathname)) return EVENT_TRACKER_I18N_NAMESPACE;
   if (pathname.includes("anon-tokyo")) return ANON_I18N_NAMESPACE;
+  if (pathname === "/charts" || pathname.startsWith("/charts/")) return COMMUNITY_I18N_NAMESPACE;
   if (pathname.includes("chart-editor") || pathname.includes("story-editor")) return EDITOR_I18N_NAMESPACE;
   if (pathname.includes("stories")) return STORY_I18N_NAMESPACE;
   if (pathname.includes("live2d")) return LIVE2D_I18N_NAMESPACE;
@@ -172,7 +173,7 @@ export const featureNamespaceForRoute = (route = "/"): MainI18nNamespace => {
 const namespaceDependencies: Partial<Record<MainI18nNamespace, readonly MainI18nNamespace[]>> = {
   catalog: ["media"],
   home: ["catalog", "media"], calendar: ["catalog"], story: ["catalog", "media"],
-  voice: ["catalog", "media"], editor: ["catalog", "media", "story"],
+  voice: ["catalog", "media"], editor: ["catalog", "media", "story", "community"],
   anon: ["catalog", "media"], spine: ["catalog", "media"], live2d: ["catalog", "media"],
   songSlidePuzzle: ["catalog"], stampMaker: ["catalog", "media"], teamBuilder: ["catalog", "media"],
   eventTracker: ["catalog", "media"],

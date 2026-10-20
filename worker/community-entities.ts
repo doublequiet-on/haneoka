@@ -31,7 +31,7 @@ export interface CommunityEntityDescriptor {
 export type CommunityEntityResolver = (
   env: Env,
   target: CommunityEntityTarget,
-  context: { server: "jp" | "intl"; locale: Locale },
+  context: { server: "jp" | "intl"; locale: Locale; discovery?: boolean },
 ) => Promise<CommunityEntityDescriptor | null>;
 interface Thread {
   postId: string;
@@ -53,6 +53,7 @@ const thread = (env: Env, target: CommunityEntityTarget) =>
     .bind(target.entityType, target.originalId)
     .first<Thread>();
 const knownTypes = new Set([
+  "community-charts",
   "cards",
   "support-cards",
   "characters",
@@ -363,7 +364,7 @@ async function entityFeed(request: Request, env: Env, url: URL, resolver: Commun
     const descriptor = await resolver(
       env,
       { entityType: candidate.entityType, originalId: candidate.originalId },
-      { server: server as "jp" | "intl", locale: locale as Locale },
+      { server: server as "jp" | "intl", locale: locale as Locale, discovery: true },
     );
     if (!descriptor) continue;
     const focus = new URL(url);
@@ -406,7 +407,7 @@ async function recommendations(request: Request, env: Env, url: URL, resolver: C
     const key = JSON.stringify([target.entityType, target.originalId]);
     let resolved = descriptors.get(key);
     if (!resolved) {
-      resolved = measureCommunityRead("catalog", () => resolver(env, target, { server: server as "jp" | "intl", locale: locale as Locale }));
+      resolved = measureCommunityRead("catalog", () => resolver(env, target, { server: server as "jp" | "intl", locale: locale as Locale, discovery: true }));
       descriptors.set(key, resolved);
     }
     const descriptor = await resolved;

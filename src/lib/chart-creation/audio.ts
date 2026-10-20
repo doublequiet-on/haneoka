@@ -1,6 +1,6 @@
 import { analyzeAudio, type AudioAnalysis } from "../../../packages/chart-editor/src/creation/audio-analysis";
 
-export const AUDIO_LIMITS = { bytes: 32 * 1024 * 1024, seconds: 600, sampleRate: 22050 } as const;
+export const AUDIO_LIMITS = { bytes: 64 * 1024 * 1024, seconds: 600, sampleRate: 22050 } as const;
 export interface CreationAudio {
   file: File;
   sha256: string;

@@ -219,6 +219,7 @@ const sections: NavSection[] = [
         { route: "/community/activity", icon: "comment", label: "community.page.activity" },
       ] },
       { route: "/community/playlists", icon: "queue_music", label: "community.page.playlistPage.title" },
+      { route: "/community/charts", icon: "music_note", label: "community.charts.title" },
       // Last in the tree: its boards are a live directory that loads after
       // the page, and at the end it can grow without moving any row.
       { route: "/community/forums", icon: "forum", label: "community.page.forums" },

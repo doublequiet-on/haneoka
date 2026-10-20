@@ -16,6 +16,8 @@ export function installProviderDevRouting(server: DevServer): void {
   server.middlewares.use((request, response, next) => {
     try {
       const url = new URL(request.url || "/", "http://localhost");
+      const chart = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/[0-9a-f-]{36}(?:\/chart)?\/?$/u.exec(url.pathname);
+      if (chart) request.url = `/${chart[1]}/${chart[2]}/charts/_/${url.search}`;
       const legacy = legacyProviderRedirectTarget(url.pathname, url.search);
       if (legacy && (request.method === "GET" || request.method === "HEAD")) {
         response.writeHead(308, { Location: legacy, "Cache-Control": "public, max-age=86400" });

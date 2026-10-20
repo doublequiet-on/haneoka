@@ -54,6 +54,7 @@ const appPages: Array<[string, string]> = [
   ["/community/activity", "community.page.activity"],
   ["/community/tags", "community.page.tags"],
   ["/community/playlists", "community.page.playlistPage.title"],
+  ["/community/charts", "community.charts.title"],
   ["/community/gbp/songs", "community.page.songsBestDori"],
   ["/community/sekai/songs", "community.page.sekai.title"],
   ["/community/sekai/stories/event", "community.page.sekai.stories.event"],

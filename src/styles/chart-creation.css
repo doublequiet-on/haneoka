@@ -454,3 +454,10 @@
     }
   }
 }
+@layer pages {
+  .chart-publication { max-width: min(44rem, calc(100vw - 2rem)); }
+  .chart-publication fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+  .chart-publication__cover { object-fit: cover; border-radius: var(--md-sys-shape-corner-medium); max-width: 100%; }
+  .chart-publication .dialog__actions { flex-wrap: wrap; }
+  .chart-publication textarea, .chart-publication select { width: 100%; min-height: 48px; }
+}

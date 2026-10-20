@@ -26,6 +26,7 @@ import type { HaneokaLocale, HaneokaReleaseIdentity } from "../../packages/api-c
 import { BESTDORI_SERVERS, isBestdoriServer, type BestdoriServer } from "../../packages/bestdori/src/transport";
 import { listBestdoriCreatorSongs, loadBestdoriCreatorSong, loadBestdoriCreationSongCardData, type BestdoriCreatorSong } from "../lib/chart-creation/bestdori-source";
 import "../styles/team-builder.css";
+import type { ChartMediaRef } from "../lib/chart-creation/community-types";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -36,6 +37,7 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
 type CatalogueRecord = Record<string, unknown>;
 
 export type CreationLibraryProvider = "haneoka" | "bestdori";
+export interface CreationMediaSelection { ref: Extract<ChartMediaRef, { kind: "server" }>; url: string; title: string }
 type CreationSong = PublicCreationSong | BestdoriCreatorSong;
 export type PublicChartImport = Awaited<ReturnType<typeof loadPublicCreationSong>> | Awaited<ReturnType<typeof loadBestdoriCreatorSong>>;
 export class ChartCreationLibrary extends LitElement {
@@ -63,6 +65,8 @@ export class ChartCreationLibrary extends LitElement {
   declare private provider: CreationLibraryProvider;
   declare private bestdoriRegion: BestdoriServer;
   declare onImport: ((value: PublicChartImport, signal: AbortSignal) => Promise<void>) | undefined;
+  onChooseMedia?: (value: CreationMediaSelection, signal: AbortSignal) => Promise<void>;
+  private mediaKind?: "audio" | "cover";
   declare pageData: PublicSongsPageData | undefined;
   declare private opened: boolean;
   declare private busy: boolean;
@@ -185,7 +189,8 @@ export class ChartCreationLibrary extends LitElement {
     this.query = ""; this.bandFilter = ""; this.characterFilter = "";
     if (this.opened) void this.loadIndex();
   }
-  async show(provider: CreationLibraryProvider = "haneoka") {
+  async show(provider: CreationLibraryProvider = "haneoka", mediaKind?: "audio" | "cover") {
+    this.mediaKind = mediaKind;
     this.trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     const server = readReleaseServer();
     if (provider !== this.provider || (provider === "haneoka" && server !== this.server) || (this.indexLocale && this.indexLocale !== this.locale)) {
@@ -335,6 +340,22 @@ export class ChartCreationLibrary extends LitElement {
       this.difficulty = defaultCreationDifficulty<CatalogueRecord>(rows)?.key ?? "";
   }
   private async importChosen() {
+    if (this.mediaKind && this.onChooseMedia) {
+      const selected = this.items.find(item => item.id === this.chosen)?.value;
+      if (!selected || this.busy) return;
+      const url = this.mediaKind === "audio" ? selected.musicUrl : selected.jacketUrl;
+      if (typeof url !== "string" || !url) return;
+      const controller = this.controller = new AbortController(); this.busy = true; this.error = "";
+      try {
+        const ref: Extract<ChartMediaRef, { kind: "server" }> = this.provider === "bestdori"
+          ? { kind: "server", provider: "bestdori", server: this.bestdoriRegion, songId: this.chosen }
+          : { kind: "server", provider: "our-notes", server: this.identity!.server, releaseId: this.identity!.releaseId, songId: this.chosen };
+        await this.onChooseMedia({ ref, url: this.provider === "haneoka" ? pinnedPublicUrl(url, this.identity!) : new URL(url, "https://haneoka.org").href, title: songTitle(selected as CatalogueRecord, this.locale).text }, controller.signal);
+        controller.signal.throwIfAborted(); this.close();
+      } catch { if (!controller.signal.aborted) this.error = this.t("loadFailed"); }
+      finally { if (this.controller === controller) { this.busy = false; this.controller = undefined; } }
+      return;
+    }
     if (this.busy || (this.provider === "haneoka" && !this.identity) || !this.chosen || !this.difficulty || !this.onImport) return;
     this.busy = true;
     this.error = "";
@@ -469,9 +490,9 @@ export class ChartCreationLibrary extends LitElement {
           selected
             ? html`
                 <strong>${songTitle(selected as unknown as Record<string, unknown>, this.locale).text}</strong>
-                ${difficultyPicker({ rows: selected.difficulty as unknown as Record<string, unknown>[], selected: this.difficulty, locale: this.locale, onSelect: (key) => (this.difficulty = key) })}
+                ${this.mediaKind ? nothing : difficultyPicker({ rows: selected.difficulty as unknown as Record<string, unknown>[], selected: this.difficulty, locale: this.locale, onSelect: (key) => (this.difficulty = key) })}
                 <button class="button button--filled" ?disabled=${this.busy || !this.difficulty} @click=${() => void this.importChosen()}>
-                  ${this.t("importServerBoth")}
+                  ${this.mediaKind ? clientText(this.locale, `community.charts.${this.mediaKind === "audio" ? "useAudio" : "useCover"}`) : this.t("importServerBoth")}
                 </button>
               `
             : nothing

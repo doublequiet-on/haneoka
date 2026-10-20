@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: 原生谱面、难度槽位、官方或作者播放转换的 combo 计数及校准。
+// Output: FC 操作负荷特征、质量状态和推荐定数。
+// Pos: [Map](L2-2.md)；正式与社区谱面共用的难度模型。
+// Effects/Dependencies: Cassiopeia 几何和读谱时间模型；纯计算，缺少有效计数或校准时不生成定数。
 import { nativeJudgementAreaOffsetX, applyLineEase, type ChartDocument, type ChartNote } from "@haneoka/cassiopeia";
 
 /** Full-combo difficulty at 1x, assist 0, from the chart alone: the skill at which every 0.4 s section is
@@ -67,6 +72,8 @@ export interface ChartDifficultyInput {
   /** Difficulty slot (0 = Easy … 3 = Expert). */
   difficulty: number;
   masterJudgedCount: number | null;
+  /** Combo count from the authored chart's independent playback conversion. */
+  authoredJudgedCount?: number;
   canonicalWarnings?: readonly string[];
   sourceId: string;
 }
@@ -76,6 +83,7 @@ export interface DifficultyQuality {
   warnings: string[];
   canonicalJudgedCount: number;
   masterJudgedCount: number | null;
+  authoredJudgedCount?: number;
   operationCount: number;
   downCount: number;
   flickCount: number;
@@ -256,6 +264,7 @@ export function chartDifficultyFeatures(input: ChartDifficultyInput): ChartDiffi
     warnings: [],
     canonicalJudgedCount: notes.filter((note) => note.judged).length,
     masterJudgedCount: input.masterJudgedCount,
+    ...(input.authoredJudgedCount === undefined ? {} : { authoredJudgedCount: input.authoredJudgedCount }),
     operationCount: 0,
     tailCheckCount: 0,
     strategyContactStarts: 0,
@@ -274,11 +283,12 @@ export function chartDifficultyFeatures(input: ChartDifficultyInput): ChartDiffi
       quality,
     };
   };
-  if (input.masterJudgedCount === null) warnings.add("master-count-unavailable");
-  if (input.masterJudgedCount !== null && quality.canonicalJudgedCount !== input.masterJudgedCount)
+  const countReference = input.masterJudgedCount ?? input.authoredJudgedCount ?? null;
+  if (countReference === null) warnings.add("master-count-unavailable");
+  if (countReference !== null && quality.canonicalJudgedCount !== countReference)
     // A note or two apart is a conversion detail, not a different chart.
     warnings.add(
-      Math.abs(quality.canonicalJudgedCount - input.masterJudgedCount) <= 2
+      Math.abs(quality.canonicalJudgedCount - countReference) <= 2
         ? "full-combo-count-near"
         : "canonical-full-combo-mismatch",
     );

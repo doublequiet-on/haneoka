@@ -52,6 +52,8 @@ import { negotiateRequestLocale } from "../src/i18n/negotiation";
 import { eventArtworkIndex } from "../src/lib/event-artwork-index";
 import { handleCommunityRequest } from "./community";
 import { handleCommunityPlaylistRequest } from "./community-playlists";
+import { handleCommunityChartRequest, communitySonolusProviders, communitySonolusRows, cleanupCommunityCharts } from "./community-charts";
+import type { ChartMediaRef } from "../src/lib/chart-creation/community-types";
 import { handleCommunityForumsRequest } from "./community-forums";
 import { handleCommunityEntityRequest } from "./community-entities";
 import { createCommunityEntityResolver } from "./community-entity-catalog";
@@ -2972,6 +2974,35 @@ async function handleArtifact(
 
 const BESTDORI_SONOLUS_DATA_ID = /^bestdori:(\d+):(easy|normal|hard|expert|special)$/u;
 const BESTDORI_SONOLUS_LEVEL_PREFIX = "/sonolus/levels/haneoka-gbp-";
+
+async function resolveCommunityChartMedia(env: Env, ctx: ExecutionContext, ref: Extract<ChartMediaRef, { kind: "server" }>, kind: "audio" | "cover", origin: string): Promise<string | null> {
+  if (ref.provider === "bestdori") {
+    const url = new URL(`/api/v1/garupa/bestdori/${ref.server}/songs/${ref.songId}`, origin);
+    const response = await handleGarupaBestdoriApi(ctx, new Request(url), url, env.BESTDORI_UPSTREAM_BASE);
+    if (!response?.ok) return null;
+    const song = await response.json() as Record<string, unknown>;
+    const value = kind === "audio" ? song.musicUrl : song.jacketUrl;
+    if (typeof value !== "string") return null;
+    const media = new URL(value, origin);
+    return media.origin === origin && /^\/api\/v1\/garupa\/bestdori\/(jp|en|tw|cn|kr)\/media\/(sound|jacket)\//u.test(media.pathname) ? media.pathname : null;
+  }
+  if (!ref.releaseId || !isPublicResourceServer(ref.server)) return null;
+  const server = await activeResourceServer(env, ref.server);
+  const release = server ? await requestedRelease(env, server, ref.releaseId) : null;
+  if (!release) return null;
+  const manifest = await catalogStorageManifest(env, release);
+  const songs = manifest?.resources.songs;
+  if (!songs?.entities) return null;
+  const shard = await readCatalogShard(env, release, songs.entities, ref.songId);
+  const song = ownJsonValue(shard, ref.songId);
+  if (!isJsonObject(song)) return null;
+  const value = kind === "audio" ? song.musicUrl : song.jacketUrl;
+  if (typeof value !== "string") return null;
+  const media = new URL(value, origin);
+  if (media.origin !== origin || ![`/assets/${ref.server}/`, `/runtime/${ref.server}/`].some(prefix => media.pathname.startsWith(prefix))) return null;
+  media.searchParams.set("release", release.releaseId);
+  return media.pathname + media.search;
+}
 const BESTDORI_SONOLUS_PLAYLIST_PREFIX = "/sonolus/playlists/haneoka-gbp-";
 
 function compareSonolusReleases(left: Release, right: Release): number {
@@ -3227,6 +3258,8 @@ async function handleSonolus(
     assetUrl.pathname === "/sonolus/playlists" ||
     assetUrl.pathname.startsWith("/sonolus/playlists/");
   const isBestdoriCatalog = isBestdoriSonolusCatalogRequest(assetUrl);
+  const communityName = /^\/sonolus\/levels\/(haneoka-community-[0-9a-f-]{36})(?:\/data\/[a-f0-9]{40})?$/u.exec(assetUrl.pathname)?.[1];
+  const isCommunityCatalog = !!communityName || assetUrl.searchParams.get("source") === "community" || assetUrl.searchParams.get("type") === "community";
   const releases = await activeSonolusReleases(env);
   const canonicalRelease = releases[0];
   if (!canonicalRelease) {
@@ -3241,8 +3274,8 @@ async function handleSonolus(
     /^[a-f0-9]{64}$/u.test(payloadState.revision)
       ? payloadState.revision
       : "unversioned";
-  const ourNotesRevision = `identity-text-v5-advanced-search:${payloadRevision}:${ourNotesSonolusRevision(releases)}`;
-  const revision = isBestdoriCatalog
+  const ourNotesRevision = `identity-text-v6-community:${payloadRevision}:${ourNotesSonolusRevision(releases)}`;
+  let revision = isBestdoriCatalog
     ? `${ourNotesRevision}:${bestdoriSonolusRevision(Date.now(), env.BESTDORI_UPSTREAM_BASE)}`
     : ourNotesRevision;
   const cacheRequest = releaseCacheRequest(request, revision);
@@ -3261,18 +3294,21 @@ async function handleSonolus(
       const value = await readRawJson(releasePath);
       return value === null ? null : sonolusThumbnailDocument(value, thumbnail);
     };
-    const catalogProvider = isBestdoriCatalog
+    const communityRows = isCommunityCatalog ? await communitySonolusRows(env, communityName) : [];
+    if (isCommunityCatalog) revision += `:community:${[...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(communityRows.map(row => [row.id, row.revision, row.updatedAt])))))].map(v => v.toString(16).padStart(2, "0")).join("")}`;
+    const communityProviders = isCommunityCatalog ? communitySonolusProviders(env, communityRows, revision) : null;
+    const catalogProvider = communityProviders?.catalogProvider ?? (isBestdoriCatalog
       ? bestdoriSonolusCatalogProvider(env.BESTDORI_UPSTREAM_BASE, revision)
-      : ourNotesSonolusCatalogProvider(env, releases, revision);
-    const dataProvider = isBestdoriCatalog
+      : ourNotesSonolusCatalogProvider(env, releases, revision));
+    const dataProvider = communityProviders?.dataProvider ?? (isBestdoriCatalog
       ? bestdoriSonolusDataProvider(env.BESTDORI_UPSTREAM_BASE)
-      : ourNotesSonolusDataProvider(env, releases);
+      : ourNotesSonolusDataProvider(env, releases));
     const serverBanner =
       assetUrl.pathname === "/sonolus/info" ? sonolusServerBanner(await readJson("runtime/sonolus/info")) : undefined;
     const projected = await sonolusLevelService.handle({
       catalogProvider,
       dataProvider,
-      ...(isBestdoriCatalog
+      ...(isCommunityCatalog ? { levelInfoTitle: encodeSonolusLocalizedText({ en: "Community Charts", ja: "コミュニティ譜面", ko: "커뮤니티 채보", "zh-CN": "社区谱面", "zh-TW": "社群譜面" }, "en"), quickSearchValues: "source=community" } : isBestdoriCatalog
         ? {
             levelInfoTitle: "GBP Charts",
             playlistInfoTitle: "GBP Playlists",
@@ -3298,6 +3334,9 @@ async function handleSonolus(
       ...(serverBanner ? { serverBanner } : {}),
     });
     if (projected) {
+      if (isCommunityCatalog) projected.cacheControl = "no-store";
+      if (assetUrl.pathname === "/sonolus/info" && projected.kind === "document" && Array.isArray(projected.body.buttons))
+        projected.body.buttons.splice(2, 0, { type: "level", title: encodeSonolusLocalizedText({ en: "Community Charts", ja: "コミュニティ譜面", ko: "커뮤니티 채보", "zh-CN": "社区谱面", "zh-TW": "社群譜面" }, "en"), infoType: "community" });
       const produce = async (): Promise<Response> => {
         const headers = new Headers({
           ...(projected.kind === "document" ? SONOLUS_JSON_HEADERS : SONOLUS_REPOSITORY_HEADERS),
@@ -3681,7 +3720,19 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   const restricted = restrictedResourceRequest(request);
   if (restricted && !(await testContentAllowed(request, env)))
     return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
-  const response = await handleScopedRequest(request, env, ctx);
+  let response = await handleScopedRequest(request, env, ctx);
+  const chartDocument = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/([0-9a-f-]{36})(\/chart)?\/?$/u.exec(new URL(request.url).pathname);
+  if (chartDocument && response.status === 200 && response.headers.get("Content-Type")?.includes("text/html")) {
+    const canonical = `https://${CANONICAL_HOST}/${chartDocument[1]}/${chartDocument[2]}/charts/${chartDocument[3]}/${chartDocument[4] ? "chart/" : ""}`;
+    response = new HTMLRewriter()
+      .on('link[rel="canonical"]', { element(element) { element.setAttribute("href", canonical); } })
+      .on('meta[property="og:url"]', { element(element) { element.setAttribute("content", canonical); } })
+      .on('link[rel="alternate"][hreflang]', { element(element) {
+        const locale = element.getAttribute("hreflang");
+        if (locale && SERVER_FIRST_LOCALES.has(locale)) element.setAttribute("href", `https://${CANONICAL_HOST}/${chartDocument[1]}/${locale}/charts/${chartDocument[3]}/${chartDocument[4] ? "chart/" : ""}`);
+      } })
+      .transform(response);
+  }
   return restricted ? privateResourceResponse(response) : response;
 }
 
@@ -3821,6 +3872,11 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
     if (appeal) return appeal;
     const upload = await handleUploadRequest(request, env);
     if (upload) return upload;
+    const communityCharts = await handleCommunityChartRequest(request, env, async (ref, kind) => {
+      const source = await resolveCommunityChartMedia(env, ctx, ref, kind, url.origin);
+      return source ? handleScopedRequest(new Request(new URL(source, url.origin)), env, ctx) : null;
+    });
+    if (communityCharts) return communityCharts;
     const communityPlaylists = await handleCommunityPlaylistRequest(request, env);
     if (communityPlaylists) return communityPlaylists;
     const communityActivity = await handleCommunityActivityRequest(request, env);
@@ -4041,7 +4097,7 @@ const worker: ExportedHandler<Env> = {
             : controller.cron === MODERATION_RECONCILIATION_CRON
               ? ["moderation_reconciliation", () => reconcileModerationState(env)]
               : controller.cron === COMMUNITY_UPLOAD_CLEANUP_CRON
-                ? ["community_upload_cleanup", () => cleanupCommunityUploads(env)]
+                ? ["community_upload_cleanup", async () => { await cleanupCommunityCharts(env); await cleanupCommunityUploads(env); }]
                 : controller.cron === DATABASE_CLEANUP_CRON
                   ? ["database_cleanup", () => cleanupDatabase(env)]
                   : null;

@@ -97,6 +97,7 @@ import {
   setAppBarSearch,
 } from "../lib/app-bar";
 import { appBarTakeover } from "../lib/app-bar-takeover";
+import { songDetailActions, chartPageActions } from "./ui/song-actions";
 import { RequestScope } from "../lib/request-scope";
 import { LitElement, html, nothing } from "lit";
 import { clientText } from "../i18n/client";
@@ -5708,12 +5709,7 @@ export class CatalogScreen extends LitElement {
     };
     const requested = { ...track(item), url };
     const { AudioDock } = await import("./runtime/audio-dock");
-    let dock = document.querySelector("audio-dock") as InstanceType<typeof AudioDock> | null;
-    if (!dock) {
-      dock = new AudioDock();
-      dock.setAttribute("data-astro-transition-persist", "haneoka-audio");
-      document.body.append(dock);
-    }
+    const dock = AudioDock.ensure();
     if (bulk) {
       if (this.payload) await this.ensureCollection();
       await dock.playTrack(
@@ -6133,85 +6129,26 @@ export class CatalogScreen extends LitElement {
   private renderDetailActions(item: Item) {
     if (this.profile.presentation !== "song") return nothing;
     const id = this.itemId(item);
-    const chart = this.chartRow(item);
-    const sonolus = this.sonolusUrl(item);
-    return html`
-      <span class="detail-header-actions">
-        ${
-          !this.isProvider()
-            ? html`
-                <a
-                  class="icon-button"
-                  href=${this.rankingPageHref(item)}
-                  aria-label=${this.label("catalog.rankings.songs.title", "Song ranking")}
-                >
-                  <svg class="material-icon" width="24" height="24"><use href="/icons.svg#bar_chart"></use></svg>
-                </a>
-              `
-            : nothing
-        }
-        ${
-          item.musicUrl
-            ? html`
-                <button
-                  class="icon-button"
-                  @click=${() => this.toggleSong(id, String(item.musicUrl))}
-                  aria-label=${this.label("play", "Play")}
-                >
-                  <svg class="material-icon" width="21" height="21">
-                    <use href="/icons.svg#play_arrow"></use>
-                  </svg>
-                </button>
-              `
-            : nothing
-        }${
-          chart.file
-            ? html`
-                <button class="icon-button" @click=${this.openChart} aria-label=${this.label("chart", "Chart")}>
-                  <svg class="material-icon" width="21" height="21"><use href="/icons.svg#sports_esports"></use></svg>
-                </button>
-              `
-            : nothing
-        }${
-          sonolus
-            ? html`
-                <a class="icon-button" href=${sonolus} target="_blank" rel="noopener noreferrer" aria-label="Sonolus">
-                  <img class="sonolus-icon" src="/images/sonolus-icon.png" alt="" />
-                </a>
-              `
-            : nothing
-        }
-      </span>
-    `;
+    return songDetailActions({
+      locale: this.settings.locale,
+      leading: !this.isProvider() ? html`
+        <a class="icon-button" href=${this.rankingPageHref(item)} aria-label=${this.label("catalog.rankings.songs.title", "Song ranking")}>
+          <svg class="material-icon" width="24" height="24"><use href="/icons.svg#bar_chart"></use></svg>
+        </a>` : nothing,
+      onPlay: item.musicUrl ? () => void this.toggleSong(id, String(item.musicUrl)) : undefined,
+      onChart: this.chartRow(item).file ? () => void this.openChart() : undefined,
+      sonolus: this.sonolusUrl(item),
+    });
   }
 
   private renderChartPageActions(item: Item) {
-    const chart = this.chartRow(item);
-    if (!chart.file) return nothing;
-    return html`
-      <span class="chart-page-actions">
-        <button
-          class="icon-button"
-          @click=${() => void this.downloadChartImage(item)}
-          aria-label=${this.label("downloadChart", "Download chart image")}
-          title=${this.label("downloadChart", "Download chart image")}
-        >
-          <svg class="material-icon" width="20" height="20"><use href="/icons.svg#download"></use></svg>
-        </button>
-        <span class="chart-page-mode">
-          ${segmented({
-            label: this.label("view", "View"),
-            value: this.chartMode,
-            iconOnly: true,
-            options: [
-              { value: "simple" as const, label: this.label("simple", "Simple"), icon: "view_week" },
-              { value: "watch" as const, label: this.label("watch", "Watch"), icon: "play_circle" },
-            ],
-            onSelect: (mode) => (this.chartMode = mode),
-          })}
-        </span>
-      </span>
-    `;
+    if (!this.chartRow(item).file) return nothing;
+    return chartPageActions({
+      locale: this.settings.locale,
+      mode: this.chartMode,
+      onMode: mode => { this.chartMode = mode; },
+      onDownload: () => void this.downloadChartImage(item),
+    });
   }
   /** Sekai scores are SUS files; the player reads them through the Sekai plugin. */
   private renderChartPlayer(item: Item, chart: Item, label: string) {

@@ -24,7 +24,7 @@ export interface ChartExportStat {
   label: string;
   value: string;
   /** Optional semantic id used to fill chart-derived values later. */
-  id?: "time" | "bpm" | "nps";
+  id?: "notes" | "time" | "bpm" | "nps";
 }
 
 export interface ChartOverviewExportMeta {
@@ -237,7 +237,7 @@ export async function composeChartOverviewImage(
   const statRowGap = Math.round(10 * scale);
   const gapHeaderStats = Math.round(18 * scale);
   const gapStatsChart = Math.round(20 * scale);
-  const width = chartWidth + padding * 2;
+  const width = Math.max(chartWidth + padding * 2, Math.round(1000 * scale));
 
   const output = document.createElement("canvas");
   const context = output.getContext("2d");

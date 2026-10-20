@@ -1,4 +1,4 @@
-import { html } from "lit";
+import { html, nothing } from "lit";
 import { uiText } from "../shared/catalog";
 import { rovingKeydown } from "./controls";
 import { difficultyEstimateCaption } from "../shared/difficulty-caption";
@@ -11,6 +11,23 @@ const EXTRA = ["special", "append"];
 export function difficultyKey(row: Row, index = 0): string {
   const value = String(row.difficultyName || row.difficulty || "").toLowerCase();
   return NAMES.includes(value) || EXTRA.includes(value) ? value : NAMES[Number(value) || index] || "master";
+}
+/** The non-interactive badge used by per-chart tables and community charts. */
+export function difficultyBadge(row: Row, caption: unknown = difficultyEstimateCaption(row)) {
+  const key = difficultyKey(row);
+  const name = String(row.difficultyName || row.difficulty || key);
+  return html`
+    <span
+      class="difficulty-picker"
+      style=${`--chart-color:var(--md-extended-color-difficulty-${EXTRA.includes(key) ? "master" : key})`}
+    >
+      <span class="difficulty-picker__value">
+        <small class="truncate">${name.toUpperCase()}</small>
+        <b class="truncate">${row.displayLevel ?? row.playLevel ?? row.level ?? "—"}</b>
+        ${caption ?? nothing}
+      </span>
+    </span>
+  `;
 }
 export function difficultyPicker(options: {
   rows: Row[];

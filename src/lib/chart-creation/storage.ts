@@ -1,8 +1,14 @@
+// L3 — GEB
+// Input: 本地谱面工程、音频、发布配置及备份 ZIP。
+// Output: CAS 本地历史与带音频／封面的可移植工程备份。
+// Pos: [Map](../L2-2.md)；谱面创作的 IndexedDB 与文件持久化边界。
+// Effects/Dependencies: IndexedDB、ZIP、哈希；导出云端封面时按当前账户读取素材，导入移除云端写入身份。
 import { zip, unzip } from "fflate";
 import { assertValidProject } from "../../../packages/chart-editor/src/validation";
 import { structuredCloneValue, type Project } from "../../../packages/chart-editor/src/model";
 import { sha256Blob, AUDIO_LIMITS, type CreationAudio } from "./audio";
 import { readAuthorCollections } from "../../../packages/chart-editor/src/creation/collections";
+import { readChartCloudDraft, saveChartCloudDraft, portableChartPublication } from "./community";
 
 export interface AudioRef {
   sha256: string;
@@ -199,6 +205,15 @@ export class CreationStore {
       refs.map((ref) => request(tx.objectStore("audio").get(ref.sha256)) as Promise<File>),
     );
     const encoder = new TextEncoder();
+    const publication = await readChartCloudDraft(id);
+    let cover = publication?.coverFile;
+    if (publication?.cover?.kind === "upload" && !cover && publication.id && publication.version) {
+      const response = await fetch(`/api/v1/community/charts/${publication.id}/media/${publication.revision ?? publication.version}/cover`, { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error("archive_invalid");
+      const blob = await response.blob();
+      cover = new File([blob], "cover", { type: blob.type });
+    }
+    if (cover && cover.size > 10 * 1024 * 1024) throw new Error("archive_size");
     const manifest = encoder.encode(
       JSON.stringify(
         {
@@ -206,6 +221,7 @@ export class CreationStore {
           version: 1,
           document: { ...document, title: value.chart.meta.title, head: value.revision, updatedAt: value.savedAt },
           value,
+          ...(publication ? { publication: portableChartPublication(publication), cover: cover ? { name: cover.name, type: cover.type } : null } : {}),
         },
         null,
         2,
@@ -213,6 +229,7 @@ export class CreationStore {
     );
     if (manifest.length > 4 * 1024 * 1024) throw new Error("archive_size");
     const entries: Record<string, Uint8Array> = { "project.yaml": manifest };
+    if (cover) entries["cover/image"] = new Uint8Array(await cover.arrayBuffer());
     for (let i = 0; i < refs.length; i++)
       entries[`audio/${refs[i].sha256}`] = new Uint8Array(await files[i].arrayBuffer());
     return new Promise((resolve, reject) =>
@@ -222,7 +239,7 @@ export class CreationStore {
     );
   }
   async import(file: File): Promise<string> {
-    if (file.size > AUDIO_LIMITS.bytes * 2 + 4 * 1024 * 1024) throw new Error("archive_size");
+    if (file.size > AUDIO_LIMITS.bytes * 2 + 14 * 1024 * 1024) throw new Error("archive_size");
     let total = 0,
       invalid = false,
       entryCount = 0;
@@ -232,13 +249,13 @@ export class CreationStore {
         bytes,
         {
           filter(entry) {
-            if (++entryCount > 3) throw new Error("archive_invalid");
+            if (++entryCount > 4) throw new Error("archive_invalid");
             total += entry.originalSize;
             const allowed =
               entry.name === "project.yaml"
                 ? entry.originalSize <= 4 * 1024 * 1024
-                : /^audio\/[0-9a-f]{64}$/.test(entry.name) && entry.originalSize <= AUDIO_LIMITS.bytes;
-            if (!allowed || total > AUDIO_LIMITS.bytes * 2 + 4 * 1024 * 1024) invalid = true;
+                : entry.name === "cover/image" ? entry.originalSize <= 10 * 1024 * 1024 : /^audio\/[0-9a-f]{64}$/.test(entry.name) && entry.originalSize <= AUDIO_LIMITS.bytes;
+            if (!allowed || total > AUDIO_LIMITS.bytes * 2 + 14 * 1024 * 1024) invalid = true;
             return allowed && !invalid;
           },
         },
@@ -300,6 +317,14 @@ export class CreationStore {
     });
     tx.objectStore("revisions").add({ projectId: id, revision: 1, savedAt, chart, audio: refs[1] });
     await done;
+    if (envelope.publication) {
+      const image = entries["cover/image"];
+      const type = envelope.cover?.type;
+      if (image && !["image/png", "image/jpeg", "image/webp"].includes(type)) throw new Error("archive_invalid");
+      const extension = type === "image/jpeg" ? "jpg" : type === "image/webp" ? "webp" : "png";
+      const cover = image ? new File([image as Uint8Array<ArrayBuffer>], `cover.${extension}`, { type }) : undefined;
+      await saveChartCloudDraft(id, portableChartPublication(envelope.publication, cover));
+    }
     return id;
   }
   async close() {

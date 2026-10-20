@@ -1947,6 +1947,7 @@ const deleteAttachment = async (request: Request, env: Env, id: string): Promise
          AND NOT EXISTS (
            SELECT 1 FROM community_profile_avatar AS avatar WHERE avatar.attachment_id = community_attachment.id
          )
+         AND NOT EXISTS (SELECT 1 FROM community_chart_revision AS chart_cover WHERE chart_cover.cover_attachment_id = community_attachment.id)
          AND NOT EXISTS (
            SELECT 1
            FROM community_moderation_case AS moderation_case
@@ -2130,6 +2131,7 @@ export const cleanupCommunityUploads = async (env: Env): Promise<void> => {
            SELECT 1 FROM community_profile_avatar AS avatar WHERE avatar.attachment_id = attachment.id
          )
          AND NOT EXISTS (SELECT 1 FROM community_playlist AS cover_playlist WHERE cover_playlist.cover_attachment_id = attachment.id)
+         AND NOT EXISTS (SELECT 1 FROM community_chart_revision AS chart_cover WHERE chart_cover.cover_attachment_id = attachment.id)
          AND NOT EXISTS (
            SELECT 1
            FROM community_moderation_case AS moderation_case

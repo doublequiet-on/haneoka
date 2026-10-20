@@ -1,7 +1,13 @@
+// L3 — GEB
+// Input: 正式 SS／SUS 或社区 playback 投影、音频及 release 身份。
+// Output: 共用 2D 概览、3D 观赏、播放控件与谱面图片下载。
+// Pos: [Map](L2-2.md)；歌曲与社区谱面运行宿主。
+// Effects/Dependencies: Cassiopeia、素材 HTTP、WebGL 和音频；切源与离开取消装载并释放运行资源。
 import { PreparedResource } from "@haneoka/cassiopeia-host-web";
 import { LitElement, html, nothing } from "lit";
 import { NoColorSpace, TextureLoader, type Texture } from "three";
 import { fetchJson, uiText } from "../shared/catalog";
+import type { CommunityChartPlayback } from "../../lib/chart-creation/community-types";
 import { loadingState } from "../ui/state";
 import { icon } from "../ui/icon";
 import { type ChartDocument, type WatchVisualReplayContract, type SessionOptions } from "@haneoka/cassiopeia";
@@ -486,6 +492,9 @@ export class ChartSimulator extends LitElement {
       return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.pinResourceValue(item)])) as T;
     return value;
   }
+  private mediaUrl(path: string): string {
+    return this.chartFormat === "community" ? path : this.pinResourceUrl(path);
+  }
 
   private descriptorUrl(source: string) {
     return this.pinResourceUrl(
@@ -752,6 +761,23 @@ export class ChartSimulator extends LitElement {
     chart.durationMs += this.offsetMs;
     return chart;
   }
+  private communityChart(source: string): ChartDocument {
+    const { ss, offsetMs, timeScaleChanges } = JSON.parse(source) as CommunityChartPlayback;
+    const chart = this.runtime().require(OUR_NOTES_RULES).parse(ss);
+    const shift = <T extends { timeMs: number }>(rows: readonly T[]) => rows.forEach(row => { row.timeMs += offsetMs; });
+    shift(chart.notes);
+    shift(chart.bpmChanges);
+    shift(chart.signatureChanges);
+    shift(chart.timeline.skills);
+    shift(chart.timeline.callChanges);
+    for (const section of chart.timeline.fever) {
+      section.startTimeMs += offsetMs;
+      section.endTimeMs += offsetMs;
+    }
+    chart.timeScaleChanges = timeScaleChanges.map(event => ({ ...event, timeMs: event.timeMs + offsetMs }));
+    chart.durationMs = Math.max(0, chart.durationMs + offsetMs);
+    return chart;
+  }
   private async load() {
     if (!this.source) return;
     this.dispose();
@@ -780,7 +806,9 @@ export class ChartSimulator extends LitElement {
       this.chart =
         this.chartFormat === "sus"
           ? await this.sekaiChart(source)
-          : this.runtime().require(OUR_NOTES_RULES).parse(source);
+          : this.chartFormat === "community"
+            ? this.communityChart(source)
+            : this.runtime().require(OUR_NOTES_RULES).parse(source);
       if (this.liveMode === "gekisou" && this.gekisouMissionTypes?.length && !assets.particles.laneEffects.gekisou)
         throw new Error("Original Gekisou lane source unavailable");
       this.gekisouPlan =
@@ -897,7 +925,7 @@ export class ChartSimulator extends LitElement {
         const jacketUrl = this.introContent?.jacketUrl;
         const [stage, jacket, baseWhite] = await Promise.all([
           loadBackgroundPixels(stageUrl),
-          jacketUrl ? loadBackgroundPixels(this.pinResourceUrl(jacketUrl)) : undefined,
+          jacketUrl ? loadBackgroundPixels(this.mediaUrl(jacketUrl)) : undefined,
           loadBackgroundPixels(
             this.pinResourceUrl(OUR_NOTES_LIGHTWEIGHT_BACKGROUND.baseWhitePath.replace("{server}", this.server)),
           ),
@@ -1035,7 +1063,7 @@ export class ChartSimulator extends LitElement {
     signal.throwIfAborted();
     if (this.gekisouPlan) await this.prepareGekisouStage(signal);
     signal.throwIfAborted();
-    this.clock = this.runtime().require(WEB_HOST).createClock(this.pinResourceUrl(this.audioUrl), {
+    this.clock = this.runtime().require(WEB_HOST).createClock(this.mediaUrl(this.audioUrl), {
       volume: this.volume,
       playbackRate: this.playbackRate,
       loop: false,
@@ -1331,7 +1359,7 @@ export class ChartSimulator extends LitElement {
           artist: this.introContent?.artist ?? "",
           difficultyIconUrl: this.introContent?.difficultyIconUrl ?? this.introDifficultyIconUrl,
           highScore: this.introContent?.highScore ?? 0,
-          jacketUrl: this.introContent?.jacketUrl ? this.pinResourceUrl(this.introContent.jacketUrl) : undefined,
+          jacketUrl: this.introContent?.jacketUrl ? this.mediaUrl(this.introContent.jacketUrl) : undefined,
           ...(this.gekisouPlan && this.introContent?.gekisou
             ? {
                 gekisou: {
@@ -1700,6 +1728,7 @@ export class ChartSimulator extends LitElement {
     const localize = (value: number) => value.toLocaleString(this.locale || undefined);
     const stats = meta.stats.map((stat) => {
       if (stat.value !== "—" || !stat.id) return stat;
+      if (stat.id === "notes") return { ...stat, value: localize(chart.notes.filter(note => note.judged && note.visible).length) };
       // Older releases ship song-meta without the canonical metrics; the
       // loaded chart still carries duration, BPM and density.
       if (stat.id === "time") {

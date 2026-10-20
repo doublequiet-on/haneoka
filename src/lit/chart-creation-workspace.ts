@@ -46,6 +46,10 @@ import { trapFocus } from "../lib/overlay";
 import { setAppBarActions, clearAppBarActions } from "../lib/app-bar";
 import { accordion } from "./ui/accordion";
 import "./chart-creation-library";
+import "./chart-publication";
+import type { ChartPublication } from "./chart-publication";
+import { loadCommunityChart, readChartCloudDraft, saveChartCloudDraft } from "../lib/chart-creation/community";
+import { communityChartPath, type ChartMediaRef } from "../lib/chart-creation/community-types";
 import "./chart-creation-collections";
 import type { ChartCollectionScope } from "./chart-creation-collections";
 import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
@@ -62,6 +66,7 @@ import { loadOurNotesCreationCanvasSkin, ourNotesCreationCanvasNoteAppearance, c
 import type { ChartNote } from "@haneoka/cassiopeia";
 import type { RenderNoteKind } from "@haneoka/cassiopeia-plugin-our-notes";
 import { loadingState } from "./ui/state";
+import { modal } from "./ui/modal";
 
 import { assertAuthoredSpanOverlap, assertEditedChartSpans, authoredSpanOverlaps, authoredSpanViewport, authoredWidthBounds, constrainLaneValue, viewportXToAuthoredLane, authoredLaneToViewportX, nativeLaneToAuthoredLane } from "../../packages/chart-editor/src/creation/span";
 import { createAuthoredNote, resizeChartSelection } from "../../packages/chart-editor/src/creation/authoring";
@@ -266,6 +271,7 @@ export class ChartCreationWorkspace extends LitElement {
   private projectExpanded = true;
   private toolExpanded = true;
   private store = new CreationStore();
+  private autosaveTimer?: ReturnType<typeof setTimeout>;
   private audio?: CreationAudio;
   private preview?: EditAudioTransport;
   declare private stageMode: "edit" | "preview";
@@ -492,9 +498,16 @@ export class ChartCreationWorkspace extends LitElement {
         this.rebuildPreview(draft.seconds);
       }
       this.documents = await this.store.list();
+      const cloudId = new URL(location.href).searchParams.get("community");
+      if (cloudId && /^[0-9a-f-]{36}$/u.test(cloudId)) await this.openCommunity(cloudId, signal);
+      else if (!this.audio) {
+        const recent = localStorage.getItem("haneoka-chart-last-project");
+        if (recent && this.documents.some(document => document.id === recent)) await this.open(recent);
+      }
     });
   }
   disconnectedCallback() {
+    clearTimeout(this.autosaveTimer);
     document.removeEventListener("fullscreenchange", this.fullscreenChanged);
     this.panelMedia?.removeEventListener("change", this.mediaChanged);
     this.releasePanelFocus?.();
@@ -523,6 +536,13 @@ export class ChartCreationWorkspace extends LitElement {
   private statusShown = "";
   protected updated() {
     if (!this.isConnected) return;
+    if (this.dirty && this.audio && !this.busy && !this.conflict && !this.autosaveTimer) {
+      this.autosaveTimer = setTimeout(() => {
+        this.autosaveTimer = undefined;
+        if (this.isConnected && !this.busy && !this.gesture && !this.nativeGesture && !this.widthSession && !this.conflict)
+          void this.run(() => this.save(true));
+      }, 2000);
+    }
     if (this.status !== this.statusShown) {
       this.statusShown = this.status;
       if (this.status) snackbar(this.status);
@@ -607,7 +627,7 @@ export class ChartCreationWorkspace extends LitElement {
       }
     }
   }
-  private async save() {
+  private async save(silent = false) {
     if (!this.audio || !this.dirty) return;
     const document = await this.store.save(
       this.projectId,
@@ -621,7 +641,8 @@ export class ChartCreationWorkspace extends LitElement {
     this.head = document.head;
     this.activeRevision = document.head;
     this.dirty = false;
-    this.status = this.t("creation.saved");
+    if (!silent) this.status = this.t("creation.saved");
+    try { localStorage.setItem("haneoka-chart-last-project", this.projectId); } catch {}
     this.documents = await this.store.list();
     this.revisions = await this.store.versions(this.projectId);
   }
@@ -842,6 +863,11 @@ export class ChartCreationWorkspace extends LitElement {
         signal.throwIfAborted();
         if (!value.audio) throw new Error("creation_audio_required");
         const audio = await decodeCreationAudio(value.audio, signal);
+        const provider = "provider" in value ? "bestdori" : "our-notes";
+        const ref: ChartMediaRef = provider === "bestdori"
+          ? { kind: "server", provider, server: (value.identity as import("../lib/chart-creation/bestdori-source").BestdoriCreatorIdentity).requestedRegion, songId: String(value.metadata.musicId) }
+          : { kind: "server", provider, server: (value.identity as HaneokaReleaseIdentity).server, releaseId: (value.identity as HaneokaReleaseIdentity).releaseId, songId: String(value.metadata.musicId) };
+        value.project.extensions.communityMedia = { audio: ref, cover: ref, audioSha: audio.sha256 };
         signal.throwIfAborted();
         await this.disposeNative();
         signal.throwIfAborted();
@@ -1048,6 +1074,33 @@ export class ChartCreationWorkspace extends LitElement {
       this.rebuildPreview(0);
     });
   }
+  private async openCommunity(id: string, signal: AbortSignal) {
+    const requestedRevision = Number(new URL(location.href).searchParams.get("revision"));
+    const result = await loadCommunityChart(id, signal, true, Number.isSafeInteger(requestedRevision) && requestedRevision > 0 ? requestedRevision : undefined);
+    const response = await fetch(result.document.audioUrl, { signal, credentials: "same-origin" });
+    if (!response.ok) throw new Error("audio_missing");
+    const file = new File([await response.blob()], `${result.chart.title}.audio`, { type: response.headers.get("Content-Type") || "audio/wav" });
+    const audio = await decodeCreationAudio(file, signal);
+    await this.save(); signal.throwIfAborted(); await this.disposeNative(); signal.throwIfAborted();
+    this.preview?.dispose(); this.projectId = crypto.randomUUID(); this.head = 0; this.activeRevision = 0;
+    this.history.reset(result.document.project); this.original = structuredClone(result.document.project); this.source = undefined;
+    this.audio = audio; this.collectionScope = {}; this.revisions = []; this.setSelection([]); this.pending = undefined;
+    const publication = { audio: result.document.audio, cover: result.document.cover, summary: result.document.summary, visibility: result.document.visibility, remix: result.document.remix, audioSha: audio.sha256, ...(result.document.upstreamId ? { upstreamId: result.document.upstreamId } : {}) };
+    if (result.chart.canEdit) await saveChartCloudDraft(this.projectId, { ...publication, id, version: result.chart.version, revision: result.chart.revision, ownerId: result.chart.ownerId });
+    else {
+      let coverFile: File | undefined;
+      if (publication.cover?.kind !== "server") {
+        const coverResponse = await fetch(result.document.coverUrl, { signal });
+        if (!coverResponse.ok) throw new Error("audio_missing");
+        const cover = await coverResponse.blob();
+        const extension = cover.type.includes("jpeg") ? "jpg" : cover.type.includes("webp") ? "webp" : "png";
+        coverFile = new File([cover], `cover.${extension}`, { type: cover.type });
+      }
+      await saveChartCloudDraft(this.projectId, { ...publication, audio: publication.audio?.kind === "server" ? publication.audio : null, cover: publication.cover?.kind === "server" ? publication.cover : null, ...(coverFile ? { coverFile } : {}), upstreamId: id });
+    }
+    this.dirty = true; this.windowStart = 0; this.rebuildPreview(0); await this.save();
+    const url = new URL(location.href); url.searchParams.delete("community"); history.replaceState(history.state, "", url);
+  }
   private async open(id: string, revision?: number) {
     const signal = this.controller!.signal;
     await this.save(); signal.throwIfAborted();
@@ -1074,6 +1127,8 @@ export class ChartCreationWorkspace extends LitElement {
       const originalAudio = this.head ? await this.store.original(this.projectId) : undefined;
       signal.throwIfAborted();
       const document = await this.store.save(id, 0, snapshot, audio, original, source, originalAudio);
+      const publication = await readChartCloudDraft(this.projectId);
+      if (publication) await saveChartCloudDraft(id, { ...publication, id: undefined, version: undefined, revision: undefined, pendingSave: undefined });
       signal.throwIfAborted();
       this.projectId = id; this.head = document.head; this.activeRevision = document.head;
       this.history.reset(snapshot); this.setSelection([]);
@@ -2471,6 +2526,7 @@ export class ChartCreationWorkspace extends LitElement {
       </span>
       ${this.busy ? iconButton({ label: this.c("cancel"), icon: "close", onClick: () => this.cancelOperation() }) : nothing}
       ${iconButton({ label: this.t("creation.save"), shortcut: "Ctrl/⌘+S", className: "chart-studio__header-save", icon: "save", disabled: this.busy || !this.audio || !this.dirty, onClick: () => void this.run(() => this.save()) })}
+      ${iconButton({ label: clientText(this.locale, "community.charts.publish"), icon: "publish", disabled: this.busy || !this.audio, onClick: () => void this.querySelector<ChartPublication>("chart-publication")?.show() })}
       <fieldset class="chart-studio__mode-toggle" ?disabled=${this.busy || !this.audio}>
         ${segmented({
           label: `${this.t("edit")} / ${this.t("preview")}`,
@@ -2494,10 +2550,15 @@ export class ChartCreationWorkspace extends LitElement {
     return html`
       <md-outlined-text-field
         label=${this.t(key)}
-        .value=${live(String(value))}
+        step=${numeric ? "any" : nothing}
         type=${numeric ? "number" : "text"}
+        .value=${live(String(value))}
         ?disabled=${this.busy || !this.audio}
-        @change=${(e: Event) => changed((e.target as HTMLInputElement).value)}
+        @change=${(e: Event) => changed((e.currentTarget as HTMLInputElement).value)}
+        @focusout=${(e: FocusEvent) => {
+          const input = e.composedPath().find(node => node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement);
+          if (input) changed(input.value);
+        }}
       ></md-outlined-text-field>
     `;
   }
@@ -2511,6 +2572,7 @@ export class ChartCreationWorkspace extends LitElement {
       });
     const filesPanel = html`
       <div class="chart-creation__actions">
+        <a class="button button--tonal" href=${communityChartPath(readReleaseServer(), this.locale)}>${clientText(this.locale, "community.charts.title")}</a>
         <button class="button" ?disabled=${this.busy} @click=${() => void this.newProject()}>
           ${this.t("newProject")}
         </button>
@@ -2557,11 +2619,10 @@ export class ChartCreationWorkspace extends LitElement {
         <button class="button button--tonal" ?disabled=${this.busy || !this.audio} @click=${() => void this.saveCopy()}>${this.t("creation.save_copy")}</button>
         <button class="button button--text" ?disabled=${this.busy || !this.head} @click=${() => void this.restoreOriginal()}>${this.t("creation.restore_original")}</button>
         <button class="button button--text" ?disabled=${this.busy || !this.head} @click=${() => { this.deletingProject = !this.deletingProject; }}>${this.t("creation.delete_project")}</button>
-        ${this.deletingProject ? html`<section class="chart-creation__form" aria-label=${this.t("creation.delete_project")}>
-          <p>${this.t("creation.delete_project_confirm")}</p>
-          <button class="button button--text" ?disabled=${this.busy} @click=${() => void this.deleteProject()}>${this.t("creation.delete_project")}</button>
-          <button class="button button--text" @click=${() => { this.deletingProject = false; }}>${this.c("cancel")}</button>
-        </section>` : nothing}
+        ${this.deletingProject ? html`<dialog class="dialog" aria-label=${this.t("creation.delete_project")} ${modal(() => { if (!this.busy) this.deletingProject = false; })}>
+          <header class="dialog__header"><h2>${this.t("creation.delete_project")}</h2></header><div class="dialog__body"><p>${this.t("creation.delete_project_confirm")}</p></div>
+          <div class="dialog__actions"><button class="button button--text" ?disabled=${this.busy} @click=${() => { this.deletingProject = false; }}>${this.c("cancel")}</button><button class="button button--filled" ?disabled=${this.busy} @click=${() => void this.deleteProject()}>${this.t("creation.delete_project")}</button></div>
+        </dialog>` : nothing}
       </div>
     `;
     const audioPanel = html`
@@ -3585,6 +3646,16 @@ export class ChartCreationWorkspace extends LitElement {
           })}
           ${iconButton({ label: this.c("fullscreen"), icon: this.fullscreen ? "fullscreen_exit" : "fullscreen", onClick: () => void this.toggleFullscreen() })}
         </footer>
+        <chart-publication .locale=${this.locale} .projectId=${this.projectId} .project=${chart} .audio=${this.audio}
+          .onSave=${() => this.run(() => this.save())}
+          .onAudio=${async (file: File, external: AbortSignal) => {
+            let audio: CreationAudio | undefined;
+            await this.run(async signal => {
+              audio = await decodeCreationAudio(file, AbortSignal.any([signal, external]));
+              await this.save(); signal.throwIfAborted(); this.preview?.dispose(); this.audio = audio; this.dirty = true; this.rebuildPreview(0);
+            });
+            if (!audio) throw new Error("audio_decode"); return audio;
+          }}></chart-publication>
       </div>
     `;
   }

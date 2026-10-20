@@ -17,6 +17,7 @@ export function releaseServerFromPath(pathname: string, sources: readonly string
 }
 
 export const RESOURCE_KINDS = [
+  "charts",
   "characters",
   "songs",
   "member-cards",
@@ -284,7 +285,9 @@ export function legacyEntityRedirectTarget(pathname: string, search = ""): strin
 /** Map logical catalogue destinations to the selected server's collections. */
 export function resourceCollectionHref(route: string, server: ReleaseServer, locale: Locale): string | undefined {
   const source = new URL(route, "https://route.invalid");
+  if (source.pathname === "/community/charts") return `/${server}/${locale}/charts/${source.search}`;
   const parts = source.pathname.replace(/^\/+|\/+$/gu, "").split("/");
+  if (parts.length === 1 && parts[0] === "charts") return `/${server}/${locale}/charts/${source.search}`;
   if (parts.length === 1 && parts[0] === "calendar")
     return `/${server}/${locale}/calendar/${source.search}`;
   if (parts[0] !== "catalog") return undefined;

@@ -161,6 +161,8 @@ export function isCoreFallbackShell(pathname: string): boolean {
   return false;
 }
 export function staticDocumentLookupPath(pathname: string): string | undefined {
+  const chart = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/[0-9a-f-]{36}(?:\/chart)?\/?$/u.exec(pathname);
+  if (chart) return coreStaticDocumentPath(`/${chart[1]}/${chart[2]}/charts/_/`);
   if (/^\/data\/chart-rates\/(?:jp|intl)\.json$/u.test(pathname)) return pathname;
   if (/^\/(?:provider-static|asset-static|playlist-static)\//u.test(pathname)) {
     const parts = pathname.split("/").filter(Boolean);

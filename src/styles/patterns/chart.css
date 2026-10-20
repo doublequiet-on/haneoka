@@ -1,0 +1,205 @@
+@layer patterns {
+  /* ---------- chart (ported) ---------- */
+  /* Canonical chart child pages use the shell's content pane directly. */
+  .chart-page {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--md-sys-color-surface);
+  }
+  :is(catalog-screen, community-charts):has(.chart-page) {
+    display: block;
+    height: 100%;
+    padding: 0;
+    max-width: none;
+  }
+  .chart-page > chart-simulator {
+    min-height: 0;
+  }
+  .chart-page--empty {
+    place-items: center;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .chart-page--empty p {
+    margin: 0;
+  }
+  .chart-page-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .chart-page-mode {
+    display: inline-flex;
+  }
+  /* Geometry comes from .pane-layer (components/overlay.css); the chart layer
+   sits above the detail pane it was opened from. */
+  .chart-detail-layer {
+    z-index: var(--md-sys-z-index-overlay-dialog);
+  }
+  chart-simulator,
+  .chart-runtime {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  .chart-runtime {
+    position: relative;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    overflow: hidden;
+    background: #16171b;
+  }
+  .chart-runtime__stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .chart-simple-overview {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto hidden;
+    background: #0f131a;
+    scrollbar-color: #68707d #1a2029;
+  }
+  .chart-simple-overview canvas {
+    display: block;
+    max-width: none;
+  }
+  .chart-runtime__canvas,
+  .chart-runtime__hud {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .chart-runtime__canvas {
+    z-index: 1;
+  }
+  .chart-runtime__hud {
+    z-index: 2;
+  }
+  .chart-runtime__pause-hit {
+    --pause-target: max(48px, calc(80px * var(--chart-hud-scale, 1)));
+    position: absolute;
+    z-index: 3;
+    top: max(0px, calc(59px * var(--chart-hud-scale, 1) - var(--pause-target) / 2));
+    right: max(0px, calc(60px * var(--chart-hud-scale, 1) - var(--pause-target) / 2));
+    width: var(--pause-target);
+    height: var(--pause-target);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .chart-runtime__pause-hit:focus-visible {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: -2px;
+  }
+  .chart-runtime__settings {
+    position: absolute;
+    z-index: 20;
+    right: 12px;
+    bottom: 76px;
+    display: grid;
+    width: min(440px, calc(100% - 24px));
+    max-height: calc(100% - 92px);
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    background: var(--md-sys-color-surface-container-high);
+    box-shadow: var(--md-sys-elevation-level3);
+  }
+  .chart-runtime__settings > header,
+  .chart-runtime__settings > header > span {
+    display: flex;
+    align-items: center;
+  }
+  .chart-runtime__settings > header {
+    min-height: 52px;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 6px 4px 16px;
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .chart-runtime__settings > header > span {
+    gap: 2px;
+  }
+  .chart-runtime__settings > header .icon-button {
+    width: 40px;
+    height: 40px;
+  }
+  .chart-runtime__settings-content {
+    display: grid;
+    gap: 16px;
+    padding: 12px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .chart-runtime__settings-content > section {
+    display: grid;
+    gap: 10px;
+  }
+  .chart-runtime__settings-content h4 {
+    margin: 0;
+    color: var(--md-sys-color-primary);
+    font-size: var(--md-sys-typescale-label-large-size);
+  }
+  .chart-runtime__setting {
+    min-width: 0;
+  }
+  .chart-runtime__setting--slider {
+    display: grid;
+    gap: 2px;
+  }
+  .chart-runtime__setting--slider > span,
+  .chart-runtime__setting--select,
+  .chart-runtime__setting--toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .chart-runtime__setting output {
+    color: var(--md-sys-color-on-surface-variant);
+    font-variant-numeric: tabular-nums;
+  }
+  .chart-runtime__setting md-slider {
+    width: 100%;
+  }
+  .chart-runtime__setting select {
+    min-width: 136px;
+    max-width: 52%;
+    height: 40px;
+    padding: 0 10px;
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    background: var(--md-sys-color-surface-container-lowest);
+  }
+  .chart-runtime__setting--toggle input {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--md-sys-color-primary);
+  }
+  @media (max-width: 420px) {
+    .chart-runtime__settings {
+      right: 6px;
+      bottom: 74px;
+      width: calc(100% - 12px);
+    }
+  }
+}
