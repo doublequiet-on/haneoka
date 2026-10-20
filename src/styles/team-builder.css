@@ -506,6 +506,7 @@
     color: var(--md-sys-color-primary);
   }
   .tb-hit {
+    container-type: inline-size;
     gap: var(--md-sys-spacing-3);
     padding: var(--md-sys-spacing-4);
   }
@@ -556,6 +557,10 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+  .tb-hit__actions .icon-button {
+    width: var(--md-sys-spacing-8);
+    height: var(--md-sys-spacing-8);
   }
   .tb-hit__chips {
     gap: var(--md-sys-spacing-2);
@@ -687,9 +692,17 @@
     .tb-hit {
       padding: var(--md-sys-spacing-3);
     }
-    .tb-hit__actions .icon-button {
-      width: 36px;
-      height: 36px;
+  }
+  @container (max-width: 36rem) {
+    .tb-hit__header {
+      display: grid;
+      grid-template-columns: 40px minmax(0, 1fr);
+    }
+    .tb-hit__actions {
+      grid-column: 1 / -1;
+    }
+    .tb-hit__label {
+      display: block;
     }
   }
   .tb-dist {

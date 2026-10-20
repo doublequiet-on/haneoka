@@ -4,7 +4,7 @@ import { clock, remaining, type RewardCutoff } from "./engine/execution";
 import type { EngineSnapshot } from "./engine/protocol";
 import { cpExchange } from "./engine/pt-value";
 
-export const PT_VERSION = "reward-mean-score-v4";
+export const PT_VERSION = "reward-other-score-cb-v5";
 export type PtMeasure = "points" | "items";
 export type PtScope = "top-one" | "top-five" | "all";
 export interface PtCycleInput {
@@ -113,6 +113,7 @@ export async function createPtJob(
 const chartKey = (song: SongRef) => `${song.songId}:${song.difficulty}`;
 const compareHit = (a: EngineHit, b: EngineHit) =>
   b.key - a.key ||
+  (b.event?.otherMean ?? 0) - (a.event?.otherMean ?? 0) ||
   (b.score?.mean ?? 0) - (a.score?.mean ?? 0) ||
   a.song!.songId - b.song!.songId ||
   a.song!.difficulty - b.song!.difficulty ||

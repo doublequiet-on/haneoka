@@ -9,6 +9,7 @@ export interface GekisoRewardOptions {
   /** Fixed native RNG draws, shared by all teams. Never the payout of the expected score. */
   luckSamples: number;
   rank: 1;
+  minComboBonus?: number;
 }
 export const DEFAULT_GEKISO_REWARDS: GekisoRewardOptions = { just: 0.25, luckSamples: 32, rank: 1 };
 

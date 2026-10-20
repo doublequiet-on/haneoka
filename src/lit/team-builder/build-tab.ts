@@ -23,6 +23,14 @@ const GOALS = [
   { id: "potential", icon: "auto_awesome" },
 ] as const;
 
+export function comboBonusControl(host: TeamBuilder): TemplateResult {
+  return html`<md-outlined-text-field type="number" min="1" step="1" inputmode="numeric"
+    label=${host.t("minComboBonus", "Minimum COMBO BONUS")} prefix-text="×"
+    .value=${live(String(host.settings.minComboBonus))}
+    @change=${(event: Event) => host.updateSettings({ minComboBonus: Math.max(1, Math.floor(Number((event.target as HTMLInputElement).value) || 1)) })}
+  ></md-outlined-text-field>`;
+}
+
 function goalText(host: TeamBuilder, goal: GoalKind): string {
   switch (goal) {
     case "score":
@@ -506,6 +514,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
           ${
             s.goal === "gekiso"
               ? html`
+                  ${comboBonusControl(host)}
                   ${segmented({
                     label: host.t("gekisoRank", "Placement in each range"),
                     value: String(s.gekisoRank),

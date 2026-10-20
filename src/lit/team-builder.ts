@@ -497,6 +497,7 @@ export class TeamBuilder extends LitElement {
               criterion: s.criterion,
               accuracy: { great: s.playMode === "ap" ? 0 : s.great / 100, just: s.just / 100, missEvery: s.playMode === "ap" ? 0 : s.missEvery || 0 },
               rank: s.gekisoRank,
+              minComboBonus: s.minComboBonus,
               ...(opponents.some((range) => range.length) ? { opponents } : {}),
               seeds: 0,
             }

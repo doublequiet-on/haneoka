@@ -85,6 +85,7 @@ function chips(host: TeamBuilder, hit: EngineHit): TemplateResult[] {
     const top = ranks[0];
     if (top) out.push(chip(RANK_NAMES[top[0]] ?? top[0], `${format(host, (top[1] / 120) * 100, top[1] === 120 ? 0 : 1)}%`, icon("workspace_premium", 16)));
   }
+  if (hit.comboBonus != null) out.push(chip(host.t("comboBonus", "COMBO BONUS"), `×${format(host, hit.comboBonus)}`));
   if (hit.event) {
     out.push(chip(host.t("eventBonus", "Event bonus"), `+${format(host, Math.floor(hit.event.bonusPercent), 0)}%`, icon("trending_up", 16)));
     if (s.goal === "event" && s.weighted) {
@@ -92,6 +93,8 @@ function chips(host: TeamBuilder, hit: EngineHit): TemplateResult[] {
       out.push(chip(host.t("pointsPerPlay", "Event points per play"), format(host, points, 1)));
       out.push(chip(host.t("itemsPerPlay", "Items per play"), format(host, items, 1)));
     }
+    if (s.goal === "event" && !s.weighted && s.measure !== "challenge-points" && hit.event.otherMean != null)
+      out.push(chip(s.measure === "items" ? host.t("pointsPerPlay", "Event points per play") : host.t("itemsPerPlay", "Items per play"), format(host, hit.event.otherMean, 1)));
     if (hit.event.challengePoints && s.measure !== "challenge-points") out.push(chip(host.t("cpPerPlay", "Challenge points per play"), format(host, hit.event.challengePoints, 1)));
   }
   const placements = s.goal === "gekiso" ? host.results?.results.find((result) => result.song?.songId === hit.song?.songId && result.song?.difficulty === hit.song?.difficulty)?.placements : undefined;

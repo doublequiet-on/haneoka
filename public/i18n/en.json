@@ -2344,6 +2344,8 @@
       "criterion": "Score goal",
       "criterionMean": "Average score",
       "criterionMin": "Minimum score (floor)",
+      "comboBonus": "COMBO BONUS",
+      "minComboBonus": "Minimum COMBO BONUS",
       "gekisoRank": "Placement in each range",
       "gekisoRankSolo": "1st (Mission)",
       "window": "Reference window",

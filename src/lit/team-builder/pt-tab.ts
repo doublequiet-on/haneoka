@@ -22,7 +22,7 @@ import {
 import { improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
 import { PtCheckpoint } from "../../lib/team-builder/pt-checkpoint";
 import { compareTable, renderHit } from "./results";
-import { renderBuildTab, renderCandidates } from "./build-tab";
+import { renderBuildTab, renderCandidates, comboBonusControl } from "./build-tab";
 import { sectionHeading } from "./catalog";
 import { boostControl } from "./boost-control";
 import type { SongPickerState } from "./song-picker";
@@ -114,7 +114,7 @@ export class PtController {
       consumption: s.boosts,
       play: { great: 0, good: 0, bad: 0, miss: 0 },
       ...(s.ptMode === "gekiso"
-        ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const } }
+        ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const, minComboBonus: s.minComboBonus } }
         : {}),
     });
     if (!request) return null;
@@ -424,6 +424,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
         ${
           s.ptMode === "gekiso"
             ? html`
+                ${comboBonusControl(host)}
                 ${ptField(
                 host,
                 "gekiso-input",
