@@ -1,7 +1,7 @@
 // L3 — GEB
-// Input: 正式 SS／SUS 或社区 playback 投影、音频及 release 身份。
+// Input: 正式 SS／SUS、社区 playback 或编辑器内存投影、音频及 release 身份。
 // Output: 共用 2D 概览、3D 观赏、播放控件与谱面图片下载。
-// Pos: [Map](L2-2.md)；歌曲与社区谱面运行宿主。
+// Pos: [Map](L2-2.md)；歌曲、社区谱面和编辑器观看预览的共用宿主。
 // Effects/Dependencies: Cassiopeia、素材 HTTP、WebGL 和音频；切源与离开取消装载并释放运行资源。
 import { PreparedResource } from "@haneoka/cassiopeia-host-web";
 import { LitElement, html, nothing } from "lit";
@@ -52,6 +52,7 @@ import {
   parseHudSpriteGeometry,
   createOurNotesPlugin,
   ourNotesNoteSoundsForRelease,
+  type NativeChartVisualProfiles,
   type RenderFrameBuilder,
   type TitleIntroductionContent,
   type RenderSettings,
@@ -203,10 +204,17 @@ const clamp = (value: number, minimum: number, maximum: number) => Math.max(mini
 const renderPixelRatio = (width: number, height: number) =>
   Math.max(1, Math.min(2, devicePixelRatio || 1, Math.sqrt((1920 * 1080) / Math.max(1, width * height))));
 
+export interface ChartSimulatorPlayback extends CommunityChartPlayback {
+  releaseId: string;
+  startTime: number;
+  visualProfiles?: NativeChartVisualProfiles;
+}
+
 export class ChartSimulator extends LitElement {
   private stopRenderQuality?: () => void;
   static properties = {
     source: { type: String },
+    playback: { attribute: false },
     audioUrl: { type: String, attribute: "audio-url" },
     chartFormat: { type: String, attribute: "chart-format" },
     offsetMs: { type: Number, attribute: "offset-ms" },
@@ -241,6 +249,7 @@ export class ChartSimulator extends LitElement {
     transportAutoHidden: { state: true },
   };
   declare source: string;
+  declare playback?: ChartSimulatorPlayback;
   declare audioUrl: string;
   /** "sus" reads a Project Sekai score through its Cassiopeia plugin. */
   declare chartFormat: string;
@@ -350,6 +359,7 @@ export class ChartSimulator extends LitElement {
   private resizeObserver?: ResizeObserver;
   private animationFrame = 0;
   private loadedKey = "";
+  private loadedPlayback?: ChartSimulatorPlayback;
   private loadAbort?: AbortController;
   private watchReplaySource?: {
     sourceKey: string;
@@ -446,7 +456,7 @@ export class ChartSimulator extends LitElement {
   }
   updated(changed: Map<PropertyKey, unknown>) {
     const key = `${this.server}:${this.source}`;
-    if (this.source && key !== this.loadedKey) void this.load();
+    if ((this.source || this.playback) && (key !== this.loadedKey || this.playback !== this.loadedPlayback)) void this.load();
     if (changed.has("liveMode") && this.phase === "ready") this.setLiveMode(this.liveMode);
     if (changed.has("gekisouEffectMode")) {
       this.renderer?.invalidateEffectFrame();
@@ -459,7 +469,7 @@ export class ChartSimulator extends LitElement {
   }
 
   private sourceRelease(): string | undefined {
-    const release = new URL(this.source, window.location.href).searchParams.get("release") ?? undefined;
+    const release = this.playback?.releaseId ?? new URL(this.source, window.location.href).searchParams.get("release") ?? undefined;
     if (release && !/^r-[a-f0-9]{20}$/u.test(release)) throw new Error("Invalid chart release pin");
     return release;
   }
@@ -493,7 +503,7 @@ export class ChartSimulator extends LitElement {
     return value;
   }
   private mediaUrl(path: string): string {
-    return this.chartFormat === "community" ? path : this.pinResourceUrl(path);
+    return this.playback || this.chartFormat === "community" ? path : this.pinResourceUrl(path);
   }
 
   private descriptorUrl(source: string) {
@@ -761,8 +771,7 @@ export class ChartSimulator extends LitElement {
     chart.durationMs += this.offsetMs;
     return chart;
   }
-  private communityChart(source: string): ChartDocument {
-    const { ss, offsetMs, timeScaleChanges } = JSON.parse(source) as CommunityChartPlayback;
+  private communityChart({ ss, offsetMs, timeScaleChanges }: CommunityChartPlayback): ChartDocument {
     const chart = this.runtime().require(OUR_NOTES_RULES).parse(ss);
     const shift = <T extends { timeMs: number }>(rows: readonly T[]) => rows.forEach(row => { row.timeMs += offsetMs; });
     shift(chart.notes);
@@ -779,12 +788,13 @@ export class ChartSimulator extends LitElement {
     return chart;
   }
   private async load() {
-    if (!this.source) return;
+    if (!this.source && !this.playback) return;
     this.dispose();
     const controller = new AbortController();
     this.loadAbort = controller;
     const { signal } = controller;
     this.loadedKey = `${this.server}:${this.source}`;
+    const playback = (this.loadedPlayback = this.playback);
     this.phase = "loading";
     await this.updateComplete;
     try {
@@ -796,18 +806,21 @@ export class ChartSimulator extends LitElement {
         )
       )
         sourceUrl.searchParams.set("projection", BESTDORI_CATALOG_VERSION);
-      const [response, assets] = await Promise.all([
-        fetch(sourceUrl, { headers: { accept: "text/plain" }, signal }),
+      const [source, assets] = await Promise.all([
+        playback ?? fetch(sourceUrl, { headers: { accept: "text/plain" }, signal }).then(async response => {
+          if (!response.ok) throw new Error(`Chart ${response.status}`);
+          return response.text();
+        }),
         this.runtimeAssets(signal),
       ]);
-      if (!response.ok) throw new Error(`Chart ${response.status}`);
-      const source = await response.text();
       signal.throwIfAborted();
       this.chart =
-        this.chartFormat === "sus"
+        typeof source !== "string"
+          ? this.communityChart(source)
+          : this.chartFormat === "sus"
           ? await this.sekaiChart(source)
           : this.chartFormat === "community"
-            ? this.communityChart(source)
+            ? this.communityChart(JSON.parse(source) as CommunityChartPlayback)
             : this.runtime().require(OUR_NOTES_RULES).parse(source);
       if (this.liveMode === "gekisou" && this.gekisouMissionTypes?.length && !assets.particles.laneEffects.gekisou)
         throw new Error("Original Gekisou lane source unavailable");
@@ -821,6 +834,7 @@ export class ChartSimulator extends LitElement {
       this.phase = "ready";
       await this.updateComplete;
       this.resize();
+      if (playback?.startTime) this.seek(playback.startTime);
     } catch (error) {
       if (signal.aborted) return;
       console.error(error);
@@ -1644,7 +1658,10 @@ export class ChartSimulator extends LitElement {
     this.session = next;
     this.frames = this.runtime()
       .require(OUR_NOTES_RULES)
-      .createFrameBuilder(this.chart, this.gekisouPlan ? { gekisou: this.gekisouPlan } : undefined);
+      .createFrameBuilder(this.chart, {
+        ...(this.gekisouPlan ? { gekisou: this.gekisouPlan } : {}),
+        ...(this.playback?.visualProfiles ? { visualProfiles: this.playback.visualProfiles } : {}),
+      });
     this.frames.configureGekisouPresentation(
       this.gekisouPlan
         ? { projector: this.gekisouOverlayProjector, context: this.gekisouOverlayContext }
@@ -1935,6 +1952,12 @@ export class ChartSimulator extends LitElement {
     };
     this.animationFrame = requestAnimationFrame(frame);
   };
+  togglePlayback() {
+    return this.toggle();
+  }
+  pause() {
+    if (this.playing) void this.toggle();
+  }
   private async toggle() {
     if (!this.clock) return;
     if (this.intro && this.intro.phase !== "complete") {
@@ -2058,7 +2081,7 @@ export class ChartSimulator extends LitElement {
       tickTimesMs: cache.tickTimesMs,
     };
   }
-  private seek(seconds: number) {
+  seek(seconds: number) {
     if (!this.clock || !this.session || !this.frames) return;
     const clock = this.clock,
       session = this.session,

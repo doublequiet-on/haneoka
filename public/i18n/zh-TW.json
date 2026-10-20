@@ -3987,6 +3987,7 @@
     },
     "charts": {
       "title": "社群譜面",
+      "publishToCommunity": "發佈到社群",
       "publish": "發布",
       "published": "已發布",
       "update": "發布更新",

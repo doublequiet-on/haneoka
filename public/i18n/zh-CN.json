@@ -3987,6 +3987,7 @@
     },
     "charts": {
       "title": "社区谱面",
+      "publishToCommunity": "发布到社区",
       "publish": "发布",
       "published": "已发布",
       "update": "发布更新",
