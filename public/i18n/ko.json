@@ -3926,6 +3926,7 @@
     },
     "charts": {
       "title": "커뮤니티 채보",
+      "publishToCommunity": "커뮤니티에 게시",
       "publish": "게시",
       "published": "게시됨",
       "update": "업데이트 게시",

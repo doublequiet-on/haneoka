@@ -204,6 +204,7 @@
     "src/lit/chart-publication.ts",
     "src/lit/community-charts.ts",
     "src/lit/ui/song-actions.ts",
+    "src/lit/chart-creation-workspace.ts",
     "src/lit/runtime/chart-simulator.ts",
     "src/lit/runtime/audio-dock.ts",
     "worker/community-charts.ts",

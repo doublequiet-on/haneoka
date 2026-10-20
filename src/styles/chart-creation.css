@@ -1,3 +1,5 @@
+@import "./patterns/chart.css";
+
 @layer pages {
   chart-creation-workspace {
     display: block;
@@ -286,12 +288,6 @@
     grid-template-rows: minmax(0, 1fr);
     background: var(--md-sys-color-scrim);
   }
-  .chart-studio__native {
-    min-inline-size: 0;
-    min-block-size: 0;
-    inline-size: 100%;
-    block-size: 100%;
-  }
 }
 @layer pages {
   .chart-studio__width {
@@ -327,31 +323,6 @@
   }
 }
 @layer pages {
-  .chart-studio__setting {
-    display: grid !important;
-    min-inline-size: 0;
-    gap: 0 !important;
-  }
-  .chart-studio__setting > span {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    font: var(--md-sys-typescale-label-large-weight)
-      var(--md-sys-typescale-label-large-size)/var(--md-sys-typescale-label-large-line-height) var(--app-font);
-  }
-  .chart-studio__setting output {
-    font-variant-numeric: tabular-nums;
-  }
-  .chart-studio__stage[data-mode="preview"] {
-    container-type: size;
-    place-items: center;
-  }
-  .chart-studio__native {
-    inline-size: min(100cqw, 177.7778cqh);
-    block-size: min(56.25cqw, 100cqh);
-  }
-}
-@layer pages {
   chart-creation-workspace:fullscreen {
     block-size: 100dvh;
     inline-size: 100vw;
@@ -384,13 +355,12 @@
   .chart-studio__width .md3-slider { --md-slider-inactive-track-color: var(--md-sys-color-outline-variant); }
 }
 @layer pages {
-  .chart-studio__native { inline-size: 100%; block-size: min(56.25cqw, 100cqh); }
-  .chart-studio[data-stage="preview"] .chart-studio__tools,
-  .chart-studio[data-stage="preview"] .chart-studio__width-preset,
-  .chart-studio[data-stage="preview"] > .chart-studio__toolbar > .chart-studio__drawer-button:first-of-type { display: none; }
-  .chart-studio[data-stage="preview"] > .chart-studio__toolbar > .chart-studio__drawer-button:last-of-type { display: inline-grid; }
-  .chart-studio[data-stage="preview"] > .chart-studio__toolbar > .chart-studio__drawer-button:last-of-type { margin-inline-start: auto; }
-  .chart-studio__preview-mode { font: var(--md-sys-typescale-label-large-weight) var(--md-sys-typescale-label-large-size)/var(--md-sys-typescale-label-large-line-height) var(--app-font); color: var(--md-sys-color-on-surface-variant); }
+  .chart-studio[data-stage="preview"] {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .chart-studio[data-stage="preview"] > .chart-studio__toolbar {
+    display: none;
+  }
 }
 @layer pages {
   .chart-studio__skin-state { position: absolute; z-index: 1; inset: 0 0 32px; display: grid; place-items: center; background: color-mix(in srgb, var(--md-sys-color-surface-container) 72%, transparent); }
@@ -405,7 +375,7 @@
 }
 
 @layer pages {
-  .chart-studio__mode-toggle { flex: 0 0 auto; inline-size: max-content; min-inline-size: clamp(168px, 24vw, 200px); max-inline-size: 100%; padding: 0; margin: 0; border: 0; }
+  .chart-studio__mode-toggle { flex: 0 0 auto; inline-size: max-content; min-inline-size: 0; max-inline-size: 100%; padding: 0; margin: 0; border: 0; }
   .chart-studio__cursor {
     position: absolute; inset-block-start: 8px; inset-inline-start: 8px; z-index: 1;
     max-inline-size: calc(100% - 16px); padding: 6px 10px; pointer-events: none;
@@ -434,26 +404,6 @@
   }
 }
 
-@layer pages {
-  /* T57 emits tabindex=0 only while the real native editing port is available. */
-  .chart-studio__native[data-native-preview][tabindex="0"] canvas.our-notes-player__canvas {
-    touch-action: none;
-    cursor: crosshair;
-  }
-  .chart-studio__native[data-native-preview][tabindex="0"]:focus-visible {
-    outline: 2px solid var(--md-sys-color-primary);
-    outline-offset: -2px;
-  }
-  .chart-studio[data-stage="preview"] .chart-studio__panel-content > :is(chart-creation-collections, section.chart-creation__form) + .chart-studio__native-settings {
-    padding-block-start: 16px;
-    border-block-start: 1px solid var(--md-sys-color-outline-variant);
-  }
-  @media (forced-colors: active) {
-    .chart-studio__native[data-native-preview][tabindex="0"]:focus-visible {
-      outline-color: Highlight;
-    }
-  }
-}
 @layer pages {
   .chart-publication { max-width: min(44rem, calc(100vw - 2rem)); }
   .chart-publication fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }

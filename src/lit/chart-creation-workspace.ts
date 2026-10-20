@@ -1,20 +1,15 @@
+// L3 — GEB
+// Input: 本地／云端工程、歌曲资料、音频与原生素材 release 身份。
+// Output: 谱面编辑、本地保存及社区发布；预览复用 chart-simulator 观看宿主。
+// Pos: [Map](L2-2.md)；谱面创作工作区。
+// Effects/Dependencies: IndexedDB、媒体与应用栏；预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { snackbar } from "../lib/snackbar";
 import { LitElement, html, nothing, type PropertyValues } from "lit";
 import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
 import { readPageData } from "../lib/page-data";
 import type { PublicSongsPageData } from "../server/tool-page-data";
-import {
-  DEFAULT_RENDER_SETTINGS,
-  OUR_NOTES_NOTE_SKINS,
-  OUR_NOTES_NOTE_SKIN_NAMES,
-  OUR_NOTES_NOTE_EFFECT_SKINS,
-  OUR_NOTES_NOTE_EFFECT_SKIN_NAMES,
-  OUR_NOTES_NOTE_SE_GROUP_IDS,
-  OUR_NOTES_NOTE_SE_GROUP_NAMES,
-  OUR_NOTES_LIVE_QUALITIES,
-  OUR_NOTES_LIVE_QUALITY_NAMES,
-} from "@haneoka/cassiopeia-plugin-our-notes";
+import { DEFAULT_RENDER_SETTINGS } from "@haneoka/cassiopeia-plugin-our-notes";
 import { live } from "lit/directives/live.js";
 import "@material/web/textfield/outlined-text-field.js";
 import "@material/web/select/outlined-select.js";
@@ -55,20 +50,20 @@ import type { ChartCollectionScope } from "./chart-creation-collections";
 import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
 import { applyAuthorCollectionOperation, type AuthorCollectionOperation } from "../../packages/chart-editor/src/creation/collections-history";
 import type { ChartCreationLibrary, PublicChartImport, CreationLibraryProvider } from "./chart-creation-library";
-import type { ChartEmbedHandle, ChartPlaybackOptions, ChartSkin } from "../../packages/embed-cassiopeia/src/types";
-import { ChartReplacementRejectedError } from "../../packages/embed-cassiopeia/src/driver";
+import type { ChartSkin } from "../../packages/embed-cassiopeia/src/types";
+import type { ChartSimulator, ChartSimulatorPlayback } from "./runtime/chart-simulator";
 import { AuthorNativeSpeedError } from "../lib/chart-creation/native-speed-plan";
 import type { HaneokaReleaseIdentity, HaneokaLocale } from "../../packages/api-client/src/haneoka";
-import { listPublicCreationSongs } from "../lib/chart-creation/public-songs";
+import { listPublicCreationSongs, pinnedPublicUrl } from "../lib/chart-creation/public-songs";
 import { readReleaseServer } from "../lib/release-server";
-import { compileOurNotesCreation, isNativeCreationPreview, type NativeCreationPreviewHandle } from "../lib/chart-creation/our-notes";
+import { compileOurNotesCreation } from "../lib/chart-creation/our-notes";
 import { loadOurNotesCreationCanvasSkin, ourNotesCreationCanvasNoteAppearance, createChartCanvasRibbonStyle, drawChartCanvasLanePlane, drawChartCanvasRibbon, interpolateNoteLine, type OurNotesCreationCanvasSkin } from "../lib/chart-creation/native-canvas-skin";
 import type { ChartNote } from "@haneoka/cassiopeia";
 import type { RenderNoteKind } from "@haneoka/cassiopeia-plugin-our-notes";
 import { loadingState } from "./ui/state";
 import { modal } from "./ui/modal";
 
-import { assertAuthoredSpanOverlap, assertEditedChartSpans, authoredSpanOverlaps, authoredSpanViewport, authoredWidthBounds, constrainLaneValue, viewportXToAuthoredLane, authoredLaneToViewportX, nativeLaneToAuthoredLane } from "../../packages/chart-editor/src/creation/span";
+import { assertAuthoredSpanOverlap, assertEditedChartSpans, authoredSpanOverlaps, authoredSpanViewport, authoredWidthBounds, constrainLaneValue, viewportXToAuthoredLane, authoredLaneToViewportX } from "../../packages/chart-editor/src/creation/span";
 import { createAuthoredNote, resizeChartSelection } from "../../packages/chart-editor/src/creation/authoring";
 import {
   brushChartSelection,
@@ -142,23 +137,6 @@ interface EditAudioTransport {
   seek(seconds: number): void;
   dispose(): void;
 }
-interface NativeSelectionGesture {
-  pointer: number;
-  canvas: HTMLCanvasElement;
-  handle: NativeCreationPreviewHandle;
-  epoch: number;
-  base: Project;
-  ids: Set<string>;
-  previous: string[];
-  primary: string;
-  lane: number;
-  mirror: boolean;
-  x: number;
-  y: number;
-  moved: boolean;
-  candidate?: Project;
-  error?: string;
-}
 interface SelectionGesture {
   pointer: number;
   base: Project;
@@ -191,7 +169,6 @@ interface SelectionGesture {
 
 let chartCreationOwnerSequence = 0;
 
-// Authored source stays in Project. This workspace's playback is a presentation preview.
 export class ChartCreationWorkspace extends LitElement {
   static properties = {
     locale: {},
@@ -212,7 +189,6 @@ export class ChartCreationWorkspace extends LitElement {
     rightOpen: { state: true },
     narrow: { state: true },
     stageMode: { state: true },
-    nativeMode: { state: true },
     defaultWidth: { state: true },
     fullscreen: { state: true },
     zoomX: { state: true },
@@ -221,8 +197,6 @@ export class ChartCreationWorkspace extends LitElement {
     relativeSnap: { state: true },
     canvasLoading: { state: true },
     canvasFailed: { state: true },
-    nativeUpdating: { state: true },
-    visualProfilesAvailable: { state: true },
   };
   declare locale: string;
   declare private collectionScope: ChartCollectionScope;
@@ -230,7 +204,7 @@ export class ChartCreationWorkspace extends LitElement {
   private scopeSnapshot?: { project: Project; scope: ChartCollectionScope; ids: Set<string> };
   private editingSnapshot?: { project: Project; scope: ChartCollectionScope; view: Project };
   private readonly collectionOperation = (operation: AuthorCollectionOperation) => {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating) return false;
+    if (this.busy || this.gesture) return false;
     try { return this.commitProject(applyAuthorCollectionOperation(this.chart, operation).project); }
     catch { this.error = this.t("creation.invalid_edit"); return false; }
   };
@@ -238,7 +212,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.cancelGesture(); this.cancelWidth(); this.pending = undefined;
     this.collectionScope = scope; this.pruneSelection(); this.paint();
   };
-  private readonly selectCollectionMembers = (ids: string[]) => { if (!this.nativeSelectionReady) return; this.setSelection(ids); this.pruneSelection(); this.paint(); };
+  private readonly selectCollectionMembers = (ids: string[]) => { this.setSelection(ids); this.pruneSelection(); this.paint(); };
   private scopeIds(project = this.chart) {
     if (this.scopeSnapshot?.project !== project || this.scopeSnapshot.scope !== this.collectionScope)
       this.scopeSnapshot = { project, scope: this.collectionScope, ids: authorSelectionForScope(project, this.collectionScope) };
@@ -275,19 +249,11 @@ export class ChartCreationWorkspace extends LitElement {
   private audio?: CreationAudio;
   private preview?: EditAudioTransport;
   declare private stageMode: "edit" | "preview";
-  declare private nativeMode: "play" | "watch" | "chart";
-  private nativePreview?: ChartEmbedHandle;
-  private nativeController?: AbortController;
-  private nativePending?: Promise<ChartEmbedHandle>;
-  private nativeDisposal: Promise<void> = Promise.resolve();
-  private nativeEpoch = 0;
-  private nativeAudio?: CreationAudio;
-  private nativeProjectId?: string;
-  declare private nativeUpdating: boolean;
-  private nativeUpdateEpoch = 0;
-  private nativeGesture?: NativeSelectionGesture;
-  declare private visualProfilesAvailable: boolean;
-  private visualProfileProbe?: Promise<void>;
+  private previewPlayback?: ChartSimulatorPlayback;
+  private previewAudioUrl?: string;
+  private previewCoverUrl?: string;
+  private previewJacketUrl?: string;
+  private previewBandId = 0;
   private previewIdentity?: HaneokaReleaseIdentity;
   private pageData?: PublicSongsPageData;
   private canvasTheme?: OurNotesCreationCanvasSkin;
@@ -296,16 +262,7 @@ export class ChartCreationWorkspace extends LitElement {
   private flatChart?: { project:Project; value?:ReturnType<typeof compileOurNotesCreation> };
   declare private canvasLoading: boolean;
   declare private canvasFailed: boolean;
-  private nativeOptions: ChartPlaybackOptions = {
-    mode: "play",
-    volume: 0.82,
-    rate: 1,
-    loop: false,
-    noteSoundEnabled: true,
-    noteSoundVolume: 0.75,
-    settings: { ...DEFAULT_RENDER_SETTINGS },
-  };
-  private nativeSkin: ChartSkin = {
+  private canvasSkin: ChartSkin = {
     currentQuality: 2,
     noteSkin: "skin001",
     noteEffectSkin: "effect001",
@@ -368,8 +325,8 @@ export class ChartCreationWorkspace extends LitElement {
   private readonly toolbarOwner = `chart-creation-${++chartCreationOwnerSequence}`;
   private mediaChanged = () => {
     this.narrow = this.panelMedia?.matches ?? false;
-    this.leftOpen = !this.narrow && innerWidth >= 1280;
-    this.rightOpen = !this.narrow;
+    this.leftOpen = this.stageMode === "edit" && !this.narrow && innerWidth >= 1280;
+    this.rightOpen = this.stageMode === "edit" && !this.narrow;
   };
   constructor() {
     super();
@@ -383,10 +340,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.relativeSnap = false;
     this.canvasLoading = false;
     this.canvasFailed = false;
-    this.nativeUpdating = false;
-    this.visualProfilesAvailable = false;
     this.stageMode = "edit";
-    this.nativeMode = "play";
     this.multiPick = false;
     this.busy = false;
     this.dirty = false;
@@ -418,20 +372,11 @@ export class ChartCreationWorkspace extends LitElement {
       this.projectSnapshot = { revision: this.history.revision, value: this.history.value };
     return this.projectSnapshot.value;
   }
-  private get nativePreviewSupported() {
+  private get nativeChart() {
     return !this.chart.meta.source || ["ss", "authored"].includes(this.chart.meta.source);
   }
-  private get canUpdateNative() {
-    return this.stageMode === "preview" && this.nativePreviewSupported && this.nativeAudio === this.audio && this.nativeProjectId === this.projectId
-      && isNativeCreationPreview(this.nativePreview);
-  }
-  private get nativeEditable() {
-    return this.canUpdateNative && this.nativeMode === "chart";
-  }
-  private get nativeSelectionReady() {
-    if (!this.canUpdateNative) return true;
-    return isNativeCreationPreview(this.nativePreview) && this.nativePreview.getCompiledProject() === this.chart
-      && !!this.nativePreview.getSourceMap() && !!this.nativePreview.getPresentation?.();
+  private get previewPlayer() {
+    return this.querySelector<ChartSimulator>("chart-simulator");
   }
   private exportWarnings() {
     if (this.warningSnapshot?.revision !== this.history.revision || this.warningSnapshot.format !== this.exportFormat)
@@ -525,7 +470,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.controller?.abort();
     this.preview?.dispose();
     this.preview = undefined;
-    void this.disposeNative();
+    void this.disposePreview();
     this.canvasController?.abort();
     void this.canvasTheme?.dispose();this.canvasTheme=undefined;
     this.observer?.disconnect();
@@ -539,7 +484,7 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.dirty && this.audio && !this.busy && !this.conflict && !this.autosaveTimer) {
       this.autosaveTimer = setTimeout(() => {
         this.autosaveTimer = undefined;
-        if (this.isConnected && !this.busy && !this.gesture && !this.nativeGesture && !this.widthSession && !this.conflict)
+        if (this.isConnected && !this.busy && !this.gesture && !this.widthSession && !this.conflict)
           void this.run(() => this.save(true));
       }, 2000);
     }
@@ -566,6 +511,7 @@ export class ChartCreationWorkspace extends LitElement {
     }
   }
   private captureDraft() {
+    if (this.previewPlayer?.phase === "ready") this.seconds = this.previewPlayer.currentTime;
     return {
       history: this.history, original: this.original, source: this.source,
       projectId: this.projectId, head: this.head, activeRevision: this.activeRevision,
@@ -578,7 +524,7 @@ export class ChartCreationWorkspace extends LitElement {
       direction: this.direction, snap: this.snap, relativeSnap: this.relativeSnap,
       insertLane: this.insertLane, multiPick: this.multiPick, brushPreset: this.brushPreset,
       followPlayback: this.followPlayback, exportFormat: this.exportFormat,
-      rate: this.rate, nativeOptions: this.nativeOptions, nativeSkin: this.nativeSkin,
+      rate: this.rate, canvasSkin: this.canvasSkin,
     };
   }
   private suspendDraft() {
@@ -647,7 +593,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.revisions = await this.store.versions(this.projectId);
   }
   private edit(updater: (draft: Project) => void) {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady) return;
+    if (this.busy || this.gesture) return;
     this.cancelWidth();
     try {
       const draft = structuredClone(this.chart);
@@ -658,50 +604,17 @@ export class ChartCreationWorkspace extends LitElement {
     }
   }
   private rebuildPreview(position = this.seconds) {
-    if (this.audio && this.nativePreviewSupported && !this.visualProfileProbe)
-      this.visualProfileProbe = import("../../packages/embed-cassiopeia/src/vue-player")
-        .then(module => module.supportsNativeVisualProfiles()).then(supported => {
-          if (this.isConnected) this.visualProfilesAvailable = supported;
-        }).catch(() => { this.visualProfileProbe = undefined; });
     if (this.viewProjectId !== this.projectId) {
       this.viewProjectId = this.projectId;
       this.laneStart = (this.chart.laneBasis - this.laneSpan()) / 2;
     }
     this.laneStart = this.clampLaneStart(this.laneStart);
-    if (this.canUpdateNative && isNativeCreationPreview(this.nativePreview)) {
-      const handle = this.nativePreview, epoch = this.nativeEpoch, update = ++this.nativeUpdateEpoch;
-      this.nativeUpdating = true;
-      void handle.updateProject(this.chart).then(() => {
-        if (epoch !== this.nativeEpoch || this.nativePreview !== handle || update !== this.nativeUpdateEpoch) return;
-        this.nativeUpdating = false;
-        this.pruneSelection();
-        this.requestUpdate();
-      }).catch(error => {
-        if (epoch !== this.nativeEpoch || this.nativePreview !== handle || update !== this.nativeUpdateEpoch) return;
-        this.error = this.t("creation.invalid_edit");
-        if (error instanceof ChartReplacementRejectedError) {
-          this.nativeUpdating = false;
-          this.requestUpdate();
-          return;
-        }
-        void this.disposeNative().then(() => {
-          if (!this.isConnected || this.nativePreview) return;
-          this.stageMode = "edit";
-          this.rebuildPreview(position);
-        });
-      });
-      this.requestUpdate();
-      return;
-    }
-    if (this.stageMode === "preview" || this.nativePreview || this.nativePending) {
-      this.stageMode = "edit";
-      void this.disposeNative();
-    }
+    if (this.stageMode === "preview") void this.disposePreview();
     this.preview?.dispose();
     this.preview = undefined;
     if (!this.audio || !this.isConnected) return;
     const url = URL.createObjectURL(this.audio.file),
-      clock = new MediaClock(url, { playbackRate: this.rate, volume: this.nativeOptions.volume ?? 0.82, loop: this.nativeOptions.loop ?? false });
+      clock = new MediaClock(url, { playbackRate: this.rate, volume: 0.82, loop: false });
     // MediaClock loads its source during construction; restore the chosen rate after load.
     clock.rate = this.rate;
     let frame = 0,
@@ -776,7 +689,7 @@ export class ChartCreationWorkspace extends LitElement {
     const identity = stored && typeof stored === "object" && !Array.isArray(stored) && typeof stored.server === "string" && typeof stored.releaseId === "string" && typeof stored.sourceId === "string"
       ? {schema:"haneoka-resource-release-identity-v1" as const,server:stored.server,releaseId:stored.releaseId,sourceId:stored.sourceId}
       : this.previewIdentity?.server===readReleaseServer() ? this.previewIdentity : undefined;
-    const requested=JSON.stringify([identity??readReleaseServer(),this.nativeSkin]);
+    const requested=JSON.stringify([identity??readReleaseServer(),this.canvasSkin]);
     if(!force&&this.canvasThemeKey===requested&&(this.canvasTheme||this.canvasLoading))return;
     this.canvasController?.abort();
     const retired=this.canvasTheme;this.canvasTheme=undefined;void retired?.dispose();
@@ -784,9 +697,9 @@ export class ChartCreationWorkspace extends LitElement {
     const report=beginLoading(this.c("loading"),{signal:controller.signal,scope:"owner"});
     try {
       const pin=identity??(await listPublicCreationSongs({server:readReleaseServer(),locale:this.apiLocale(),limit:1,signal:controller.signal})).release;
-      const theme=await loadOurNotesCreationCanvasSkin(pin,{skin:this.nativeSkin,locale:this.locale,signal:controller.signal});
+      const theme=await loadOurNotesCreationCanvasSkin(pin,{skin:this.canvasSkin,locale:this.locale,signal:controller.signal});
       if(controller!==this.canvasController||!this.isConnected){await theme.dispose();return;}
-      this.canvasTheme=theme;this.previewIdentity=pin;this.canvasThemeKey=JSON.stringify([pin,this.nativeSkin]);
+      this.canvasTheme=theme;this.previewIdentity=pin;this.canvasThemeKey=JSON.stringify([pin,this.canvasSkin]);
       report.finish();this.paint();
     } catch(error) {
       if(!controller.signal.aborted&&controller===this.canvasController){this.canvasFailed=true;report.fail(error);}
@@ -821,33 +734,20 @@ export class ChartCreationWorkspace extends LitElement {
       button.querySelector("use")?.setAttribute("href", `/icons.svg#${playing ? "pause" : "play_arrow"}`);
     }
   }
-  private disposeNative() {
-    this.cancelNativeGesture();
-    ++this.nativeEpoch;
-    ++this.nativeUpdateEpoch;
-    this.nativeUpdating = false;
-    this.nativeAudio = undefined;
-    this.nativeProjectId = undefined;
-    this.nativeController?.abort();
-    this.nativeController = undefined;
-    const handle = this.nativePreview,
-      pending = this.nativePending;
-    this.nativePreview = undefined;
-    this.nativePending = undefined;
-    handle?.cancel();
-    this.nativeDisposal = Promise.all([
-      this.nativeDisposal,
-      pending
-        ?.then(async (value) => {
-          if (value !== handle) await value.dispose();
-        })
-        .catch(() => {}),
-    ])
-      .then(async () => {
-        await handle?.dispose();
-      })
-      .catch(() => {});
-    return this.nativeDisposal;
+  private async disposePreview() {
+    const player = this.previewPlayer;
+    if (player) {
+      if (player.phase === "ready") this.seconds = player.currentTime;
+      player.pause();
+    }
+    const audioUrl = this.previewAudioUrl, coverUrl = this.previewCoverUrl;
+    this.previewPlayback = undefined;
+    this.previewAudioUrl = undefined;
+    this.previewCoverUrl = undefined;
+    this.stageMode = "edit";
+    await this.updateComplete;
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    if (coverUrl) URL.revokeObjectURL(coverUrl);
   }
   private async importLibrary(value: PublicChartImport, external: AbortSignal) {
     let accepted = false,
@@ -869,7 +769,7 @@ export class ChartCreationWorkspace extends LitElement {
           : { kind: "server", provider, server: (value.identity as HaneokaReleaseIdentity).server, releaseId: (value.identity as HaneokaReleaseIdentity).releaseId, songId: String(value.metadata.musicId) };
         value.project.extensions.communityMedia = { audio: ref, cover: ref, audioSha: audio.sha256 };
         signal.throwIfAborted();
-        await this.disposeNative();
+        await this.disposePreview();
         signal.throwIfAborted();
         if (!this.isConnected) throw new DOMException("Disconnected", "AbortError");
         this.projectId = crypto.randomUUID();
@@ -893,7 +793,7 @@ export class ChartCreationWorkspace extends LitElement {
       } finally {
         cancelled = signal.aborted;
         external.removeEventListener("abort", abort);
-        if (!accepted && this.isConnected && this.audio && this.stageMode === "preview" && !this.nativePreview && !this.nativePending) {
+        if (!accepted && this.isConnected && this.audio && this.stageMode === "preview" && !this.previewPlayback) {
           this.stageMode = "edit";
           await this.updateComplete;
           this.rebuildPreview(this.seconds);
@@ -911,135 +811,60 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.busy || !this.audio) return;
     this.clearCursor();
     if (this.stageMode === "preview") {
-      await this.disposeNative();
-      this.stageMode = "edit";
-      await this.updateComplete;
+      await this.disposePreview();
       this.rebuildPreview(this.seconds);
       return;
     }
-    let mounted = false;
-    await this.run(async (signal) => {
-      const position = this.seconds;
-      await this.disposeNative();
-      this.preview?.dispose();
-      this.preview = undefined;
-      this.stageMode = "preview";
-      this.closePanels();
-      await this.updateComplete;
-      signal.throwIfAborted();
-      if (!this.nativePreviewSupported) {
-        const { mountCreationPresentationPreview } = await import("../lib/chart-creation/presentation-preview");
-        signal.throwIfAborted();
-        const epoch = ++this.nativeEpoch, controller = (this.nativeController = new AbortController());
-        const abort = () => controller.abort(signal.reason);
-        signal.addEventListener("abort", abort, { once: true });
-        try {
-          const style = getComputedStyle(this), color = (key: string) => style.getPropertyValue(`--md-sys-color-${key}`).trim();
-          const handle = mountCreationPresentationPreview(this.querySelector<HTMLElement>("[data-native-preview]")!, this.chart, this.audio!, {
-            mode: "chart", rate: this.rate, volume: this.nativeOptions.volume ?? 0.82, loop: this.nativeOptions.loop ?? false,
-            signal: controller.signal, label: this.t("preview"),
-            colors: { surface: color("surface-container"), primary: color("primary"), secondary: color("secondary"), outline: color("outline-variant"), critical: color("tertiary") },
-            onEvent: event => { if (epoch !== this.nativeEpoch) return; if (event.type === "state") this.updateTransport(event.snapshot.time, event.snapshot.playing); if (event.type === "error") this.error = this.t("audioFailed"); },
-          });
-          this.nativePreview = handle;
-          handle.seek(position);
-          mounted = true;
-        } finally { signal.removeEventListener("abort", abort); }
-        return;
-      }
+    await this.run(async signal => {
       const stored = this.chart.extensions.haneoka;
-      if (
-        stored &&
-        typeof stored === "object" &&
-        !Array.isArray(stored) &&
-        typeof stored.server === "string" &&
-        typeof stored.releaseId === "string" &&
-        typeof stored.sourceId === "string"
-      )
+      if (stored && typeof stored === "object" && !Array.isArray(stored)
+        && typeof stored.server === "string" && typeof stored.releaseId === "string" && typeof stored.sourceId === "string")
         this.previewIdentity = {
           schema: "haneoka-resource-release-identity-v1",
-          server: stored.server,
-          releaseId: stored.releaseId,
-          sourceId: stored.sourceId,
+          server: stored.server, releaseId: stored.releaseId, sourceId: stored.sourceId,
         };
       else if (!this.previewIdentity || this.previewIdentity.server !== readReleaseServer())
-        this.previewIdentity = (
-          await listPublicCreationSongs({
-            server: readReleaseServer(),
-            locale: this.apiLocale(),
-            limit: 1,
-            signal,
-          })
-        ).release;
+        this.previewIdentity = (await listPublicCreationSongs({
+          server: readReleaseServer(), locale: this.apiLocale(), limit: 1, signal,
+        })).release;
+      const [draft] = await Promise.all([
+        readChartCloudDraft(this.projectId),
+        import("./runtime/chart-simulator"),
+      ]);
       signal.throwIfAborted();
-      const epoch = ++this.nativeEpoch,
-        controller = (this.nativeController = new AbortController());
-      const abort = () => controller.abort(signal.reason);
-      signal.addEventListener("abort", abort, { once: true });
-      try {
-        const { mountOurNotesCreationPreview } = await import("../lib/chart-creation/our-notes");
-        signal.throwIfAborted();
-        const pending = (this.nativePending = mountOurNotesCreationPreview(
-          this.querySelector<HTMLElement>("[data-native-preview]")!,
-          this.chart,
-          this.audio!,
-          {
-            ...this.nativeOptions,
-            mode: this.nativeMode,
-            rate: this.rate,
-            identity: this.previewIdentity!,
-            locale: this.locale,
-            signal: controller.signal,
-            skin: this.nativeSkin,
-            labels: { player: this.t("preview"), pause: this.c("pause"), loading: this.c("loading") },
-            onEvent: (event) => {
-              if (epoch !== this.nativeEpoch) return;
-              if (event.type === "state") this.updateTransport(event.snapshot.time, event.snapshot.playing);
-              if (event.type === "error") this.error = this.t("audioFailed");
-            },
-          },
-        ));
-        const handle = await pending;
-        signal.throwIfAborted();
-        if (epoch !== this.nativeEpoch || !this.isConnected) {
-          await handle.dispose();
-          return;
-        }
-        this.nativePreview = handle;
-        this.nativePending = undefined;
-        this.nativeAudio = this.audio;
-        this.nativeProjectId = this.projectId;
-        signal.throwIfAborted();
-        handle.seek(position);
-        mounted = true;
-      } finally {
-        signal.removeEventListener("abort", abort);
-      }
-    });
-    if (!mounted && this.isConnected) {
-      await this.disposeNative();
-      this.stageMode = "edit";
+      const compiled = this.nativeChart ? compileOurNotesCreation(this.chart) : undefined;
+      const playback: ChartSimulatorPlayback = {
+        ss: compiled?.ss ?? serializeSsForTarget(this.chart, false),
+        offsetMs: this.chart.audioOffset * 1000,
+        timeScaleChanges: compiled?.chart.timeScaleChanges ?? this.chart.timeScales.map(event => ({
+          timeMs: this.map().tickToSeconds(event.tick) * 1000, scale: event.scale,
+        })),
+        releaseId: this.previewIdentity!.releaseId,
+        startTime: this.seconds,
+        ...(compiled?.visualProfiles ? { visualProfiles: compiled.visualProfiles } : {}),
+      };
+      this.preview?.dispose();
+      this.preview = undefined;
+      this.previewAudioUrl = URL.createObjectURL(this.audio!.file);
+      this.previewCoverUrl = draft?.coverFile ? URL.createObjectURL(draft.coverFile) : undefined;
+      const song = stored && typeof stored === "object" && !Array.isArray(stored) && typeof stored.songId === "string"
+        ? this.pageData?.variants[this.previewIdentity!.server]?.songs[stored.songId] : undefined;
+      this.previewBandId = Number(song?.bandId ?? 0);
+      this.previewJacketUrl = this.previewCoverUrl ?? (typeof song?.jacketUrl === "string"
+        ? pinnedPublicUrl(song.jacketUrl, this.previewIdentity!) : undefined);
+      this.previewPlayback = playback;
+      this.closePanels();
+      this.stageMode = "preview";
       await this.updateComplete;
-      this.rebuildPreview(this.seconds);
-    }
+    });
   }
   private seekPlayback(seconds: number) {
-    if (this.stageMode === "preview") this.nativePreview?.seek(seconds);
+    if (this.stageMode === "preview") this.previewPlayer?.seek(seconds);
     else this.preview?.seek(seconds);
   }
   private pausePlayback() {
-    this.nativePreview?.pause();
+    this.previewPlayer?.pause();
     this.preview?.pause();
-  }
-  private async applyNativeOptions(patch: ChartPlaybackOptions) {
-    this.cancelNativeGesture();
-    this.nativeOptions = { ...this.nativeOptions, ...patch };
-    try {
-      await this.nativePreview?.setOptions(patch);
-      this.requestUpdate();
-    } catch {
-      this.error = this.t("audioFailed");
-    }
   }
   private loadAudio(file: File, example = false) {
     void this.run(async (signal) => {
@@ -1081,7 +906,7 @@ export class ChartCreationWorkspace extends LitElement {
     if (!response.ok) throw new Error("audio_missing");
     const file = new File([await response.blob()], `${result.chart.title}.audio`, { type: response.headers.get("Content-Type") || "audio/wav" });
     const audio = await decodeCreationAudio(file, signal);
-    await this.save(); signal.throwIfAborted(); await this.disposeNative(); signal.throwIfAborted();
+    await this.save(); signal.throwIfAborted(); await this.disposePreview(); signal.throwIfAborted();
     this.preview?.dispose(); this.projectId = crypto.randomUUID(); this.head = 0; this.activeRevision = 0;
     this.history.reset(result.document.project); this.original = structuredClone(result.document.project); this.source = undefined;
     this.audio = audio; this.collectionScope = {}; this.revisions = []; this.setSelection([]); this.pending = undefined;
@@ -1107,7 +932,7 @@ export class ChartCreationWorkspace extends LitElement {
     const opened = await this.store.open(id, revision);
     const [audio, revisions] = await Promise.all([decodeCreationAudio(opened.file, signal), this.store.versions(id)]);
     if (audio.sha256 !== opened.value.audio.sha256) throw new Error("audio_hash");
-    signal.throwIfAborted(); await this.disposeNative(); signal.throwIfAborted();
+    signal.throwIfAborted(); await this.disposePreview(); signal.throwIfAborted();
     if (!this.isConnected) throw new DOMException("Disconnected", "AbortError");
     this.preview?.dispose();
     this.projectId = id; this.head = opened.document.head; this.activeRevision = opened.value.revision;
@@ -1142,7 +967,7 @@ export class ChartCreationWorkspace extends LitElement {
       await this.save(); signal.throwIfAborted();
       const original = await this.store.original(this.projectId), audio = await decodeCreationAudio(original.file, signal);
       if (audio.sha256 !== original.audio.sha256) throw new Error("audio_hash");
-      signal.throwIfAborted(); await this.disposeNative(); signal.throwIfAborted();
+      signal.throwIfAborted(); await this.disposePreview(); signal.throwIfAborted();
       this.original = original.chart; this.source = original.document.source; this.audio = audio;
       this.history.reset(original.chart); this.collectionScope = {}; this.previewIdentity = undefined;
       this.setSelection([]); this.pending = undefined; this.dirty = true;
@@ -1155,7 +980,7 @@ export class ChartCreationWorkspace extends LitElement {
       await this.save(); signal.throwIfAborted();
       await this.store.delete(this.projectId, this.head);
       // The confirmed local deletion committed; finalize its UI even if Cancel arrives during disposal.
-      await this.disposeNative();
+      await this.disposePreview();
       this.preview?.dispose(); this.preview = undefined; this.audio = undefined;
       const project = createEmptyProject({ source: "authored" });
       this.history.reset(project); this.original = structuredClone(project); this.source = undefined;
@@ -1218,7 +1043,7 @@ export class ChartCreationWorkspace extends LitElement {
     }
   };
   private keydown = (event: KeyboardEvent) => {
-    if (!this.isConnected || this.busy || this.nativeUpdating || event.defaultPrevented || event.isComposing || event.repeat) return;
+    if (!this.isConnected || this.busy || event.defaultPrevented || event.isComposing || event.repeat) return;
     const path = event.composedPath();
     if (!path.some(node => node === this || node instanceof HTMLElement && node.dataset.appBarOwner === this.toolbarOwner)) return;
     if (document.querySelector("dialog[open]")) return;
@@ -1239,27 +1064,17 @@ export class ChartCreationWorkspace extends LitElement {
       && path.some(node => node instanceof HTMLElement && node.matches("button,a[href],[role=button],[role=radio],[role=checkbox]"))) return;
     if (event.altKey && !["ArrowUp", "ArrowDown"].includes(event.key)) return;
     if (this.stageMode === "preview") {
-      if (!this.nativeSelectionReady && event.key !== "Escape") return;
-      if (this.nativeGesture) {
-        if (event.key === "Escape") this.cancelNativeGesture();
-        event.preventDefault();
-        return;
-      }
-      if (this.nativeEditable && event.key !== "Escape") {
-        const modifier = event.ctrlKey || event.metaKey;
-        const editingKey = modifier && ["s", "z", "y", "a", "x", "c", "v"].includes(event.key.toLowerCase())
-          || !modifier && ["Delete", "Backspace", " "].includes(event.key)
-          || !modifier && event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key)
-          || !modifier && !event.altKey && ["BracketLeft", "BracketRight"].includes(event.code);
-        if (!editingKey) return;
-      } else {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         void this.run(() => this.save());
-      } else if (event.key === " " && !(event.ctrlKey || event.metaKey)) { event.preventDefault(); this.togglePlayback(); }
-      else if (event.key === "Escape") { event.preventDefault(); void this.switchStage(); }
-      return;
+      } else if (event.key === " " && !(event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        this.togglePlayback();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        void this.switchStage();
       }
+      return;
     }
     if (this.gesture) {
       if (event.key === "Escape") this.cancelGesture();
@@ -1323,13 +1138,8 @@ export class ChartCreationWorkspace extends LitElement {
     if (used) event.preventDefault();
   };
   private togglePlayback() {
-    if (this.nativeUpdating || this.nativeGesture || !this.nativeSelectionReady) return;
     if (this.stageMode === "preview") {
-      if (this.nativePreview?.snapshot.playing) this.nativePreview.pause();
-      else
-        void this.nativePreview?.play().catch(() => {
-          this.error = this.t("audioFailed");
-        });
+      void this.previewPlayer?.togglePlayback();
       return;
     }
     if (this.preview?.clock.playing) this.preview.pause();
@@ -1578,79 +1388,10 @@ export class ChartCreationWorkspace extends LitElement {
     this.selected = this.selectedIds.has(primary) ? primary : (ids[0] ?? "");
   }
   private nudgeSelection(direction: -1 | 1) {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady || !this.audio || !this.selectedIds.size) return;
+    if (this.busy || this.gesture || !this.audio || !this.selectedIds.size) return;
     this.cancelWidth();
     try { this.commitProject(nudgeChartSelectionOnGrid(this.chart, this.selectedIds, this.selected, direction, this.snap)); }
     catch { this.error = this.t("creation.invalid_edit"); }
-  }
-  private nativePointerDown = (event: PointerEvent) => {
-    if (!this.nativeEditable || !this.nativeSelectionReady || this.nativeUpdating || this.busy || this.nativeGesture || event.button !== 0 || !event.isPrimary) return;
-    const handle = this.nativePreview;
-    if (!isNativeCreationPreview(handle)) return;
-    const canvas = event.composedPath().find(node => node instanceof HTMLCanvasElement && node.matches(".our-notes-player__canvas"));
-    const presentation = handle.getPresentation?.(), sources = handle.getSourceMap();
-    if (!(canvas instanceof HTMLCanvasElement) || !presentation || !sources) return;
-    const hit = presentation.pickNoteAtClientPoint(event.clientX, event.clientY), point = presentation.clientPointToNoteView(event.clientX, event.clientY);
-    const scope = this.scopeIds(), ids = hit && typeof hit.id === "number"
-      ? sources.sourcesForNote(hit.id).map(source => source.canonicalId).filter(id => scope.has(id)) : [];
-    const previous = [...this.selectedIds], primary = this.selected;
-    const additive = this.multiPick || event.shiftKey || event.ctrlKey || event.metaKey;
-    if (!ids.length || !point) { if (!additive) this.setSelection([]); this.requestUpdate(); return; }
-    event.preventDefault();
-    handle.pause();
-    this.cancelWidth();
-    if (additive) {
-      const selected = new Set(this.selectedIds), remove = ids.every(id => selected.has(id));
-      for (const id of ids) if (remove) selected.delete(id); else selected.add(id);
-      this.setSelection([...selected], ids[0]);
-      if (remove) { this.requestUpdate(); return; }
-    } else if (!ids.every(id => this.selectedIds.has(id))) this.setSelection(ids, ids[0]);
-    else this.selected = ids[0];
-    this.nativeGesture = {
-      pointer: event.pointerId, canvas, handle, epoch: this.nativeEpoch, base: this.chart,
-      ids: new Set(this.selectedIds), previous, primary,
-      lane: nativeLaneToAuthoredLane(point.lane, this.chart.laneBasis), x: event.clientX, y: event.clientY, moved: false,
-      mirror: this.nativeOptions.settings?.mirror ?? DEFAULT_RENDER_SETTINGS.mirror,
-    };
-    canvas.setPointerCapture(event.pointerId);
-    this.querySelector<HTMLElement>("[data-native-preview]")?.focus({ preventScroll: true });
-    this.requestUpdate();
-  };
-  private nativePointerMove = (event: PointerEvent) => {
-    const gesture = this.nativeGesture;
-    if (!gesture || gesture.pointer !== event.pointerId) return;
-    event.preventDefault();
-    if (gesture.epoch !== this.nativeEpoch || gesture.handle !== this.nativePreview || !this.nativeEditable || !this.nativeSelectionReady) { this.cancelNativeGesture(); return; }
-    gesture.moved ||= Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) >= 5;
-    if (!gesture.moved) return;
-    const point = gesture.handle.getPresentation?.()?.clientPointToNoteView(event.clientX, event.clientY);
-    if (!point) { gesture.candidate = undefined; gesture.error = ""; return; }
-    try {
-      const lane = nativeLaneToAuthoredLane(point.lane, gesture.base.laneBasis), step = 0.25;
-      const delta = Math.round(((lane - gesture.lane) * (gesture.mirror ? -1 : 1)) / step) * step;
-      gesture.candidate = moveChartSelection(gesture.base, gesture.ids, 0, delta, { placement: "overlap", grid: { step } });
-      gesture.error = "";
-    } catch { gesture.candidate = undefined; gesture.error = this.t("creation.invalid_edit"); }
-  };
-  private nativePointerEnd = (event: PointerEvent) => {
-    const gesture = this.nativeGesture;
-    if (!gesture || gesture.pointer !== event.pointerId) return;
-    if (event.type !== "pointerup") { this.cancelNativeGesture(); return; }
-    this.nativePointerMove(event);
-    if (this.nativeGesture !== gesture) return;
-    this.nativeGesture = undefined;
-    if (gesture.canvas.hasPointerCapture(gesture.pointer)) gesture.canvas.releasePointerCapture(gesture.pointer);
-    if (gesture.error) this.error = gesture.error;
-    if (gesture.candidate && !this.commitProject(gesture.candidate) && this.error) this.setSelection(gesture.previous, gesture.primary);
-    this.requestUpdate();
-  };
-  private cancelNativeGesture() {
-    const gesture = this.nativeGesture;
-    if (!gesture) return;
-    this.nativeGesture = undefined;
-    this.setSelection(gesture.previous, gesture.primary);
-    if (gesture.canvas.hasPointerCapture(gesture.pointer)) gesture.canvas.releasePointerCapture(gesture.pointer);
-    this.requestUpdate();
   }
   private pruneSelection() {
     const state = readAuthorCollections(this.chart);
@@ -1746,7 +1487,6 @@ export class ChartCreationWorkspace extends LitElement {
     this.paint();
   }
   private cancelGesture() {
-    this.cancelNativeGesture();
     const g = this.gesture;
     if (!g) return;
     cancelAnimationFrame(this.gestureFrame);
@@ -2036,7 +1776,7 @@ export class ChartCreationWorkspace extends LitElement {
   private cancelOperation() {
     this.controller?.abort();
     if (this.stageMode === "preview") {
-      void this.disposeNative().then(() => {
+      void this.disposePreview().then(() => {
         if (!this.isConnected) return;
         this.stageMode = "edit";
         this.rebuildPreview(this.seconds);
@@ -2044,7 +1784,7 @@ export class ChartCreationWorkspace extends LitElement {
     }
   }
   private commitProject(candidate: Project, mergeKey?: string): boolean {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating) return false;
+    if (this.busy || this.gesture) return false;
     this.cancelWidth();
     try {
       candidate = reconcileAuthorEdit(this.chart, candidate);
@@ -2116,7 +1856,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.requestUpdate();
   }
   private removeSelectedNodes() {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady || !this.audio) return;
+    if (this.busy || this.gesture || !this.audio) return;
     this.cancelWidth();
     try {
       const result = removeLineControlPoints(this.chart, this.selectedIds);
@@ -2133,7 +1873,7 @@ export class ChartCreationWorkspace extends LitElement {
     return values.size > 1 ? "mixed" : (values.values().next().value ?? "inherit");
   }
   private setSelectedLineCritical(value: string): boolean {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady || !this.audio
+    if (this.busy || this.gesture || !this.audio
       || !["inherit", "normal", "critical"].includes(value)) return false;
     const ids = this.selectedConnectorIds();
     if (!ids.size) return false;
@@ -2158,7 +1898,7 @@ export class ChartCreationWorkspace extends LitElement {
     return values.size > 1 ? "mixed" : (values.values().next().value ?? "long");
   }
   private setSelectedLineKind(value: string): boolean {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady || !this.audio
+    if (this.busy || this.gesture || !this.audio
       || (value !== "long" && value !== "guide")) return false;
     const ids = this.selectedConnectorIds();
     if (!ids.size || this.chart.lines.filter(line => ids.has(line.id)).every(line => line.kind === value)) return false;
@@ -2178,7 +1918,7 @@ export class ChartCreationWorkspace extends LitElement {
     await this.run(async (signal) => {
       await this.save();
       signal.throwIfAborted();
-      await this.disposeNative();
+      await this.disposePreview();
       this.preview?.dispose();
       this.preview = undefined;
       this.audio = undefined;
@@ -2209,160 +1949,6 @@ export class ChartCreationWorkspace extends LitElement {
       this.error = this.c("unavailable");
     }
   }
-  private nativeLabel(key: string) {
-    return this.c(`chartPlayer.${key}`);
-  }
-  private async applyNativeSkin(patch: ChartSkin) {
-    if (this.busy) return;
-    const skin = { ...this.nativeSkin, ...patch };
-    await this.run(async (signal) => {
-      await this.nativePreview?.setSkin(skin);
-      signal.throwIfAborted();
-      this.nativeSkin = skin;
-      this.requestUpdate();
-    });
-  }
-  private renderNativeSettings() {
-    const native = this.nativePreviewSupported;
-    const settings = { ...DEFAULT_RENDER_SETTINGS, ...this.nativeOptions.settings };
-    const slider = (
-      label: string,
-      value: number,
-      min: number,
-      max: number,
-      step: number,
-      change: (value: number) => void,
-      nativeOnly = true,
-    ) => html`
-      <label class="chart-studio__setting">
-        <span>
-          ${label}
-          <output>${Math.round(value * 100) / 100}</output>
-        </span>
-        <md-slider
-          class="md3-slider"
-          labeled
-          aria-label=${label}
-          .min=${min}
-          .max=${max}
-          .step=${step}
-          .value=${value}
-          ?disabled=${this.busy || (nativeOnly && !native)}
-          @input=${(e: Event) => change(Number((e.target as HTMLElement & { value: number }).value))}
-        ></md-slider>
-      </label>
-    `;
-    const select = (
-      label: string,
-      value: string,
-      rows: readonly { value: string; label: string }[],
-      change: (value: string) => void,
-      nativeOnly = true,
-    ) => html`
-      <md-outlined-select
-        label=${label}
-        .value=${value}
-        ?disabled=${this.busy || (nativeOnly && !native)}
-        @change=${(e: Event) => change((e.target as HTMLElement & { value: string }).value)}
-      >
-        ${rows.map(
-          (row) => html`
-            <md-select-option value=${row.value} .selected=${row.value === value}>
-              <div slot="headline">${row.label}</div>
-            </md-select-option>
-          `,
-        )}
-      </md-outlined-select>
-    `;
-    const toggle = (label: string, value: boolean, change: (value: boolean) => void, nativeOnly = true) => html`
-      <label>
-        <md-checkbox
-          aria-label=${label}
-          .checked=${value}
-          ?disabled=${this.busy || (nativeOnly && !native)}
-          @change=${(e: Event) => change((e.target as HTMLInputElement).checked)}
-        ></md-checkbox>
-        ${label}
-      </label>
-    `;
-    const changeSetting = (key: keyof typeof settings, value: number | boolean) =>
-      void this.applyNativeOptions({
-        settings: { ...DEFAULT_RENDER_SETTINGS, ...this.nativeOptions.settings, [key]: value },
-      });
-    return html`
-      <div class="chart-creation__form chart-studio__native-settings">
-        ${select(
-        this.t("preview"),
-        native ? this.nativeMode : "chart",
-        (native ? ["play", "watch", "chart"] : ["chart"]).map((value) => ({ value, label: this.t(`creation.preview_${value}`) })),
-        (value) => {
-          this.nativeMode = value as typeof this.nativeMode;
-          void this.applyNativeOptions({ mode: this.nativeMode });
-        },
-      )}
-        ${slider(this.nativeLabel("volume"), this.nativeOptions.volume ?? 0.82, 0, 1, 0.01, (value) => void this.applyNativeOptions({ volume: value }), false)}
-        ${toggle(this.nativeLabel("noteSe"), native && (this.nativeOptions.noteSoundEnabled ?? true), (value) => void this.applyNativeOptions({ noteSoundEnabled: value }))}
-        ${slider(this.nativeLabel("noteSe"), this.nativeOptions.noteSoundVolume ?? 0.75, 0, 1, 0.01, (value) => void this.applyNativeOptions({ noteSoundVolume: value }))}
-        ${select(
-        this.nativeLabel("playbackSpeed"),
-        String(this.rate),
-        [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((value) => ({ value: String(value), label: `${value}×` })),
-        (value) => {
-          this.rate = Number(value);
-          void this.applyNativeOptions({ rate: this.rate });
-        },
-        false,
-      )}
-        ${toggle(this.nativeLabel("loop"), this.nativeOptions.loop ?? false, (value) => void this.applyNativeOptions({ loop: value }), false)}
-        ${select(
-        this.nativeLabel("noteSkin"),
-        this.nativeSkin.noteSkin ?? "skin001",
-        OUR_NOTES_NOTE_SKINS.map((value) => ({
-          value,
-          label: OUR_NOTES_NOTE_SKIN_NAMES[value][this.locale] ?? OUR_NOTES_NOTE_SKIN_NAMES[value].en,
-        })),
-        (value) => void this.applyNativeSkin({ noteSkin: value as ChartSkin["noteSkin"] }),
-      )}
-        ${select(
-        this.nativeLabel("noteEffectSkin"),
-        this.nativeSkin.noteEffectSkin ?? "effect001",
-        OUR_NOTES_NOTE_EFFECT_SKINS.map((value) => ({
-          value,
-          label: OUR_NOTES_NOTE_EFFECT_SKIN_NAMES[value][this.locale] ?? OUR_NOTES_NOTE_EFFECT_SKIN_NAMES[value].en,
-        })),
-        (value) => void this.applyNativeSkin({ noteEffectSkin: value as ChartSkin["noteEffectSkin"] }),
-      )}
-        ${select(
-        this.nativeLabel("noteSe"),
-        String(this.nativeSkin.noteSeGroup ?? 1),
-        OUR_NOTES_NOTE_SE_GROUP_IDS.map((value) => ({
-          value: String(value),
-          label: OUR_NOTES_NOTE_SE_GROUP_NAMES[value][this.locale] ?? OUR_NOTES_NOTE_SE_GROUP_NAMES[value].en,
-        })),
-        (value) => void this.applyNativeSkin({ noteSeGroup: Number(value) as ChartSkin["noteSeGroup"] }),
-      )}
-        ${select(
-        this.nativeLabel("liveQuality"),
-        String(this.nativeSkin.currentQuality ?? 2),
-        OUR_NOTES_LIVE_QUALITIES.map((value) => ({
-          value: String(value),
-          label: OUR_NOTES_LIVE_QUALITY_NAMES[value][this.locale] ?? OUR_NOTES_LIVE_QUALITY_NAMES[value].en,
-        })),
-        (value) => void this.applyNativeSkin({ currentQuality: Number(value) as ChartSkin["currentQuality"] }),
-      )}
-        ${slider(this.nativeLabel("noteSpeed"), settings.noteSpeed, 1, 12, 0.1, (value) => changeSetting("noteSpeed", value))}
-        ${slider(this.nativeLabel("longOpacity"), settings.longAlpha, 0, 1, 0.05, (value) => changeSetting("longAlpha", value))}
-        ${slider(this.nativeLabel("guideOpacity"), settings.guideAlpha, 0, 1, 0.05, (value) => changeSetting("guideAlpha", value))}
-        ${slider(this.nativeLabel("backgroundBrightness"), settings.backgroundBrightness, 0, 1, 0.05, (value) => changeSetting("backgroundBrightness", value))}
-        ${slider(this.nativeLabel("laneOpacity"), settings.laneOpacity, 0, 1, 0.05, (value) => changeSetting("laneOpacity", value))}
-        ${slider(this.nativeLabel("guidelineOpacity"), settings.guidelineOpacity, 0, 1, 0.05, (value) => changeSetting("guidelineOpacity", value))}
-        ${toggle(this.nativeLabel("mirror"), settings.mirror, (value) => changeSetting("mirror", value))}
-        ${toggle(this.nativeLabel("effects"), settings.effects, (value) => changeSetting("effects", value))}
-        ${toggle(this.nativeLabel("judgementLine"), settings.showJudgementLine, (value) => changeSetting("showJudgementLine", value))}
-        ${toggle(this.nativeLabel("simultaneousLine"), settings.showSimultaneousLine, (value) => changeSetting("showSimultaneousLine", value))}
-      </div>
-    `;
-  }
   private setDefaultWidth(value: number) {
     if (this.busy || this.gesture || this.pan) return;
     if (!Number.isFinite(value) || value < 0) {
@@ -2375,7 +1961,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.error = "";
   }
   private stepWidth(delta: number) {
-    if (this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady || this.pan || !this.audio) return;
+    if (this.busy || this.gesture || this.pan || !this.audio) return;
     // A keyboard press starts a new operation after a cancelled slider gesture.
     this.widthCancelled = false;
     const item = this.selectionNodes().find(node => node.note.id === this.selected);
@@ -2386,8 +1972,8 @@ export class ChartCreationWorkspace extends LitElement {
     catch { this.error = this.t("creation.invalid_edit"); }
   }
   private previewWidth(value: number) {
-    if (this.widthCancelled || this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady || !this.selected) return;
-    this.widthSession ??= { base: this.chart, ids: this.nativeEditable ? new Set(this.selectedIds) : new Set([this.selected]) };
+    if (this.widthCancelled || this.busy || this.gesture || !this.selected) return;
+    this.widthSession ??= { base: this.chart, ids: new Set([this.selected]) };
     try {
       this.widthSession.candidate = resizeChartSelection(
         this.widthSession.base,
@@ -2402,7 +1988,7 @@ export class ChartCreationWorkspace extends LitElement {
     }
   }
   private commitWidth(value: number) {
-    if (this.widthCancelled || this.busy || this.gesture || this.nativeGesture || this.nativeUpdating || !this.nativeSelectionReady || !this.selected) return;
+    if (this.widthCancelled || this.busy || this.gesture || !this.selected) return;
     this.previewWidth(value);
     const candidate = this.widthSession?.candidate;
     this.widthSession = undefined;
@@ -2433,7 +2019,7 @@ export class ChartCreationWorkspace extends LitElement {
           max=${maximum}
           step="0.25"
           .value=${value}
-          ?disabled=${this.busy || this.nativeUpdating || !this.nativeSelectionReady || !!this.nativeGesture || !!this.gesture || !!this.pan || !this.audio}
+          ?disabled=${this.busy || !!this.gesture || !!this.pan || !this.audio}
           @pointerdown=${() => {
           this.widthCancelled = false;
         }}
@@ -2463,7 +2049,7 @@ export class ChartCreationWorkspace extends LitElement {
           min="0"
           step="any"
           .value=${live(String(value))}
-          ?disabled=${this.busy || this.nativeUpdating || !this.nativeSelectionReady || !!this.nativeGesture || !!this.gesture || !!this.pan || !this.audio}
+          ?disabled=${this.busy || !!this.gesture || !!this.pan || !this.audio}
           @change=${(event: Event) => {
           const raw = (event.target as HTMLInputElement).value;
           const size = raw.trim() ? Number(raw) : NaN;
@@ -2492,13 +2078,13 @@ export class ChartCreationWorkspace extends LitElement {
   }
   private renderAppActions() {
     return html`
-      <span class="chart-studio__wide-actions">
+      <span class="chart-studio__wide-actions" ?hidden=${this.stageMode === "preview"}>
         ${iconButton({ label: this.t("project"), icon: "folder_open", toggle: true, pressed: this.leftOpen, onClick: () => this.togglePanel("left") })}
         ${iconButton({
           label: this.t("undo"),
           shortcut: "Ctrl/⌘+Z",
           icon: "undo",
-          disabled: this.busy || this.nativeUpdating || !this.history.canUndo,
+          disabled: this.busy || !this.history.canUndo,
           onClick: () => {
             this.cancelGesture();
             this.history.undo();
@@ -2512,7 +2098,7 @@ export class ChartCreationWorkspace extends LitElement {
           label: this.t("redo"),
           shortcut: "Ctrl/⌘+Shift+Z",
           icon: "redo",
-          disabled: this.busy || this.nativeUpdating || !this.history.canRedo,
+          disabled: this.busy || !this.history.canRedo,
           onClick: () => {
             this.cancelGesture();
             this.history.redo();
@@ -2526,13 +2112,16 @@ export class ChartCreationWorkspace extends LitElement {
       </span>
       ${this.busy ? iconButton({ label: this.c("cancel"), icon: "close", onClick: () => this.cancelOperation() }) : nothing}
       ${iconButton({ label: this.t("creation.save"), shortcut: "Ctrl/⌘+S", className: "chart-studio__header-save", icon: "save", disabled: this.busy || !this.audio || !this.dirty, onClick: () => void this.run(() => this.save()) })}
-      ${iconButton({ label: clientText(this.locale, "community.charts.publish"), icon: "publish", disabled: this.busy || !this.audio, onClick: () => void this.querySelector<ChartPublication>("chart-publication")?.show() })}
-      <fieldset class="chart-studio__mode-toggle" ?disabled=${this.busy || !this.audio}>
+      <button class="button button--text" type="button" ?disabled=${this.busy || !this.audio}
+        @click=${() => void this.querySelector<ChartPublication>("chart-publication")?.show()}>
+        ${icon("edit", 20)}<span>${clientText(this.locale, "community.charts.publishToCommunity")}</span>
+      </button>
+      <fieldset class="chart-studio__mode-toggle" data-app-bar-keep ?disabled=${this.busy || !this.audio}>
         ${segmented({
           label: `${this.t("edit")} / ${this.t("preview")}`,
           value: this.stageMode,
           options: [{ value: "edit", label: this.t("edit") }, { value: "preview", label: this.t("preview") }],
-          grow: true,
+          grow: false,
           onSelect: async (value) => {
             if (this.busy || value === this.stageMode) return;
             const group = document.activeElement?.closest(".chart-studio__mode-toggle");
@@ -2567,7 +2156,7 @@ export class ChartCreationWorkspace extends LitElement {
       selection = [...chart.singles, ...chart.lines.flatMap((l) => l.points)].find((n) => n.id === this.selected);
     const selectedUpdate = (updater: (note: SingleNote | LinePoint) => void) =>
       this.edit((p) => {
-        const ids = this.nativeEditable ? this.selectedIds : new Set([this.selected]);
+        const ids = new Set([this.selected]);
         for (const note of [...p.singles, ...p.lines.flatMap((l) => l.points)]) if (ids.has(note.id)) updater(note);
       });
     const filesPanel = html`
@@ -2651,7 +2240,7 @@ export class ChartCreationWorkspace extends LitElement {
       }
     `;
     const selectionPanel = html`
-      <chart-creation-collections .locale=${this.locale} .project=${chart} .selection=${this.selectedIds} .scope=${this.collectionScope} .busy=${this.busy || this.nativeUpdating || !!this.nativeGesture || !!this.gesture || !!this.widthSession || !this.audio} .forceSpeedAvailable=${this.visualProfilesAvailable && this.nativePreviewSupported} .globalNoteSpeed=${this.nativeOptions.settings?.noteSpeed ?? DEFAULT_RENDER_SETTINGS.noteSpeed} .onOperation=${this.collectionOperation} .onScope=${this.changeCollectionScope} .onSelect=${this.selectCollectionMembers}></chart-creation-collections>
+      <chart-creation-collections .locale=${this.locale} .project=${chart} .selection=${this.selectedIds} .scope=${this.collectionScope} .busy=${this.busy || !!this.gesture || !!this.widthSession || !this.audio} .forceSpeedAvailable=${this.nativeChart} .globalNoteSpeed=${DEFAULT_RENDER_SETTINGS.noteSpeed} .onOperation=${this.collectionOperation} .onScope=${this.changeCollectionScope} .onSelect=${this.selectCollectionMembers}></chart-creation-collections>
       ${
         selection
           ? html`
@@ -2661,7 +2250,7 @@ export class ChartCreationWorkspace extends LitElement {
                   ${([-1, 1] as const).map(direction => iconButton({
                     label: `${this.t("beat")} ${direction > 0 ? "+" : "−"} · ${this.t("snap")}`,
                     icon: direction > 0 ? "arrow_upward" : "arrow_downward",
-                    disabled: this.busy || this.nativeUpdating || !this.nativeSelectionReady || !!this.nativeGesture || !!this.gesture || !this.audio,
+                    disabled: this.busy || !!this.gesture || !this.audio,
                     onClick: () => this.nudgeSelection(direction),
                   }))}
                   <button
@@ -2676,7 +2265,7 @@ export class ChartCreationWorkspace extends LitElement {
                   ${iconButton({ label: this.t("creation.copy_brush"), icon: "format_paint", disabled: this.busy, onClick: () => this.copyBrush() })}
                   ${"ease" in selection ? iconButton({ label: this.t("creation.generate_nodes"), icon: "add", disabled: this.busy, onClick: () => this.generateSelectedNodes() }) : nothing}
                   ${iconButton({ label: this.t("creation.remove_nodes"), icon: "remove",
-                    disabled: this.busy || this.nativeUpdating || !this.nativeSelectionReady || !!this.nativeGesture || !!this.gesture || !this.audio || !removableLinePointIds(chart, this.selectedIds).length,
+                    disabled: this.busy || !!this.gesture || !this.audio || !removableLinePointIds(chart, this.selectedIds).length,
                     onClick: () => this.removeSelectedNodes() })}
                 </div>
                 <button
@@ -2718,7 +2307,7 @@ export class ChartCreationWorkspace extends LitElement {
                 ${this.selectedConnectorIds(chart).size ? html`
                   <md-outlined-select label=${this.t("creation.line_kind")}
                     .value=${live(this.selectedLineKind())}
-                    ?disabled=${this.busy || this.nativeUpdating || !this.nativeSelectionReady || !!this.nativeGesture || !!this.gesture || !this.audio}
+                    ?disabled=${this.busy || !!this.gesture || !this.audio}
                     @change=${this.changeLineKind}>
                     <md-select-option value="long" .selected=${this.selectedLineKind() === "long"}><div slot="headline">${this.t("hold")}</div></md-select-option>
                     <md-select-option value="guide" .selected=${this.selectedLineKind() === "guide"}><div slot="headline">${this.t("guide")}</div></md-select-option>
@@ -2728,7 +2317,7 @@ export class ChartCreationWorkspace extends LitElement {
                   <p>${this.t("creation.line_kind_hint")}</p>
                   <md-outlined-select label=${this.t("creation.line_critical")}
                     .value=${live(this.selectedLineCritical())}
-                    ?disabled=${this.busy || this.nativeUpdating || !this.nativeSelectionReady || !!this.nativeGesture || !!this.gesture || !this.audio}
+                    ?disabled=${this.busy || !!this.gesture || !this.audio}
                     @change=${this.changeLineCritical}>
                     <md-select-option value="inherit" .selected=${this.selectedLineCritical() === "inherit"}><div slot="headline">${this.t("creation.line_critical_inherit")}</div></md-select-option>
                     <md-select-option value="normal" .selected=${this.selectedLineCritical() === "normal"}><div slot="headline">${this.t("creation.line_critical_normal")}</div></md-select-option>
@@ -3200,7 +2789,6 @@ export class ChartCreationWorkspace extends LitElement {
           @change=${(e: Event) => {
             this.rate = Number((e.target as HTMLSelectElement).value);
             if (this.preview) this.preview.clock.rate = this.rate;
-            void this.applyNativeOptions({ rate: this.rate });
           }}
         >
           ${[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map(
@@ -3332,7 +2920,6 @@ export class ChartCreationWorkspace extends LitElement {
             ${iconButton({ icon: "add", label: `${this.t("creation.zoom_y")} +`, disabled: this.busy || !this.audio || Boolean(this.gesture) || this.secondsPerScreen <= 0.5,
               onClick: () => this.setVerticalZoom(this.secondsPerScreen / 2) })}
           </div>
-          <span class="chart-studio__preview-mode" ?hidden=${this.stageMode !== "preview"}>${this.t(`creation.preview_${this.nativePreviewSupported ? this.nativeMode : "chart"}`)}</span>
           <div class="chart-studio__tools">
             <div class="chart-creation__actions">
               ${segmented({
@@ -3384,7 +2971,7 @@ export class ChartCreationWorkspace extends LitElement {
           shortcut: "Ctrl/⌘+Z",
           icon: "undo",
           className: "chart-studio__history",
-          disabled: this.busy || this.nativeUpdating || !this.history.canUndo,
+          disabled: this.busy || !this.history.canUndo,
           onClick: () => {
             this.cancelGesture();
             this.history.undo();
@@ -3399,7 +2986,7 @@ export class ChartCreationWorkspace extends LitElement {
           shortcut: "Ctrl/⌘+Shift+Z",
           icon: "redo",
           className: "chart-studio__history",
-          disabled: this.busy || this.nativeUpdating || !this.history.canRedo,
+          disabled: this.busy || !this.history.canRedo,
           onClick: () => {
             this.cancelGesture();
             this.history.redo();
@@ -3455,7 +3042,7 @@ export class ChartCreationWorkspace extends LitElement {
           <aside
             id="chart-studio-project"
             class="chart-studio__panel chart-studio__panel--left"
-            ?hidden=${!this.leftOpen}
+            ?hidden=${this.stageMode === "preview" || !this.leftOpen}
             role=${this.narrow ? "dialog" : "complementary"}
             aria-modal=${this.narrow ? "true" : nothing}
             aria-label=${this.t("project")}
@@ -3507,10 +3094,19 @@ export class ChartCreationWorkspace extends LitElement {
             ></canvas>
             ${this.audio && this.stageMode === "edit" && (this.canvasLoading || this.canvasFailed) ? html`<div class="chart-studio__skin-state">${this.canvasLoading ? loadingState(this.c("loading"),{local:true}) : html`<button class="button button--tonal" @click=${()=>void this.ensureCanvasSkin(true)}>${this.c("retry")}</button>`}</div>` : nothing}
             <output class="chart-studio__cursor" data-cursor aria-live="off" hidden></output>
-            <div data-native-preview class="chart-studio__native" ?hidden=${this.stageMode !== "preview"}
-              tabindex=${this.nativeEditable ? 0 : nothing}
-              @pointerdown=${this.nativePointerDown} @pointermove=${this.nativePointerMove}
-              @pointerup=${this.nativePointerEnd} @pointercancel=${this.nativePointerEnd} @lostpointercapture=${this.nativePointerEnd}></div>
+            ${this.stageMode === "preview" && this.previewPlayback ? html`
+              <chart-simulator
+                .playback=${this.previewPlayback}
+                audio-url=${this.previewAudioUrl!}
+                chart-format="community"
+                band-id=${this.previewBandId}
+                server=${this.previewIdentity!.server}
+                locale=${this.locale}
+                label=${this.chart.meta.title || this.t("preview")}
+                .mode=${"watch"}
+                .introContent=${{ title: this.chart.meta.title, jacketUrl: this.previewJacketUrl }}
+              ></chart-simulator>
+            ` : nothing}
             ${
               !this.audio
                 ? html`
@@ -3555,22 +3151,20 @@ export class ChartCreationWorkspace extends LitElement {
           <aside
             id="chart-studio-inspector"
             class="chart-studio__panel chart-studio__panel--right"
-            ?hidden=${!this.rightOpen}
+            ?hidden=${this.stageMode === "preview" || !this.rightOpen}
             role=${this.narrow ? "dialog" : "complementary"}
             aria-modal=${this.narrow ? "true" : nothing}
-            aria-label=${this.stageMode === "preview" ? this.c("chartPlayer.settings") : this.t("inspector")}
+            aria-label=${this.t("inspector")}
           >
             <header>
               <strong>
-                ${this.stageMode === "preview" ? this.c("chartPlayer.settings") : this.t("inspector")}
+                ${this.t("inspector")}
               </strong>
               ${iconButton({ label: this.c("close"), icon: "close", onClick: () => this.togglePanel("right") })}
             </header>
             <div class="chart-studio__panel-content">
               ${
-                this.stageMode === "preview"
-                  ? html`${this.nativeEditable ? selectionPanel : nothing}${this.renderNativeSettings()}`
-                  : html`
+                html`
                       ${selectionPanel}${defaultsPanel}${viewControls}
                       ${this.field(
                 "beat",
@@ -3597,7 +3191,7 @@ export class ChartCreationWorkspace extends LitElement {
             </div>
           </aside>
         </div>
-        <footer class="chart-studio__transport" ?inert=${this.narrow && (this.leftOpen || this.rightOpen)}>
+        <footer class="chart-studio__transport" ?hidden=${this.stageMode !== "edit"} ?inert=${this.narrow && (this.leftOpen || this.rightOpen)}>
           <button
             class="icon-button icon-button--filled"
             type="button"

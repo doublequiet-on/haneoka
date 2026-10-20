@@ -3926,6 +3926,7 @@
     },
     "charts": {
       "title": "Community Charts",
+      "publishToCommunity": "Post to community",
       "publish": "Publish",
       "published": "Published",
       "update": "Publish update",

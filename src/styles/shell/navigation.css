@@ -361,6 +361,28 @@
   --nav-depth: 2;
   margin-top: 2px;
 }
+.nav__item-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.nav__item-row > .nav-item {
+  flex: 1;
+}
+.nav__item-row:has(> .nav__item-toggle) > .nav-item {
+  margin-inline-end: 0;
+}
+.nav__item-toggle {
+  --icon-button-size: 48px;
+  flex: none;
+  margin-inline-end: 8px;
+}
+.nav__item-toggle > .material-icon {
+  transition: rotate var(--motion-spatial);
+}
+.nav__item-toggle[aria-expanded="true"] > .material-icon {
+  rotate: 180deg;
+}
 .nav-item {
   display: flex;
   min-width: 0;
@@ -491,10 +513,10 @@
   }
 }
 @media (min-width: 1200px) {
-  :root[data-nav="expanded"] .nav__items > li > .nav-item[aria-current="page"] > .nav-item__indicator {
+  :root[data-nav="expanded"] .nav__items .nav-item[aria-current="page"] > .nav-item__indicator {
     view-transition-name: nav-indicator;
   }
-  :root[data-nav="expanded"] .rail-item:has(~ .nav__tree .nav__items > li > .nav-item[aria-current="page"]) .rail-item__indicator {
+  :root[data-nav="expanded"] .rail-item:has(~ .nav__tree .nav__items .nav-item[aria-current="page"]) .rail-item__indicator {
     view-transition-name: none;
   }
 }

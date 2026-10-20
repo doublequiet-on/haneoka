@@ -77,8 +77,8 @@ const publicForumsDataId = "shell-public-forums";
     Primary destinations morph between the vertical item (56x32 indicator,
     label below) and the horizontal item (56dp full-width pill, label beside
     the icon); the icon keeps its x so the morph reads as one object. The current
-    destination's whole tree is listed below it — every level visible and
-    indented, nothing to disclose — and account, settings and about are
+    destination's tree is listed below it with collapsible branches, and
+    account, settings and about are
     pinned at the bottom.
   -->
   <nav
@@ -145,8 +145,8 @@ const publicForumsDataId = "shell-public-forums";
                 <div class="nav__tree" id={`nav-tree-${destination.id}`} data-nav-tree={destination.id}>
                   <div class="nav__tree-inner">
                     {destination.sections.map((section) => (
-                      <section class="nav__section" aria-labelledby={destination.sections.length > 1 ? `nav-section-${section.id}` : undefined}>
-                        {destination.sections.length > 1 && !section.collapsible && (
+                      <section class="nav__section" aria-labelledby={destination.sections.length > 1 && !section.hideHeading ? `nav-section-${section.id}` : undefined}>
+                        {destination.sections.length > 1 && !section.hideHeading && !section.collapsible && (
                           <h2 class="nav__headline" id={`nav-section-${section.id}`}>
                             <I18nText keyName={section.label} fallback={section.id} locale={locale} />
                           </h2>
@@ -170,15 +170,29 @@ const publicForumsDataId = "shell-public-forums";
                             const children = item.children || [];
                             const forums = destination.id === "community" && item.route === "/community/forums";
                             const active = itemActive(item.route);
+                            const branch = children.length > 0 || forums;
+                            const branchId = `nav-item${item.route.replaceAll("/", "-")}`;
+                            const branchOpen = active || children.some(child => itemActive(child.route))
+                              || (forums && route.startsWith("/community/forums/"));
                             return (
                               <li>
-                                <a class="nav-item" href={navigationHref(item.route)} aria-current={active ? "page" : undefined}>
-<span class="nav-item__indicator" aria-hidden="true"></span>
-                                  <Icon name={item.icon} size={20} filled={active} />
-                                  <span class="nav-item__label"><I18nText keyName={item.label} fallback={item.label} locale={locale} /></span>
-                                </a>
+                                <div class="nav__item-row">
+                                  <a class="nav-item" href={navigationHref(item.route)} aria-current={active ? "page" : undefined}>
+                                    <span class="nav-item__indicator" aria-hidden="true"></span>
+                                    <Icon name={item.icon} size={20} filled={active} />
+                                    <span class="nav-item__label"><I18nText keyName={item.label} fallback={item.label} locale={locale} /></span>
+                                  </a>
+                                  {branch && (
+                                    <button class="icon-button nav__item-toggle" type="button"
+                                      data-nav-section-toggle={branchId}
+                                      aria-expanded={branchOpen ? "true" : "false"} aria-controls={branchId}>
+                                      <Icon name="expand_more" size={20} />
+                                      <span class="sr-only"><I18nText keyName={item.label} fallback={item.label} locale={locale} /></span>
+                                    </button>
+                                  )}
+                                </div>
                                 {children.length > 0 && (
-                                  <ul class="nav__items nav__items--nested" role="list">
+                                  <ul class="nav__items nav__items--nested" role="list" id={branchId} hidden={!branchOpen}>
                                     {children.map((child) => (
                                       <li>
                                         <a class="nav-item" href={navigationHref(child.route)} aria-current={itemActive(child.route) ? "page" : undefined}>
@@ -191,7 +205,7 @@ const publicForumsDataId = "shell-public-forums";
                                   </ul>
                                 )}
                                 {forums && (
-                                  <div class="nav__items--nested nav__forums">
+                                  <div class="nav__items--nested nav__forums" id={branchId} hidden={!branchOpen}>
                                     <community-forum-navigation locale={locale} data-community-forum-directory
                                       data-prerendered data-page-data={publicForumsDataId} set:html={publicForums.body}
                                       transition:persist="community-forum-navigation"></community-forum-navigation>

@@ -11,6 +11,7 @@ export interface NavSection {
   id: string;
   label: string;
   items: NavItem[];
+  hideHeading?: boolean;
   /** Long sections collapse behind a disclosure so the drawer stays scannable. */
   collapsible?: boolean;
 }
@@ -207,6 +208,7 @@ const sections: NavSection[] = [
   {
     id: "community",
     label: "navigation.community",
+    hideHeading: true,
     items: [
       { route: "/community", icon: "dynamic_feed", label: "community.page.feedRecommended", children: [
         { route: "/community/latest", icon: "schedule", label: "community.page.feedLatest" },
