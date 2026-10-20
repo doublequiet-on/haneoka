@@ -45,7 +45,8 @@ export const scoreGoal = (s: BuildSettings) => (s.goal === "score" && s.scoreTar
 export const resultSettings = (host: TeamBuilder): BuildSettings => {
   if (host.tab === "pt" && host.settings.rewardMode === "recommendation") {
     const goal = host.pt.job?.request.goal;
-    return { ...host.settings, goal: "event", route: "live", measure: goal?.kind === "event" ? goal.measure : host.pt.measure,
+    return { ...host.settings, eventId: goal?.kind === "event" && goal.eventId >= 0 ? goal.eventId : host.settings.eventId,
+      goal: "event", route: "live", measure: goal?.kind === "event" ? goal.measure : host.pt.measure,
       songs: goal?.kind === "event" ? goal.songs : host.settings.songs };
   }
   return host.resultSettings ?? host.searchSettings;

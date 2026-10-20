@@ -19,7 +19,8 @@ import type { TeamBuilder } from "../team-builder";
 import type { BuildSettings } from "./types";
 import { resultSettings, SCORE_GOALS, scoreGoal, scoreProof, scoreText } from "./score-goal";
 import { resolveBox } from "../../lib/team-builder/engine/box";
-import { resolveSlotSkill } from "../../lib/team-builder/engine/skills";
+import { effectPercent, resolveSlotSkill } from "../../lib/team-builder/engine/skills";
+import { memberEventPercent, snapEventPercent } from "../../lib/team-builder/engine/power";
 import { resourceCollectionHref } from "../../lib/resource-route";
 import type { ReleaseServer } from "../../lib/release-server";
 import type { Locale } from "../../i18n/locales";
@@ -471,21 +472,28 @@ function songMetaHref(host: TeamBuilder, hit: EngineHit): string | null {
     inputs.snaps.filter((row) => hit.snaps.includes(row.key)),
     inputs.unknownPolicy,
   );
-  const slots = hit.members.map((key, slot) => {
-    const member = box.members.find((item) => item.key === key);
+  const members = hit.members.map((key) => box.members.find((item) => item.key === key));
+  const snaps = hit.snaps.map((key) => (key ? (box.snaps.find((item) => item.key === key) ?? null) : null));
+  const slots = members.map((member, slot) => {
     if (!member) return "0:0:0";
-    const snapKey = hit.snaps[slot];
-    const snap = snapKey ? (box.snaps.find((item) => item.key === snapKey) ?? null) : null;
-    const skill = resolveSlotSkill(master, member, snap);
-    const percent = (type: number) => skill.effects.filter((effect) => effect.type === type).reduce((sum, effect) => sum + effect.delta / 1000, 0);
-    return `${percent(2000)}:${percent(2004)}:${skill.extensionMs}`;
+    const skill = resolveSlotSkill(master, member, snaps[slot] ?? null);
+    return `${effectPercent(skill, 2000)}:${effectPercent(skill, 2004)}:${skill.extensionMs}`;
   });
   const query = new URLSearchParams({ deckPower: String(hit.power), deckSlots: slots.join(",") });
   const settings = resultSettings(host);
-  if (hit.event && settings.goal === "event" && settings.route === "live") {
-    query.set(settings.measure === "items" ? "deckItemBonus" : "deckPointBonus", String(Math.floor(hit.event.bonusPercent)));
-    if (settings.eventId) query.set("deckEvent", String(settings.eventId));
-    if (settings.boosts) query.set("deckBoosts", String(settings.boosts));
+  const event = settings.eventId !== null ? master.events.get(settings.eventId) : undefined;
+  if (hit.event && settings.goal === "event" && settings.route !== "challenge" && event) {
+    const bonus = (type: number) =>
+      Math.floor(
+        (members.reduce((sum, member) => sum + (member ? memberEventPercent(event.effects, member, type) : 0), 0) +
+          snaps.reduce((sum, snap) => sum + (snap ? snapEventPercent(event.effects, snap, type) : 0), 0)) /
+          100,
+      );
+    // An event live earns both bonuses; `hit.event.bonusPercent` only carries the ranked measure's one.
+    query.set("deckPointBonus", String(bonus(0)));
+    query.set("deckItemBonus", String(bonus(1)));
+    query.set("deckEvent", String(settings.eventId));
+    query.set("deckBoosts", String(settings.boosts));
   }
   return resourceCollectionHref(`catalog/song-meta?${query}`, host.server as ReleaseServer, host.locale as Locale) ?? null;
 }
