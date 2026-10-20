@@ -338,6 +338,7 @@ export function projectLevelItem(
   };
   if (cover !== undefined) result.cover = cover;
   if (bgm !== undefined) result.bgm = bgm;
+  if (metadata.previewUrl) result.preview = { url: metadata.previewUrl };
   return result;
 }
 
@@ -377,6 +378,7 @@ export function projectCatalogCharts(
       }
       const coverUrl = absoluteUrl(song.jacketUrl ?? song.jacketThumbUrl, options.mediaBaseUrl);
       const bgmUrl = absoluteUrl(song.musicUrl, options.mediaBaseUrl);
+      const previewUrl = absoluteUrl(song.previewUrl, options.mediaBaseUrl);
       const metadata = {
         artists,
         artistFilters,
@@ -392,6 +394,7 @@ export function projectCatalogCharts(
         ...(Array.isArray(song.tags) ? { tags: song.tags.filter(isJsonValue) } : {}),
         ...(coverUrl ? { coverUrl } : {}),
         ...(bgmUrl ? { bgmUrl } : {}),
+        ...(previewUrl ? { previewUrl } : {}),
       };
       charts.push(metadata);
     }
@@ -471,6 +474,53 @@ function recommendedCharts(chart: ChartRecord, charts: readonly ChartRecord[], c
   return result;
 }
 
+export function relatedLevelCharts<T extends ChartDescriptor>(
+  chart: ChartDescriptor,
+  charts: readonly T[],
+  count = 5,
+): { otherDifficulties: T[]; sameArtists: T[] } {
+  const server = sonolusServerFromLevelName(chart.name);
+  const otherDifficulties = charts
+    .filter(
+      (candidate) =>
+        candidate.name !== chart.name &&
+        candidate.songId === chart.songId &&
+        sonolusServerFromLevelName(candidate.name) === server,
+    )
+    .sort(
+      (left, right) =>
+        DIFFICULTIES.indexOf(left.difficulty as (typeof DIFFICULTIES)[number]) -
+        DIFFICULTIES.indexOf(right.difficulty as (typeof DIFFICULTIES)[number]),
+    );
+  const artists = new Set(chart.artistFilters?.map(({ name }) => name));
+  const candidates = charts
+    .filter(
+      (candidate) =>
+        candidate.songId !== chart.songId &&
+        (artists.size && candidate.artistFilters?.length
+          ? candidate.artistFilters.some(({ name }) => artists.has(name))
+          : candidate.artists === chart.artists),
+    )
+    .sort(
+      (left, right) =>
+        Number(right.difficulty === chart.difficulty) - Number(left.difficulty === chart.difficulty) ||
+        Math.abs(left.rating - chart.rating) - Math.abs(right.rating - chart.rating) ||
+        Number(sonolusServerFromLevelName(right.name) === server) -
+          Number(sonolusServerFromLevelName(left.name) === server) ||
+        right.publishedAt - left.publishedAt ||
+        left.name.localeCompare(right.name, "en", { numeric: true }),
+    );
+  const songs = new Set<string>();
+  const sameArtists = candidates
+    .filter((candidate) => {
+      if (songs.has(candidate.songId)) return false;
+      songs.add(candidate.songId);
+      return true;
+    })
+    .slice(0, Math.max(0, count));
+  return { otherDifficulties, sameArtists };
+}
+
 export function projectLevelDetails(
   chart: ChartRecord,
   charts: readonly ChartRecord[],
@@ -479,19 +529,50 @@ export function projectLevelDetails(
   const template = options.template ?? null;
   const byName = new Map(charts.map((candidate) => [candidate.name, candidate]));
   const inheritedSections = templateSections(template, byName);
-  const recommendations = recommendedCharts(chart, charts, Math.max(0, options.recommendationCount ?? 5));
-  const sections = inheritedSections.length
-    ? inheritedSections
-    : recommendations.length
+  const related = relatedLevelCharts(chart, charts);
+  const relatedNames = new Set([...related.otherDifficulties, ...related.sameArtists].map(({ name }) => name));
+  const recommendations = recommendedCharts(
+    chart,
+    charts.filter((candidate) => !relatedNames.has(candidate.name)),
+    Math.max(0, options.recommendationCount ?? 5),
+  );
+  const search = new URLSearchParams(options.quickSearchValues);
+  search.set("type", search.get("source") === "bestdori" ? "bestdori" : "advanced");
+  if (chart.artistFilters?.length) search.set("artists", chart.artistFilters.map(({ name }) => name).join(","));
+  else search.set("keywords", chart.artists);
+  const sections = [
+    ...(related.otherDifficulties.length
       ? [
           {
-            title: options.sectionTitle ?? "#RECOMMENDED",
-            icon: "star",
+            title: "#OTHER_DIFFICULTIES",
             itemType: "level",
-            items: recommendations.map((candidate) => candidate.item),
-          } as JsonObject,
+            items: related.otherDifficulties.map((candidate) => candidate.item),
+          },
         ]
-      : [];
+      : []),
+    ...(related.sameArtists.length
+      ? [
+          {
+            title: "#SAME_ARTISTS",
+            itemType: "level",
+            items: related.sameArtists.map((candidate) => candidate.item),
+            searchValues: search.toString(),
+          },
+        ]
+      : []),
+    ...(inheritedSections.length
+      ? inheritedSections
+      : recommendations.length
+        ? [
+            {
+              title: options.sectionTitle ?? "#RECOMMENDED",
+              icon: "star",
+              itemType: "level",
+              items: recommendations.map((candidate) => candidate.item),
+            } as JsonObject,
+          ]
+        : []),
+  ];
   return {
     ...(template ?? {}),
     item: chart.item,

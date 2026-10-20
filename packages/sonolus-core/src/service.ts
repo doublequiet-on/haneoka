@@ -12,6 +12,7 @@ import {
   projectRandomLevelInfo,
   projectRandomLevelList,
   projectServerInfo,
+  relatedLevelCharts,
   sonolusPlaylistName,
   sonolusServerFromLevelName,
   sonolusSourceRoot,
@@ -549,16 +550,25 @@ export class SonolusLevelService {
     if (!name) return notFound();
     const descriptor = snapshot.byName.get(name);
     if (!descriptor) return notFound();
+    const related = relatedLevelCharts(descriptor, [...snapshot.byName.values()], FEATURED_ITEM_COUNT);
     const prepared = await prepareSnapshotCharts(
       snapshot,
-      [descriptor, ...descriptorRecommendations(descriptor, snapshot.charts, FEATURED_ITEM_COUNT)],
+      uniqueCharts([
+        descriptor,
+        ...related.otherDifficulties,
+        ...related.sameArtists,
+        ...descriptorRecommendations(descriptor, snapshot.charts, FEATURED_ITEM_COUNT),
+      ]),
       options,
     );
     const chart = prepared.find((candidate) => candidate.name === name);
     return chart
       ? document(
           200,
-          projectLevelDetails(chart, prepared, { template: snapshot.template.details ?? null }),
+          projectLevelDetails(chart, prepared, {
+            template: snapshot.template.details ?? null,
+            ...(options.quickSearchValues ? { quickSearchValues: options.quickSearchValues } : {}),
+          }),
           "public, max-age=600, stale-while-revalidate=86400",
         )
       : notFound();

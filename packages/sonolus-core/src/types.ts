@@ -49,6 +49,7 @@ export interface ChartDescriptor {
   author?: string;
   bgmUrl?: string;
   coverUrl?: string;
+  previewUrl?: string;
   categories?: ChartFilterValue[];
   tags?: JsonValue[];
   dataId: string;
@@ -138,6 +139,7 @@ export interface LevelInfoOptions {
 }
 
 export interface LevelDetailsOptions {
+  quickSearchValues?: string;
   recommendationCount?: number;
   sectionTitle?: string;
   template?: JsonObject | null;

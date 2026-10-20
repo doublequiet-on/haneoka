@@ -925,8 +925,10 @@ class BuildData:
                 movies[key] = {**media, "loop": loop}
         return movies or None
 
-    def music_sound(self, identity: int) -> dict[str, Any] | None:
-        """Resolve the live-song sound through the exact Master/CRI MusicScore chain."""
+    def music_sound(
+        self, identity: int, *, directory: str = "musicscore"
+    ) -> dict[str, Any] | None:
+        """Resolve song audio through the exact Master/CRI cue-sheet chain."""
         identity = int(identity or 0)
         row = self.sounds.get(identity)
         if not row:
@@ -937,7 +939,7 @@ class BuildData:
             return None
         cue_sheet_name = str(sheet.get("_cueSheetName") or "")
         runtime_path = PurePosixPath(
-            "cri", "sound", "musicscore", cue_sheet_name
+            "cri", "sound", directory, cue_sheet_name
         ).as_posix()
         matches = [
             entry
@@ -967,7 +969,11 @@ class BuildData:
             streamCount=output.get("streamCount") if output else None,
             loopInfo=output.get("loopInfo") if output else None,
             missing=not bool(playable),
-            binding="exact-master-sound-cue-sheet-to-music-score-runtime-path",
+            binding=(
+                "exact-master-sound-cue-sheet-to-music-score-short-runtime-path"
+                if directory == "musicscoreshort"
+                else "exact-master-sound-cue-sheet-to-music-score-runtime-path"
+            ),
             sourceTables=["MasterSound", "MasterSoundCueSheet"],
             raw=row,
         )
@@ -2513,6 +2519,9 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
                     )
         sound = data.music_sound(int(row.get("_musicSoundID") or 0))
         music = sound.get("playableUrl") if sound else None
+        preview_sound = data.music_sound(
+            int(row.get("_jingleSoundID") or 0), directory="musicscoreshort"
+        )
         band_ids = [int(value) for value in row.get("_bandIDs", [])]
         primary_band = band_ids[0] if band_ids else 0
         # Cover songs (e.g. 春日影/Crychic) ship an empty _bandIDs; fall back to
@@ -2540,6 +2549,8 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
             jacketThumbUrl=data.asset(f"Assets/AddressableResources/Image/Jacket/small/{jacket}.png"),
             musicUrl=music,
             musicSound=sound,
+            previewUrl=preview_sound.get("playableUrl") if preview_sound else None,
+            previewSound=preview_sound,
             difficulty=difficulties,
             lyricist=data.text(row.get("_lyricistTextID"), ""),
             composer=data.text(row.get("_composerTextID"), ""),
@@ -2576,6 +2587,10 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
                 "musicSoundBinding": (
                     "MasterLiveMusic._musicSoundID -> MasterSound._soundCueSheetID -> "
                     "MasterSoundCueSheet._cueSheetName -> exact MusicScore CRI ACB runtimePath"
+                ),
+                "previewSoundBinding": (
+                    "MasterLiveMusic._jingleSoundID -> MasterSound._soundCueSheetID -> "
+                    "MasterSoundCueSheet._cueSheetName -> exact MusicScoreShort CRI ACB runtimePath"
                 ),
             },
             sourceTable="MasterLiveMusic",

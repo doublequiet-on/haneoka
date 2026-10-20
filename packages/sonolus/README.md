@@ -18,3 +18,8 @@ ZIP are required by the sound pack builder.
 
 Generated resources include the native engine's Haneoka MPL-2.0 license and
 the preserved upstream Project SEKAI MIT notice.
+
+Song previews use the game's MusicScoreShort audio, resolved from
+`MasterLiveMusic._jingleSoundID` through its exact sound and cue-sheet records.
+Rebuild the resource catalog to publish `previewUrl`; levels without an available
+preview retain Sonolus's BGM preview behavior.
