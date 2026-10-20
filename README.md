@@ -45,6 +45,11 @@ community levels do not enter the default official list. Withdrawal removes
 public chart and media access; deleted chart payloads are retained for 30 days before cleanup. Project backups include audio,
 cover and publication settings, and import as a new local project.
 
+The team builder's Gekiso settings include a Luck sample count: 0 retains the
+nominal expectation model; a positive count averages fixed seeds 0 through n-1.
+Manual team evaluation follows the selected Gekiso accuracy, assumed range
+placement, and sample count.
+
 ## Development
 
 Start with the [repository map](L1.md) and [development guide](docs/DEV_GUIDE.md)

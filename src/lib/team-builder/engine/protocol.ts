@@ -4,7 +4,7 @@
 // Pos: [Map](L2-2.md)；主线程与当前引擎 Worker 的消息边界。
 // Effects/Dependencies: 类型声明；资源获取与计算由 client／worker 实现。
 import type { TeamBuilderData } from "../data";
-import type { EngineRequest, EngineResponse, SongRef, TeamSpec } from "./api";
+import type { EngineRequest, EngineResponse, Goal, SongRef, TeamSpec } from "./api";
 import type { MemberInput, SnapInput, UnknownPolicy } from "./box";
 import type { PlayModel } from "./live";
 import type { PlayerInput } from "./api";
@@ -17,6 +17,7 @@ export type EvaluateRequest = {
   team: TeamSpec;
   songs: SongRef[];
   play: PlayModel;
+  gekiso?: Pick<Extract<Goal, { kind: "gekiso" }>, "accuracy" | "rank" | "seeds">;
   challengeEventId: number | null;
   event: { eventId: number; route: "live" | "challenge"; consumption: number } | null;
 };

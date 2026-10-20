@@ -42,8 +42,9 @@ async function evaluate(host: TeamBuilder) {
       player: host.view!.player,
       team: teamSpec(host),
       songs: goal.songs,
-      play: goal.play,
-      challengeEventId: goal.challengeEventId,
+      play: goal.kind === "score" ? goal.play : { great: 0, good: 0, bad: 0, miss: 0 },
+      ...(goal.kind === "gekiso" ? { gekiso: goal } : {}),
+      challengeEventId: goal.kind === "score" ? goal.challengeEventId : null,
       event: null,
     });
     if (host.ownsTask(task) && context === host.manualContext()) {
@@ -195,6 +196,7 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
   const suggestions = host.manualSuggestionsFor === host.manualSuggestionContext() ? host.manualSuggestions : null;
   const suggesting = host.manualSuggesting;
   const calculating = host.taskKind === "evaluation" || host.taskKind === "suggestion";
+  const showSkipScore = host.manualGoal().kind !== "gekiso";
   return html`
     <div class="tb-teams stack stack--loose">
       <div class=${comparison ? "stack" : "tb-build tb-manual"}>
@@ -202,23 +204,23 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
         <section class="surface stack">
           ${sectionHeading({ icon: "library_music", label: host.t("songs", "Songs"), count: host.settings.songs.length || undefined })}
           ${songList(host, host.settings.songs, songs => host.updateSettings({ songs }), false,
-            host.settings.challengeRules && host.settings.eventId !== null ? catalog.challengeSongs(host.settings.eventId).map(row => row.liveMusicId) : undefined)}
+            showSkipScore && host.settings.challengeRules && host.settings.eventId !== null ? catalog.challengeSongs(host.settings.eventId).map(row => row.liveMusicId) : undefined)}
         </section>
         <section class="surface stack">
           ${sectionHeading({ icon: "piano", label: host.t("play", "Play") })}
-          ${playSection(host, { ...host.settings, goal: "score" })}
-          <label class="tb-check">
+          ${playSection(host, { ...host.settings, goal: showSkipScore ? "score" : "gekiso" })}
+          ${showSkipScore ? html`<label class="tb-check">
             <md-checkbox touch-target="wrapper" .checked=${live(host.settings.challengeRules)}
               @change=${(event: Event) => host.updateSettings({ challengeRules: (event.target as HTMLInputElement).checked })}></md-checkbox>
             <span>${host.t("challengeRules", "Challenge live rules (event parameter bonus)")}</span>
           </label>
-          ${host.settings.challengeRules ? eventSection(host, { ...host.settings, goal: "score" }) : nothing}
+          ${host.settings.challengeRules ? eventSection(host, { ...host.settings, goal: "score" }) : nothing}` : nothing}
           <span class="tb-field__label">${host.t("unknownPolicy", "Growth not entered")}</span>
           ${segmented({ label: host.t("unknownPolicy", "Growth not entered"), value: host.settings.unknownPolicy,
             options: [{ value: "max", label: host.t("unknownMax", "Count as max") }, { value: "min", label: host.t("unknownMin", "Count as minimum") }],
             onSelect: unknownPolicy => host.updateSettings({ unknownPolicy }),
           })}
-          <button class="button tb-run__button" type="button" ?disabled=${!calculating && (!manualReady(host) || duplicate || !host.settings.songs.length || host.running || (host.settings.challengeRules && host.settings.eventId === null))} @click=${() => calculating ? host.cancel() : void evaluate(host)}>
+          <button class="button tb-run__button" type="button" ?disabled=${!calculating && (!manualReady(host) || duplicate || !host.settings.songs.length || host.running || (showSkipScore && host.settings.challengeRules && host.settings.eventId === null))} @click=${() => calculating ? host.cancel() : void evaluate(host)}>
             ${calculating ? icon("close", 18) : icon("calculate", 18)}${calculating ? host.common("common.actions.cancel", "Cancel") : host.t("evaluateTeam", "Evaluate on the chosen songs")}</button>
           <div class="tb-manual__progress">${calculating ? html`<md-linear-progress indeterminate aria-label=${host.t("evaluating", "Evaluating")}></md-linear-progress>` : nothing}</div>
         </section>
@@ -306,11 +308,11 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
           ? html`<section class="surface stack tb-manual__scores">
             ${sectionHeading({ icon: "query_stats", label: host.t("goalScore", "Live score"), count: rows.length || undefined })}
             <div class="table-scroll" role="region" tabindex="0" aria-label=${host.t("goalScore", "Live score")}><table class="data-table tb-eval">
-              <thead><tr><th scope="col">${host.t("song", "Song")}</th><th scope="col" class="is-numeric">${host.t("power", "Power")}</th><th scope="col" class="is-numeric">${host.t("expectedScore", "Expected score")}</th><th scope="col" class="is-numeric">${host.t("scoreRange", "Range")}</th><th scope="col" class="is-numeric">${host.t("skipScore", "Skip score")}</th></tr></thead>
+              <thead><tr><th scope="col">${host.t("song", "Song")}</th><th scope="col" class="is-numeric">${host.t("power", "Power")}</th><th scope="col" class="is-numeric">${host.t("expectedScore", "Expected score")}</th><th scope="col" class="is-numeric">${host.t("scoreRange", "Range")}</th>${showSkipScore ? html`<th scope="col" class="is-numeric">${host.t("skipScore", "Skip score")}</th>` : nothing}</tr></thead>
               <tbody>${rows.map(({ song, row }) => html`<tr>
                 <th scope="row">${catalog.songTitle(song.songId)} <small>${catalog.difficultyLabel(song.songId, song.difficulty)}</small></th>
                 <td class="is-numeric">${row ? format(host, row.power) : "—"}</td><td class="is-numeric">${row ? format(host, row.score.mean) : "—"}</td>
-                <td class="is-numeric">${row ? `${format(host, row.score.min)} – ${format(host, row.score.max)}` : "—"}</td><td class="is-numeric">${row ? format(host, row.skipScore) : "—"}</td>
+                <td class="is-numeric">${row ? `${format(host, row.score.min)} – ${format(host, row.score.max)}` : "—"}</td>${showSkipScore ? html`<td class="is-numeric">${row ? format(host, row.skipScore) : "—"}</td>` : nothing}
               </tr>`)}</tbody></table></div></section>`
           : nothing}
       </div>

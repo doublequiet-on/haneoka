@@ -437,8 +437,10 @@ export class TeamBuilder extends LitElement {
     });
     return { members, snaps, player: this.view?.player, unknownPolicy: this.settings.unknownPolicy };
   }
-  manualGoal(): Extract<Goal, { kind: "score" }> {
+  manualGoal(): Extract<Goal, { kind: "score" | "gekiso" }> {
     const s = this.settings;
+    const goal = this.goal();
+    if (goal?.kind === "gekiso") return { ...goal, criterion: "mean" };
     return {
       kind: "score", songs: s.songs, criterion: "mean",
       play: s.playMode === "ap" ? { great: 0, good: 0, bad: 0, miss: 0 } : { great: s.great / 100, good: s.good / 100, bad: 0, miss: s.miss / 100, missEvery: s.missEvery || 0 },
@@ -457,7 +459,7 @@ export class TeamBuilder extends LitElement {
   }
   private compatibleSettings(settings: BuildSettings): BuildSettings {
     if (!this.catalog || settings.eventId === null) return settings;
-    const goal = this.tab === "pt" ? settings.rewardMode : this.tab === "teams" ? "score" : settings.goal;
+    const goal = this.tab === "pt" ? settings.rewardMode : this.tab === "teams" && settings.goal !== "gekiso" ? "score" : settings.goal;
     const challengeIds = new Set(this.catalog.challengeSongs(settings.eventId).map((row) => row.liveMusicId));
     const challenge = goal === "event" ? settings.route === "challenge" : (goal === "score" || goal === "power") && settings.challengeRules;
     const normalEvent = goal === "event" || goal === "plan" || goal === "recommendation";
@@ -499,7 +501,7 @@ export class TeamBuilder extends LitElement {
               rank: s.gekisoRank,
               minComboBonus: s.minComboBonus,
               ...(opponents.some((range) => range.length) ? { opponents } : {}),
-              seeds: 0,
+              seeds: s.gekisoSeeds,
             }
           : null;
       }

@@ -2413,6 +2413,7 @@
       "proven": "Verified optimal",
       "unproven": "Time limit reached: best found so far",
       "resultMeta": "{ms} ms · {exact} teams simulated exactly",
+      "resultElapsed": "{ms} ms",
       "staleResults": "Conditions changed since this search.",
       "rerun": "Search again",
       "unknownCards": "{count} saved cards are not in this data release and were skipped.",

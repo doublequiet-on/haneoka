@@ -2413,6 +2413,7 @@
       "proven": "최적 검증 완료",
       "unproven": "시간 제한 도달: 지금까지 찾은 최선의 결과",
       "resultMeta": "{ms} ms · {exact}개 팀 정밀 시뮬레이션",
+      "resultElapsed": "{ms}밀리초",
       "staleResults": "이 검색 이후 조건이 바뀌었습니다.",
       "rerun": "다시 검색",
       "unknownCards": "저장된 카드 {count}장이 이 데이터 버전에 없어 건너뛰었습니다.",

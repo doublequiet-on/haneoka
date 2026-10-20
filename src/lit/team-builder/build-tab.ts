@@ -515,6 +515,15 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
             s.goal === "gekiso"
               ? html`
                   ${comboBonusControl(host)}
+                  <md-outlined-text-field
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                    label=${host.t("pt.luckSamples", "Luck samples")}
+                    .value=${String(s.gekisoSeeds)}
+                    @change=${(e: Event) => set({ gekisoSeeds: Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0)) })}
+                  ></md-outlined-text-field>
                   ${segmented({
                     label: host.t("gekisoRank", "Placement in each range"),
                     value: String(s.gekisoRank),

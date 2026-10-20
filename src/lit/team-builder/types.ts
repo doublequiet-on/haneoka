@@ -58,6 +58,8 @@ export interface BuildSettings {
   just: number;
   gekisoRank: number;
   minComboBonus: number;
+  /** Zero keeps the nominal Luck model; positive values average seeds 0..n. */
+  gekisoSeeds: number;
   /** Opponents' scores per range as typed (numbers separated by spaces or commas). */
   gekisoOpponents: [string, string, string];
 }
@@ -108,6 +110,7 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   just: 100,
   gekisoRank: 1,
   minComboBonus: 1,
+  gekisoSeeds: 0,
   gekisoOpponents: ["", "", ""],
 };
 export interface BoxFilters {

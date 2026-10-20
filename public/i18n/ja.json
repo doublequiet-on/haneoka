@@ -2413,6 +2413,7 @@
       "proven": "最適性を検証済み",
       "unproven": "時間制限に達しました：現時点で最良の結果",
       "resultMeta": "{ms} ms · {exact} 編成を厳密にシミュレート",
+      "resultElapsed": "{ms}ミリ秒",
       "staleResults": "この検索の後に条件が変わりました。",
       "rerun": "再検索",
       "unknownCards": "保存済みの {count} 枚はこのデータ版にないためスキップしました。",

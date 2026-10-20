@@ -640,7 +640,9 @@ export function renderResults(host: TeamBuilder): TemplateResult {
         <span class=${`tb-proof${proven ? " is-proven" : ""}`}>${icon(proven ? "verified" : "hourglass_bottom", 18)}${scoreProof(host, proven)}${gap === null ? nothing : html` · ${host.t("improvementBound", "Up to {percent}% improvement", { percent: format(host, gap, 1) })}`}</span>
         ${host.stale
           ? html`<button class="button button--tonal button--small" type="button" title=${host.t("staleResults", "Conditions changed since this search.")} @click=${() => void host.run()}>${icon("refresh", 18)}${host.t("rerun", "Search again")}</button>`
-          : html`<span class="tb-results__meta tabular">${host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, results.elapsedMs), exact: stats })}</span>`}
+          : html`<span class="tb-results__meta tabular">${stats > 0
+            ? host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, results.elapsedMs), exact: stats })
+            : host.t("resultElapsed", "{ms} ms", { ms: format(host, results.elapsedMs) })}</span>`}
       </div>
       <div class="cluster">
         <button class="button button--tonal" type="button" ?disabled=${proven || host.stale || host.running}

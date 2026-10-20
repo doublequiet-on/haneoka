@@ -2413,6 +2413,7 @@
       "proven": "已驗證最優",
       "unproven": "已達時間上限：目前找到的最佳結果",
       "resultMeta": "{ms} 毫秒 · 精確模擬了 {exact} 支隊伍",
+      "resultElapsed": "{ms} 毫秒",
       "staleResults": "自本次搜尋以來條件已變更。",
       "rerun": "重新搜尋",
       "unknownCards": "有 {count} 張已儲存的卡牌不在此資料版本中，已略過。",
