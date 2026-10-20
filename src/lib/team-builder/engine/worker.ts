@@ -119,6 +119,7 @@ async function charts(songs: SongRef[]) {
     if (index >= 0) staged.splice(index, 1);
     else rows.push({ song, chart: JSON.parse(decoder.decode(await chartBytes(song))) });
     staged.push(key);
+    if (staged.length > 4) staged.shift();
   }
   return rows;
 }

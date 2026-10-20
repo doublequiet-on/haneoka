@@ -40,7 +40,7 @@ function goalText(host: TeamBuilder, goal: GoalKind): string {
   }
 }
 
-function songList(
+export function songList(
   host: TeamBuilder,
   songs: SongRef[],
   change: (songs: SongRef[]) => void,
@@ -91,8 +91,7 @@ function songList(
   `;
 }
 
-function eventSection(host: TeamBuilder): TemplateResult {
-  const s = host.searchSettings;
+export function eventSection(host: TeamBuilder, s = host.searchSettings): TemplateResult {
   const catalog = host.catalog!;
   const events = catalog.events();
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
@@ -153,8 +152,7 @@ function eventSection(host: TeamBuilder): TemplateResult {
   `;
 }
 
-function playSection(host: TeamBuilder): TemplateResult {
-  const s = host.searchSettings;
+export function playSection(host: TeamBuilder, s = host.searchSettings): TemplateResult {
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
   const slider = (label: string, key: "great" | "good" | "miss", max: number) => html`
     <div class="tb-field">

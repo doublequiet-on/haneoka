@@ -3,7 +3,7 @@ import { matchesCardFilters, renderCardFilters } from "./card-filters";
 import { html, nothing, type TemplateResult } from "lit";
 import { live } from "lit/directives/live.js";
 import type { EngineHit } from "../../lib/team-builder/engine/api";
-import { cardIdOf, type SavedTeam } from "../../lib/team-builder/sync/box-view";
+import { cardIdOf, engineInputs, type SavedTeam } from "../../lib/team-builder/sync/box-view";
 import { iconButton } from "../ui/controls";
 import { icon } from "../ui/icon";
 import { selectionPane } from "../ui/selection-pane";
@@ -11,93 +11,102 @@ import { tileMedia } from "../ui/tile";
 import { sectionHeading } from "./catalog";
 import { saveTeam } from "./results";
 import { renderSongComparison } from "./song-comparison-view";
+import { eventSection, playSection, songList } from "./build-tab";
+import { segmented } from "../ui/controls";
+import { clock } from "../../lib/team-builder/engine/execution";
+import { compareHits } from "../../lib/team-builder/engine/merge";
 import type { TeamBuilder } from "../team-builder";
 
 const format = (host: TeamBuilder, value: number, digits = 0) =>
   new Intl.NumberFormat(host.locale, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value);
-let suggestions: { slot: number; hits: EngineHit[] } | null = null;
-let suggesting = -1;
-
-
 function manualReady(host: TeamBuilder) {
-  return host.manual.members.every((id) => id !== null) && new Set(host.manual.members.map((id) => host.catalog!.member(id!)?.characterId)).size === 5;
+  const inputs = host.manualInputs();
+  return host.manual.members.every((id) => id !== null) && inputs.members.length === 5 && inputs.snaps.length === host.manual.snaps.filter(id => id !== null).length && new Set(host.manual.members.map((id) => host.catalog!.member(id!)?.characterId)).size === 5;
 }
 function teamSpec(host: TeamBuilder) {
   const { members, snaps, leader } = host.manual;
   return { members: members.map((id) => `m${id}`), snaps: snaps.map((id) => (id === null ? null : `s${id}`)), leader: `m${members[leader]}` };
 }
-/** Engine inputs that always contain the manual team's own cards. */
-function inputs(host: TeamBuilder) {
-  const request = host.request() ?? { members: [], snaps: [], player: host.view!.player, unknownPolicy: host.settings.unknownPolicy };
-  const members = [...request.members];
-  const snaps = [...request.snaps];
-  for (const id of host.manual.members) if (id !== null && !members.some((row) => row.cardId === id)) {
-    const owned = host.view!.members.get(id);
-    members.push({ key: `m${id}`, cardId: id, level: owned?.level ?? null, awake: owned?.awake ?? null, rank: owned?.rank ?? null, liveSkillLevel: owned?.skill ?? null, gekisoSkillLevel: owned?.gekisoSkill ?? null });
-  }
-  for (const id of host.manual.snaps) if (id !== null && !snaps.some((row) => row.cardId === id)) {
-    const owned = host.view!.snaps.get(id);
-    snaps.push({ key: `s${id}`, cardId: id, level: owned?.level ?? null, rank: owned?.rank ?? null });
-  }
-  return { members, snaps, player: request.player, unknownPolicy: request.unknownPolicy };
-}
 async function evaluate(host: TeamBuilder) {
   if (!manualReady(host) || !host.engine || !host.settings.songs.length || host.running) return;
   const task = host.acquireTask("evaluation");
   if (!task) return;
-  const formation = JSON.stringify(host.manual);
+  const context = host.manualContext();
+  host.activeManualContext = context;
   host.manualBusy = true;
   host.requestUpdate();
-  const s = host.settings;
+  const goal = host.manualGoal();
   try {
     const results = await host.engine.evaluate({
-      ...inputs(host),
+      ...host.manualInputs(),
+      player: host.view!.player,
       team: teamSpec(host),
-      songs: s.songs,
-      play: s.playMode === "ap" ? { great: 0, good: 0, bad: 0, miss: 0 } : { great: s.great / 100, good: s.good / 100, bad: 0, miss: s.miss / 100, missEvery: s.missEvery || 0 },
-      challengeEventId: s.challengeRules ? s.eventId : null,
-      event: s.eventId !== null && (s.goal === "event" || s.goal === "plan") && s.route !== "skip" ? { eventId: s.eventId, route: s.route === "challenge" ? "challenge" : "live", consumption: s.route === "challenge" ? s.challengePoints : s.boosts } : null,
+      songs: goal.songs,
+      play: goal.play,
+      challengeEventId: goal.challengeEventId,
+      event: null,
     });
-    if (host.ownsTask(task) && formation === JSON.stringify(host.manual)) host.manualResults = results;
+    if (host.ownsTask(task) && context === host.manualContext()) {
+      host.manualResultsFor = context;
+      host.manualResults = results;
+    }
   } catch (error) {
-    if (host.ownsTask(task)) host.error = String(error);
+    if (host.ownsTask(task) && !(error instanceof DOMException && error.name === "AbortError")) host.error = String(error);
   } finally {
-    if (host.ownsTask(task)) host.manualBusy = false;
+    if (host.ownsTask(task)) { host.manualBusy = false; host.activeManualContext = ""; }
     host.releaseTask(task);
     host.requestUpdate();
   }
 }
 /** Best cards for one slot with the other four fixed (exact constrained search). */
 async function suggest(host: TeamBuilder, slot: number) {
-  const base = host.request();
+  const base = host.request(host.manualGoal());
   if (!base || !host.engine || !manualReady(host) || host.running) return;
   const task = host.acquireTask("suggestion");
   if (!task) return;
-  const formation = JSON.stringify(host.manual);
-  suggesting = slot;
+  const context = host.manualSuggestionContext();
+  host.activeManualContext = context;
+  host.manualSuggesting = slot;
+  host.manualSuggestions = null;
   host.requestUpdate();
   const { members, snaps, leader } = host.manual;
   const others = members.flatMap((id, index) => (index === slot || id === null ? [] : [{ member: id, snap: snaps[index] ?? null, leader: index === leader }]));
-  const extra = inputs(host);
+  const selected = host.manualInputs();
+  const owned = engineInputs(host.view!, true);
+  const ownedMembers = new Map(owned.members.map(row => [row.key, row]));
+  const ownedSnaps = new Map(owned.snaps.map(row => [row.key, row]));
+  const memberInputs = [...new Map([...base.members.map(row => ownedMembers.get(row.key) ?? row), ...selected.members].map(row => [row.key, row])).values()];
+  const snapInputs = [...new Map([...base.snaps.map(row => ownedSnaps.get(row.key) ?? row), ...selected.snaps].map(row => [row.key, row])).values()];
+  const constraints = {
+    requiredMembers: others.map((row) => `m${row.member}`),
+    leader: slot === leader ? null : `m${members[leader]}`,
+    bindings: others.map((row): [string, string | null] => [`m${row.member}`, row.snap === null ? null : `s${row.snap}`]),
+    excludedMembers: [`m${members[slot]}`], requiredSnaps: [], excludedSnaps: [], noSnaps: false, minBonusPercent: null,
+  };
+  const request = { ...base, members: memberInputs, snaps: snapInputs, unknownPolicy: host.settings.unknownPolicy, constraints, k: 3, deadline: base.timeLimitMs === null ? Infinity : clock() + base.timeLimitMs };
   try {
-    const result = await host.engine.run({
-      ...base,
-      members: extra.members,
-      snaps: extra.snaps,
-      k: 3,
-      constraints: {
-        ...base.constraints,
-        requiredMembers: others.map((row) => `m${row.member}`),
-        leader: slot === leader ? null : `m${members[leader]}`,
-        bindings: others.map((row) => [`m${row.member}`, row.snap === null ? null : `s${row.snap}`]),
-        excludedMembers: [`m${members[slot]}`].filter(() => false),
-      },
-    });
-    if (host.ownsTask(task) && formation === JSON.stringify(host.manual)) suggestions = { slot, hits: result.overall.slice(0, 3) };
+    let hits: EngineHit[] = [];
+    const leaders = slot === leader ? memberInputs.filter(row => !members.includes(row.cardId)).map(row => row.key) : [constraints.leader];
+    for (const candidate of leaders) {
+      if (!host.ownsTask(task) || context !== host.manualSuggestionContext() || clock() >= request.deadline) break;
+      const result = await host.engine.run({ ...request, constraints: { ...constraints, leader: candidate } });
+      if (result.error) throw new Error(result.error);
+      hits.push(...result.overall);
+    }
+    if (host.ownsTask(task) && context === host.manualSuggestionContext()) {
+      const seen = new Set<string>();
+      hits = hits.sort(compareHits).filter(hit => {
+        const member = hit.members.find(key => !others.some(row => key === `m${row.member}`))!;
+        if (seen.has(member)) return false;
+        seen.add(member); return true;
+      });
+      host.manualSuggestionsFor = context;
+      host.manualSuggestions = { slot, hits: hits.slice(0, 3) };
+    }
   } catch (error) {
-    if (host.ownsTask(task)) host.error = String(error);
+    if (host.ownsTask(task) && !(error instanceof DOMException && error.name === "AbortError")) host.error = String(error);
   } finally {
-    suggesting = -1;
+    if (host.ownsTask(task)) { host.manualSuggesting = -1; host.activeManualContext = ""; }
     host.releaseTask(task);
     host.requestUpdate();
   }
@@ -146,7 +155,7 @@ function slotPicker(host: TeamBuilder): TemplateResult | typeof nothing {
       list[picker.slot] = id;
       host.manual = kind === "members" ? { ...host.manual, members: list } : { ...host.manual, snaps: list };
       host.manualResults = null;
-      suggestions = null;
+      host.manualSuggestions = null;
       close();
     },
     countLabel: host.t("cardCount", "{count} cards", { count: ids.length }),
@@ -176,15 +185,45 @@ export function renderSongComparisonTab(host: TeamBuilder): TemplateResult {
 function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateResult {
   const catalog = host.catalog!;
   const view = host.view!;
-  const order = [1, 2, 0, 3, 4].map((index) => (index === 0 ? host.manual.leader : index <= host.manual.leader ? index - 1 : index));
   const visualOrder = [0, 1, 2, 3, 4].filter((index) => index !== host.manual.leader);
   visualOrder.splice(2, 0, host.manual.leader);
-  void order;
   const characters = host.manual.members.map((id) => (id === null ? null : catalog.member(id)?.characterId ?? null));
   const duplicate = characters.some((id, index) => id !== null && characters.indexOf(id) !== index);
-  const results = host.manualResults;
+  const context = host.manualContext();
+  const results = host.manualResultsFor === context ? host.manualResults : null;
+  const rows = results ? [...results].sort((a, b) => b.score.mean - a.score.mean).map(row => ({ song: row.song, row })) : host.settings.songs.map(song => ({ song, row: null }));
+  const suggestions = host.manualSuggestionsFor === host.manualSuggestionContext() ? host.manualSuggestions : null;
+  const suggesting = host.manualSuggesting;
+  const calculating = host.taskKind === "evaluation" || host.taskKind === "suggestion";
   return html`
     <div class="tb-teams stack stack--loose">
+      <div class=${comparison ? "stack" : "tb-build tb-manual"}>
+      ${!comparison ? html`<aside class="tb-config stack">
+        <section class="surface stack">
+          ${sectionHeading({ icon: "library_music", label: host.t("songs", "Songs"), count: host.settings.songs.length || undefined })}
+          ${songList(host, host.settings.songs, songs => host.updateSettings({ songs }), false,
+            host.settings.challengeRules && host.settings.eventId !== null ? catalog.challengeSongs(host.settings.eventId).map(row => row.liveMusicId) : undefined)}
+        </section>
+        <section class="surface stack">
+          ${sectionHeading({ icon: "piano", label: host.t("play", "Play") })}
+          ${playSection(host, { ...host.settings, goal: "score" })}
+          <label class="tb-check">
+            <md-checkbox touch-target="wrapper" .checked=${live(host.settings.challengeRules)}
+              @change=${(event: Event) => host.updateSettings({ challengeRules: (event.target as HTMLInputElement).checked })}></md-checkbox>
+            <span>${host.t("challengeRules", "Challenge live rules (event parameter bonus)")}</span>
+          </label>
+          ${host.settings.challengeRules ? eventSection(host, { ...host.settings, goal: "score" }) : nothing}
+          <span class="tb-field__label">${host.t("unknownPolicy", "Growth not entered")}</span>
+          ${segmented({ label: host.t("unknownPolicy", "Growth not entered"), value: host.settings.unknownPolicy,
+            options: [{ value: "max", label: host.t("unknownMax", "Count as max") }, { value: "min", label: host.t("unknownMin", "Count as minimum") }],
+            onSelect: unknownPolicy => host.updateSettings({ unknownPolicy }),
+          })}
+          <button class="button tb-run__button" type="button" ?disabled=${!calculating && (!manualReady(host) || duplicate || !host.settings.songs.length || host.running || (host.settings.challengeRules && host.settings.eventId === null))} @click=${() => calculating ? host.cancel() : void evaluate(host)}>
+            ${calculating ? icon("close", 18) : icon("calculate", 18)}${calculating ? host.common("common.actions.cancel", "Cancel") : host.t("evaluateTeam", "Evaluate on the chosen songs")}</button>
+          <div class="tb-manual__progress">${calculating ? html`<md-linear-progress indeterminate aria-label=${host.t("evaluating", "Evaluating")}></md-linear-progress>` : nothing}</div>
+        </section>
+      </aside>` : nothing}
+      <div class="tb-results-column stack">
       <section id="sc-formation" data-sc-field class="surface stack">
         <div class="row row--between row--wrap">
           ${sectionHeading({ icon: "edit_square", label: host.t("manualTeam", "Build a team by hand") })}
@@ -193,14 +232,14 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
             <button class="button button--text button--small" type="button" ?disabled=${!manualReady(host)}
               @click=${() => saveTeam(host, [host.manual.members[host.manual.leader]!, ...host.manual.members.filter((_, index) => index !== host.manual.leader) as number[]], [host.manual.snaps[host.manual.leader] ?? null, ...host.manual.snaps.filter((_, index) => index !== host.manual.leader)], (comparison ? host.songComparison.settings.songs[0] : host.settings.songs[0]) ?? null)}>
               ${icon("bookmark_add", 18)}${host.t("saveTeam", "Save team")}</button>
-            <button class="button button--text button--small" type="button" @click=${() => { host.manual = { members: [null, null, null, null, null], snaps: [null, null, null, null, null], leader: 2 }; host.manualResults = null; suggestions = null; host.requestUpdate(); }}>${host.common("common.actions.clear", "Clear")}</button>
+            <button class="button button--text button--small" type="button" @click=${() => { host.manual = { members: [null, null, null, null, null], snaps: [null, null, null, null, null], leader: 2 }; host.manualResults = null; host.manualSuggestions = null; host.requestUpdate(); }}>${host.common("common.actions.clear", "Clear")}</button>
           </div>
         </div>
         ${comparison && view.teams.length ? html`
           <md-outlined-select label=${host.t("sc.chooseTeam", "Use a saved team")} .value=${""}
             @change=${(event: Event) => {
               const team = view.teams.find(team => team.id === (event.target as HTMLSelectElement).value);
-              if (team) { suggestions = null; host.openSongComparison(savedFormation(team)); }
+              if (team) { host.manualSuggestions = null; host.openSongComparison(savedFormation(team)); }
               (event.target as HTMLSelectElement).value = "";
             }}>
             <md-select-option value=""><div slot="headline">${host.t("sc.select", "Choose")}</div></md-select-option>
@@ -227,14 +266,13 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
                   ${leader
                     ? html`<span class="badge badge--primary">${host.t("leader", "Leader")}</span>`
                     : html`<button class="button button--text button--small" type="button" ?disabled=${member === null} @click=${() => { host.manual = { ...host.manual, leader: slot }; host.manualResults = null; host.requestUpdate(); }}>${host.t("makeLeader", "Leader")}</button>`}
-                  ${!comparison ? iconButton({ icon: "auto_fix_high", label: host.t("suggestSlot", "Best card for this slot"), size: 18, disabled: host.running || !manualReady(host) || suggesting >= 0 || !host.request(), onClick: () => void suggest(host, slot) }) : nothing}
+                  ${!comparison ? iconButton({ icon: "auto_fix_high", label: host.t("suggestSlot", "Best card for this slot"), size: 18, disabled: host.running || !manualReady(host) || suggesting >= 0 || !host.settings.songs.length, onClick: () => void suggest(host, slot) }) : nothing}
                 </span>
               </li>
             `;
           })}
         </ol>
         ${!comparison && duplicate ? html`<p class="field-note field-note--error">${host.t("duplicateCharacter", "Each character can appear once.")}</p>` : nothing}
-        ${suggesting >= 0 ? html`<md-linear-progress indeterminate aria-label=${host.t("searching", "Searching teams")}></md-linear-progress>` : nothing}
         ${!comparison && suggestions
           ? html`<div class="stack tb-suggest">
               <strong class="tb-subtitle">${host.t("suggestions", "Best replacements")}</strong>
@@ -254,7 +292,7 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
                         members[suggestions!.slot] = cardIdOf(slotMember);
                         snaps[suggestions!.slot] = snapKey ? cardIdOf(snapKey) : null;
                         host.manual = { ...host.manual, members, snaps };
-                        suggestions = null;
+                        host.manualSuggestions = null;
                         host.manualResults = null;
                         host.requestUpdate();
                       }}>${host.t("apply", "Apply")}</button></span></div>`;
@@ -262,23 +300,20 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
                 : html`<p class="card__supporting">${host.t("noSuggestion", "No better card found.")}</p>`}
             </div>`
           : nothing}
-        ${!comparison ? html`        <div class="row row--wrap">
-          <button class="button" type="button" ?disabled=${!manualReady(host) || duplicate || !host.settings.songs.length || host.manualBusy || host.running} @click=${() => void evaluate(host)}>
-            ${icon("calculate", 18)}${host.t("evaluateTeam", "Evaluate on the chosen songs")}</button>
-          <span class="field-note">${host.settings.songs.length ? host.t("evaluateSongs", "{count} songs from Build", { count: host.settings.songs.length }) : host.t("needSongs", "Choose at least one song.")}</span>
-        </div>
-        ${host.manualBusy ? html`<md-linear-progress indeterminate aria-label=${host.t("evaluating", "Evaluating")}></md-linear-progress>` : nothing}
-        ${results
-          ? html`<div class="scroll-x"><table class="table tb-eval">
-              <thead><tr><th>${host.t("song", "Song")}</th><th>${host.t("power", "Power")}</th><th>${host.t("expectedScore", "Expected score")}</th><th>${host.t("scoreRange", "Range")}</th><th>${host.t("skipScore", "Skip score")}</th>${results.some((row) => row.event) ? html`<th>${host.t("pointsPerPlay", "Event points per play")}</th><th>${host.t("itemsPerPlay", "Items per play")}</th>` : nothing}</tr></thead>
-              <tbody>${[...results].sort((a, b) => b.score.mean - a.score.mean).map((row) => html`<tr>
-                <th scope="row">${catalog.songTitle(row.song.songId)} <small>${catalog.difficultyLabel(row.song.songId, row.song.difficulty)}</small></th>
-                <td class="tabular">${format(host, row.power)}</td><td class="tabular">${format(host, row.score.mean)}</td>
-                <td class="tabular">${format(host, row.score.min)} – ${format(host, row.score.max)}</td><td class="tabular">${format(host, row.skipScore)}</td>
-                ${row.event ? html`<td class="tabular">${format(host, row.event.points, 1)} (+${format(host, Math.floor(row.event.bonusPercent))}%)</td><td class="tabular">${format(host, row.event.items, 1)}</td>` : results.some((item) => item.event) ? html`<td></td><td></td>` : nothing}
-              </tr>`)}</tbody></table></div>`
-          : nothing}` : nothing}
       </section>
+      </div>
+        ${!comparison
+          ? html`<section class="surface stack tb-manual__scores">
+            ${sectionHeading({ icon: "query_stats", label: host.t("goalScore", "Live score"), count: rows.length || undefined })}
+            <div class="table-scroll" role="region" tabindex="0" aria-label=${host.t("goalScore", "Live score")}><table class="data-table tb-eval">
+              <thead><tr><th scope="col">${host.t("song", "Song")}</th><th scope="col" class="is-numeric">${host.t("power", "Power")}</th><th scope="col" class="is-numeric">${host.t("expectedScore", "Expected score")}</th><th scope="col" class="is-numeric">${host.t("scoreRange", "Range")}</th><th scope="col" class="is-numeric">${host.t("skipScore", "Skip score")}</th></tr></thead>
+              <tbody>${rows.map(({ song, row }) => html`<tr>
+                <th scope="row">${catalog.songTitle(song.songId)} <small>${catalog.difficultyLabel(song.songId, song.difficulty)}</small></th>
+                <td class="is-numeric">${row ? format(host, row.power) : "—"}</td><td class="is-numeric">${row ? format(host, row.score.mean) : "—"}</td>
+                <td class="is-numeric">${row ? `${format(host, row.score.min)} – ${format(host, row.score.max)}` : "—"}</td><td class="is-numeric">${row ? format(host, row.skipScore) : "—"}</td>
+              </tr>`)}</tbody></table></div></section>`
+          : nothing}
+      </div>
       ${comparison ? renderSongComparison(host) : nothing}
       ${!comparison ? html`<section class="surface stack">
         ${sectionHeading({ icon: "bookmarks", label: host.t("savedTeams", "Saved teams"), count: view.teams.length || undefined })}
@@ -292,7 +327,7 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
                   ${iconButton({ icon: "edit", label: host.t("loadTeam", "Open in the editor"), onClick: () => {
                     host.manual = savedFormation(team);
                     host.manualResults = null;
-                    suggestions = null;
+                    host.manualSuggestions = null;
                     if (team.song && !host.settings.songs.some((song) => song.songId === team.song!.songId && song.difficulty === team.song!.difficulty)) host.updateSettings({ songs: [...host.settings.songs, team.song] });
                     host.requestUpdate();
                     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -303,7 +338,7 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
                     host.requestUpdate();
                   } })}
                 </div>
-                <button class="button button--text" type="button" @click=${() => { suggestions = null; host.openSongComparison(savedFormation(team)); }}>${host.t("sc.useTeam", "Compare songs with this team")}</button>
+                <button class="button button--text" type="button" @click=${() => { host.manualSuggestions = null; host.openSongComparison(savedFormation(team)); }}>${host.t("sc.useTeam", "Compare songs with this team")}</button>
                 <div class="tb-saved__cards">
                   ${team.members.map((id) => {
                     const options = catalog.cardOptions("members", id);

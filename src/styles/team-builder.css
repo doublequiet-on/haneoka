@@ -1129,6 +1129,59 @@
   .tb-formation--edit .tb-slot {
     padding: var(--md-sys-spacing-2);
   }
+  .team-builder .tb-formation--edit {
+    grid-template-columns: repeat(5, minmax(64px, 1fr));
+    overflow-x: auto;
+  }
+  .team-builder .tb-teams :is(button, .button, .icon-button) {
+    min-width: 48px;
+    min-height: 48px;
+  }
+  .team-builder .tb-teams .tb-check {
+    min-height: 48px;
+  }
+  .team-builder .tb-manual__progress {
+    min-height: var(--md-sys-spacing-1);
+  }
+  .team-builder .tb-manual > .tb-config {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+  .team-builder .tb-manual__scores {
+    grid-column: 1 / -1;
+    order: 2;
+  }
+  .team-builder .tb-eval tbody th {
+    min-width: 12rem;
+    white-space: normal;
+  }
+  .team-builder .tb-eval small {
+    display: block;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  @media (max-width: 1099px) {
+    .team-builder .tb-manual > .tb-config {
+      order: 1;
+    }
+  }
+  @media (max-width: 599px) {
+    .team-builder .tb-formation--edit {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--md-sys-spacing-3);
+    }
+    .team-builder .tb-formation--edit .tb-slot {
+      grid-template-columns: 72px minmax(0, 1fr) 64px;
+      align-items: center;
+      gap: var(--md-sys-spacing-2);
+    }
+    .team-builder .tb-formation--edit .tb-slot__tools {
+      flex-direction: column;
+    }
+    .team-builder .tb-formation--edit .tb-slot__snap {
+      aspect-ratio: 16 / 9;
+    }
+  }
   .tb-saved {
     display: grid;
     gap: var(--md-sys-spacing-3);

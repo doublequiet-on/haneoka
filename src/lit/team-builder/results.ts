@@ -569,7 +569,7 @@ export function compareTable(host: TeamBuilder, hits: EngineHit[]): TemplateResu
     <section class="surface stack tb-compare">
       <div class="row row--between"><strong class="tb-subtitle">${host.t("comparison", "Comparison")}</strong>
         <button class="button button--text button--small" type="button" @click=${() => { host.compare = []; host.requestUpdate(); }}>${host.common("common.actions.clear", "Clear")}</button></div>
-      <div class="scroll-x"><table class="table tb-compare__table">
+      <div class="table-scroll" role="region" tabindex="0" aria-label=${host.t("comparison", "Comparison")}><table class="data-table tb-compare__table">
         <thead><tr><th></th>${picked.map((hit) => html`<th>#${hits.indexOf(hit) + 1}</th>`)}</tr></thead>
         <tbody>${rows.map(([label, value]) => {
           const values = picked.map(value);
