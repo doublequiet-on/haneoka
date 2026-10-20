@@ -487,11 +487,10 @@ export class TeamBuilder extends LitElement {
     const cards = this.engineCards();
     const s = this.settings;
     const theoretical = s.scope === "theoretical";
-    const trial = goal.kind === "event" && goal.ranking === "pt-only";
     const memberKeys = new Set(cards.members.map((row) => row.key));
     const snapKeys = new Set(cards.snaps.map((row) => row.key));
     const locked = (kind: "m" | "s") =>
-      theoretical ? [] : [...(kind === "m" ? this.view!.members : this.view!.snaps).values()].filter((row) => row.lock && (trial || row.use)).map((row) => `${kind}${row.cardId}`);
+      theoretical ? [] : [...(kind === "m" ? this.view!.members : this.view!.snaps).values()].filter((row) => row.lock && row.use).map((row) => `${kind}${row.cardId}`);
     return {
       members: cards.members,
       snaps: cards.snaps,
@@ -499,12 +498,14 @@ export class TeamBuilder extends LitElement {
       unknownPolicy: theoretical ? "max" : s.unknownPolicy,
       goal,
       constraints: {
-        requiredMembers: locked("m").filter((key) => trial || memberKeys.has(key)),
+        requiredMembers: locked("m").filter((key) => memberKeys.has(key)),
         excludedMembers: [],
-        requiredSnaps: locked("s").filter((key) => trial || snapKeys.has(key)),
+        requiredSnaps: locked("s").filter((key) => snapKeys.has(key)),
         excludedSnaps: [],
-        leader: s.leader !== null && (trial || memberKeys.has(`m${s.leader}`)) ? `m${s.leader}` : null,
-        bindings: s.bindings.filter(([member]) => trial || memberKeys.has(`m${member}`)).map(([member, snap]) => [`m${member}`, snap === null ? null : `s${snap}`]),
+        leader: s.leader !== null && memberKeys.has(`m${s.leader}`) ? `m${s.leader}` : null,
+        bindings: s.bindings
+          .filter(([member, snap]) => memberKeys.has(`m${member}`) && (snap === null || snapKeys.has(`s${snap}`)))
+          .map(([member, snap]) => [`m${member}`, snap === null ? null : `s${snap}`]),
         noSnaps: s.noSnaps,
         minBonusPercent: goal.kind === "event" || goal.kind === "plan" ? s.minBonus : null,
       },
@@ -554,6 +555,13 @@ export class TeamBuilder extends LitElement {
       this.resultsFor = contextKey;
       this.resultSettings = settings;
       this.resultInputs = inputs;
+      if (
+        this.resultTab !== "overall" &&
+        !response.results.some(
+          (result) => result.song && `${result.song.songId}:${result.song.difficulty}` === this.resultTab,
+        )
+      )
+        this.resultTab = "overall";
       this.requestUpdate();
     };
     const loading = beginLoading(this.t("searching", "Searching teams"));

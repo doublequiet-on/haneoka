@@ -54,7 +54,7 @@ async function evaluate(host: TeamBuilder) {
       ...inputs(host),
       team: teamSpec(host),
       songs: s.songs,
-      play: s.playMode === "ap" ? { great: 0, good: 0, bad: 0, miss: 0 } : { great: s.great / 100, good: s.good / 100, bad: 0, miss: s.miss / 100 },
+      play: s.playMode === "ap" ? { great: 0, good: 0, bad: 0, miss: 0 } : { great: s.great / 100, good: s.good / 100, bad: 0, miss: s.miss / 100, missEvery: s.missEvery || 0 },
       challengeEventId: s.challengeRules ? s.eventId : null,
       event: s.eventId !== null && (s.goal === "event" || s.goal === "plan") && s.route !== "skip" ? { eventId: s.eventId, route: s.route === "challenge" ? "challenge" : "live", consumption: s.route === "challenge" ? s.challengePoints : s.boosts } : null,
     });
@@ -290,16 +290,14 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
                     @change=${(e: Event) => host.write([{ key: `team.${team.id}`, value: { ...team, name: (e.target as HTMLInputElement).value.slice(0, 80) } }])}></md-outlined-text-field>
                   <span class="row__spacer"></span>
                   ${iconButton({ icon: "edit", label: host.t("loadTeam", "Open in the editor"), onClick: () => {
-                    const members = [team.members[1] ?? null, team.members[2] ?? null, team.members[0] ?? null, team.members[3] ?? null, team.members[4] ?? null];
-                    const snaps = [team.snaps[1] ?? null, team.snaps[2] ?? null, team.snaps[0] ?? null, team.snaps[3] ?? null, team.snaps[4] ?? null];
-                    host.manual = { members, snaps, leader: 2 };
+                    host.manual = savedFormation(team);
                     host.manualResults = null;
                     suggestions = null;
-                    if (team.song && !host.settings.songs.some((song) => song.songId === team.song!.songId)) host.updateSettings({ songs: [...host.settings.songs, team.song] });
+                    if (team.song && !host.settings.songs.some((song) => song.songId === team.song!.songId && song.difficulty === team.song!.difficulty)) host.updateSettings({ songs: [...host.settings.songs, team.song] });
                     host.requestUpdate();
                     window.scrollTo({ top: 0, behavior: "smooth" });
                   } })}
-                  ${iconButton({ icon: "delete", label: host.common("delete", "Delete"), onClick: () => {
+                  ${iconButton({ icon: "delete", label: host.t("delete", "Delete"), onClick: () => {
                     host.write([{ key: `team.${team.id}`, value: null }]);
                     host.notice = host.t("deletedTeam", "Team deleted");
                     host.requestUpdate();
@@ -307,9 +305,9 @@ function renderTeamWorkspace(host: TeamBuilder, comparison: boolean): TemplateRe
                 </div>
                 <button class="button button--text" type="button" @click=${() => { suggestions = null; host.openSongComparison(savedFormation(team)); }}>${host.t("sc.useTeam", "Compare songs with this team")}</button>
                 <div class="tb-saved__cards">
-                  ${team.members.map((id, index) => {
+                  ${team.members.map((id) => {
                     const options = catalog.cardOptions("members", id);
-                    return options ? html`<span class=${`tb-saved__card${index === 0 ? " is-leader" : ""}`} title=${options.label}>${tileMedia({ ...options, marks: [] })}</span>` : nothing;
+                    return options ? html`<span class=${`tb-saved__card${team.leader === id ? " is-leader" : ""}`} title=${options.label}>${tileMedia({ ...options, marks: [] })}</span>` : nothing;
                   })}
                 </div>
                 ${team.song ? html`<span class="card__supporting">${catalog.songTitle(team.song.songId)} ${catalog.difficultyLabel(team.song.songId, team.song.difficulty)}</span>` : nothing}

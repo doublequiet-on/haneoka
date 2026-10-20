@@ -1882,6 +1882,10 @@
       "native-normal-complete-member-order-domain": "모든 스킬 순서 비교",
       "explicit-personal-solo-score-domain": "개인 Solo 점수",
       "previousResult": "이전 결과",
+      "importFlow": {
+        "characterMemory": "캐릭터 메모리 보너스",
+        "musicMemory": "곡 메모리 보너스"
+      },
       "importExisting": {
         "keep": "기존 값 모두 유지",
         "overwrite": "기존 값 모두 덮어쓰기",
@@ -2432,6 +2436,7 @@
       "evaluating": "평가 중",
       "loadTeam": "편집기에서 열기",
       "deletedTeam": "팀 삭제됨",
+      "delete": "삭제",
       "noSavedTeams": "검색 결과나 수동 편성을 저장하면 여기에 표시됩니다. 저장한 팀은 계정과 동기화됩니다.",
       "useInSearch": "팀 검색에 사용",
       "markOwned": "보유로 표시",

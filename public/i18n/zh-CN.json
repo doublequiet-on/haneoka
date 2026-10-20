@@ -1882,6 +1882,10 @@
       "native-normal-complete-member-order-domain": "比较所有技能顺序",
       "explicit-personal-solo-score-domain": "个人 Solo 分数",
       "previousResult": "上次结果",
+      "importFlow": {
+        "characterMemory": "角色回忆加成",
+        "musicMemory": "歌曲回忆加成"
+      },
       "importExisting": {
         "keep": "全部保留现有值",
         "overwrite": "全部覆盖现有值",
@@ -2432,6 +2436,7 @@
       "evaluating": "评估中",
       "loadTeam": "在编辑器中打开",
       "deletedTeam": "已删除队伍",
+      "delete": "删除",
       "noSavedTeams": "保存搜索结果或手动组的队伍后会显示在这里。已保存的队伍会随账号同步。",
       "useInSearch": "用于组队搜索",
       "markOwned": "标记为已拥有",

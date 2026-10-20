@@ -362,6 +362,9 @@ function renderSetup(host: TeamBuilder): TemplateResult {
   const s = host.settings;
   const catalog = host.catalog!;
   const master = host.master!;
+  const events = catalog.events();
+  const eventId = s.eventId !== null && events.some((event) => event.id === s.eventId) ? s.eventId : (events[0]?.id ?? null);
+  if (eventId !== null && eventId !== s.eventId) queueMicrotask(() => host.updateSettings({ eventId }));
   const picker = (songs: SongRef[], change: (songs: SongRef[]) => void, extra: Partial<SongPickerState> = {}) => {
     host.songPicker = {
       songs: songs.filter((song) => !extra.allowedSongIds || extra.allowedSongIds.includes(song.songId)),
@@ -402,10 +405,10 @@ function renderSetup(host: TeamBuilder): TemplateResult {
           html`
             <md-outlined-select
               label=${host.t("event", "Event")}
-              .value=${s.eventId === null ? "" : String(s.eventId)}
+              .value=${eventId === null ? "" : String(eventId)}
               @change=${(e: Event) => host.updateSettings({ eventId: Number((e.target as HTMLInputElement).value), planChallengeSongs: [] })}
             >
-              ${catalog.events().map(
+              ${events.map(
               (event) => html`
                 <md-select-option value=${String(event.id)}><div slot="headline">${event.name}</div></md-select-option>
               `,

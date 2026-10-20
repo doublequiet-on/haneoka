@@ -1882,6 +1882,10 @@
       "native-normal-complete-member-order-domain": "比較所有技能順序",
       "explicit-personal-solo-score-domain": "個人 Solo 分數",
       "previousResult": "上次結果",
+      "importFlow": {
+        "characterMemory": "角色回憶加成",
+        "musicMemory": "歌曲回憶加成"
+      },
       "importExisting": {
         "keep": "全部保留現有值",
         "overwrite": "全部覆蓋現有值",
@@ -2432,6 +2436,7 @@
       "evaluating": "評估中",
       "loadTeam": "在編輯器中開啟",
       "deletedTeam": "已刪除隊伍",
+      "delete": "刪除",
       "noSavedTeams": "儲存搜尋結果或手動組的隊伍後會顯示在這裡。已儲存的隊伍會隨帳號同步。",
       "useInSearch": "用於組隊搜尋",
       "markOwned": "標記為已擁有",

@@ -253,9 +253,11 @@ function eventBonus(host: TeamBuilder) {
       ${sectionHeading({ icon: "emoji_events", label: t("event") })}
       ${current.map(({ event, name }) => {
         const bonus = (type: number) =>
-          (team.box.members.reduce((sum, member) => sum + memberEventPercent(event.effects, member, type), 0) +
-            team.box.snaps.reduce((sum, snap) => sum + snapEventPercent(event.effects, snap, type), 0)) /
-          100;
+          Math.floor(
+            (team.box.members.reduce((sum, member) => sum + memberEventPercent(event.effects, member, type), 0) +
+              team.box.snaps.reduce((sum, snap) => sum + snapEventPercent(event.effects, snap, type), 0)) /
+              100,
+          );
         return html`
           <strong>${name}</strong>
           <dl class="spec-list">
@@ -395,7 +397,8 @@ export function renderSongComparison(host: TeamBuilder) {
               : t("play"),
             expanded: c.expanded.has(-1),
             onExpandedChange: (open) => {
-              open ? c.expanded.add(-1) : c.expanded.delete(-1);
+              if (open) c.expanded.add(-1);
+              else c.expanded.delete(-1);
               host.requestUpdate();
             },
             content: conditions(host),
@@ -501,7 +504,8 @@ export function renderSongComparison(host: TeamBuilder) {
                                 aria-expanded=${String(open)}
                                 aria-controls=${`sc-chart-${group.id}`}
                                 @click=${() => {
-                      open ? c.expanded.delete(group.id) : c.expanded.add(group.id);
+                      if (open) c.expanded.delete(group.id);
+                      else c.expanded.add(group.id);
                       host.requestUpdate();
                     }}
                               >
@@ -544,7 +548,7 @@ export function renderSongComparison(host: TeamBuilder) {
                                 <dt>${t("average")}</dt>
                                 <dd>${metrics ? format(Math.ceil(metrics.average)) : "—"}</dd>
                                 <dt>${t("score")}</dt>
-                                <dd>${chart.hit?.score?.mean ?? "—"}</dd>
+                                <dd>${chart.hit?.score ? format(chart.hit.score.mean) : "—"}</dd>
                                 <dt>${t("rank")}</dt>
                                 <dd>${missions} · ${s.rank ?? "—"}</dd>
                               </dl>

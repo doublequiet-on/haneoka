@@ -514,9 +514,9 @@ export function renderHit(host: TeamBuilder, hit: EngineHit, index: number, opti
         </div>
         <div class="tb-hit__actions">
           ${iconButton({ icon: "bookmark_add", label: host.t("saveTeam", "Save team"), disabled: options.stale ?? host.stale, onClick: () => saveTeam(host, hit.members.map(cardIdOf), hit.snaps.map((snap) => (snap ? cardIdOf(snap) : null)), hit.song) })}
-          <button class="button button--text" type="button" ?disabled=${options.stale ?? host.stale} @click=${() => {
+          ${resultSettings(host).scope === "theoretical" ? nothing : html`<button class="button button--text" type="button" ?disabled=${options.stale ?? host.stale} @click=${() => {
             host.openSongComparison({ members: hit.members.map(cardIdOf), snaps: hit.snaps.map(snap => snap ? cardIdOf(snap) : null), leader: 0 });
-          }}>${host.t("sc.useTeam", "Compare songs with this team")}</button>
+          }}>${host.t("sc.useTeam", "Compare songs with this team")}</button>`}
           ${iconButton({ icon: "compare_arrows", label: host.t("compare", "Compare"), toggle: true, pressed: compared, onClick: () => {
             host.compare = compared ? host.compare.filter((item) => item !== key) : [...host.compare, key].slice(-3);
             host.requestUpdate();

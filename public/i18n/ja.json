@@ -1882,6 +1882,10 @@
       "native-normal-complete-member-order-domain": "すべてのスキル順を比較",
       "explicit-personal-solo-score-domain": "個人Soloスコア",
       "previousResult": "前回の結果",
+      "importFlow": {
+        "characterMemory": "キャラクターメモリーボーナス",
+        "musicMemory": "楽曲メモリーボーナス"
+      },
       "importExisting": {
         "keep": "既存の値をすべて保持",
         "overwrite": "既存の値をすべて上書き",
@@ -2432,6 +2436,7 @@
       "evaluating": "評価中",
       "loadTeam": "エディターで開く",
       "deletedTeam": "編成を削除しました",
+      "delete": "削除",
       "noSavedTeams": "検索結果や手動編成を保存するとここに表示されます。保存した編成はアカウントと同期されます。",
       "useInSearch": "編成検索に使う",
       "markOwned": "所持にする",

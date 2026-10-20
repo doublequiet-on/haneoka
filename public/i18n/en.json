@@ -1882,6 +1882,10 @@
       "native-normal-complete-member-order-domain": "All skill orders compared",
       "explicit-personal-solo-score-domain": "Personal Solo score",
       "previousResult": "Previous result",
+      "importFlow": {
+        "characterMemory": "Character memory bonus",
+        "musicMemory": "Song memory bonus"
+      },
       "importExisting": {
         "keep": "Keep all existing values",
         "overwrite": "Overwrite all existing values",
@@ -2432,6 +2436,7 @@
       "evaluating": "Evaluating",
       "loadTeam": "Open in the editor",
       "deletedTeam": "Team deleted",
+      "delete": "Delete",
       "noSavedTeams": "Save a result or a hand-built team to keep it here. Saved teams sync with your account.",
       "useInSearch": "Use in team search",
       "markOwned": "Mark as owned",
