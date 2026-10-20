@@ -12,11 +12,12 @@ import { initializeI18nClient } from "../i18n/client";
 import type { Catalog, MessageParams } from "@haneoka/i18n";
 import { readCommunityViewer, type CommunityViewer } from "../lib/community-viewer";
 import { resourceCollectionHref, entityHref } from "../lib/resource-route";
-import { readReleaseServer } from "../lib/release-server";
+import { isPublicReleaseServer, readReleaseServer } from "../lib/release-server";
 import { showRestrictedContent } from "../lib/content-visibility";
 import { fetchCrossServerCatalogs, crossCatalogSeedSources } from "../lib/cross-server/fetch";
 import { homeEventDisplay } from "../lib/home-event-display";
 import { pinCrossCatalogValue } from "../lib/cross-server/presentation";
+import { crossCatalogRows } from "../lib/cross-server/definitions";
 import { announcementPath } from "../lib/announcements";
 import { announcementText, announcementRow } from "./shared/announcement";
 import { fetchAnnouncements, type Announcement } from "../lib/announcements";
@@ -250,6 +251,11 @@ export class HomeDashboard extends LitElement {
   private birthdayGachaServer?: HomeSeed["server"];
   private birthdayStories: Record<string, JsonRecord[]> = {};
   private crossServerCatalogs: NonNullable<HomeSeed["crossServerCatalogs"]> = {};
+  /** Per-source character and band rows, kept from each source's own document. */
+  private sourceRelations: {
+    characters: Record<string, Map<number, JsonRecord>>;
+    bands: Record<string, Map<number, JsonRecord>>;
+  } = { characters: {}, bands: {} };
   private seed?: HomeSeed;
   private catalogRequests = new RequestScope();
   private liveRequests = new RequestScope();
@@ -519,11 +525,12 @@ export class HomeDashboard extends LitElement {
         this.sameVariant(entry, row) &&
         Number(entry.perServer[server as OfficialCatalogServer]?.row.characterId) === id,
     );
-    return entry
-      ? crossServerDetail(entry, server as OfficialCatalogServer).row
-      : (server === this.sourceServer()
-          ? this.characters.find((person) => Number(person.characterId) === id)
-          : undefined) || values(row.characterDetails).find((person) => Number(person.characterId) === id);
+    if (entry) return crossServerDetail(entry, server as OfficialCatalogServer).row;
+    const source = this.sourceRelations.characters[server]?.get(id);
+    if (source) return source;
+    return (server === this.sourceServer()
+      ? this.characters.find((person) => Number(person.characterId) === id)
+      : undefined) || values(row.characterDetails).find((person) => Number(person.characterId) === id);
   }
   private relationshipBand(id: unknown, row: JsonRecord) {
     const server = this.rowServer(row);
@@ -532,11 +539,12 @@ export class HomeDashboard extends LitElement {
         this.sameVariant(entry, row) &&
         Number(entry.perServer[server as OfficialCatalogServer]?.row.bandId) === Number(id),
     );
-    return entry
-      ? crossServerDetail(entry, server as OfficialCatalogServer).row
-      : server === this.sourceServer()
-        ? this.bands.find((band) => Number(band.bandId) === Number(id))
-        : undefined;
+    if (entry) return crossServerDetail(entry, server as OfficialCatalogServer).row;
+    const source = this.sourceRelations.bands[server]?.get(Number(id));
+    if (source) return source;
+    return server === this.sourceServer()
+      ? this.bands.find((band) => Number(band.bandId) === Number(id))
+      : undefined;
   }
   private readonly songPerformers = new Map<string, PerformerRegistry>();
   private songPerformer(row: JsonRecord) {
@@ -549,6 +557,7 @@ export class HomeDashboard extends LitElement {
         ...new Set([
           ...fallback.map((entry) => Number(entry[field])),
           ...(this.crossServerCatalogs[resource]?.entries ?? []).map((entry) => Number(entry.perServer[server as OfficialCatalogServer]?.row[field])),
+          ...(this.sourceRelations[resource][server]?.keys() ?? []),
         ]),
       ];
       registry = createPerformerRegistry({
@@ -684,7 +693,32 @@ export class HomeDashboard extends LitElement {
         this.marks.set(logical, `/runtime/${this.sourceServer()}/${path.replace(/^runtime\//u, "")}`);
     this.banners = this.carousel(documents["home-banners"], now);
     this.events = this.catalogRows("events", documents.events).map((entry) => this.spotlightOf(entry, "events"));
+    this.indexSourceRelations();
     this.phase = "ready";
+  }
+  /**
+   * The merged entries drop a restricted variant that duplicates a formal
+   * source; each source's own document keeps every row that source names, so
+   * its cards and songs keep their characters and bands.
+   */
+  private indexSourceRelations() {
+    const relations: HomeDashboard["sourceRelations"] = { characters: {}, bands: {} };
+    for (const resource of ["characters", "bands"] as const) {
+      const catalog = this.crossServerCatalogs[resource];
+      if (!catalog) continue;
+      for (const [server, identity] of Object.entries(catalog.identities)) {
+        const document = catalog.documents[server];
+        if (!identity || document === undefined) continue;
+        const rows = new Map<number, JsonRecord>();
+        for (const [id, row] of Object.entries(crossCatalogRows(resource, document))) {
+          const numeric = Number(id);
+          if (Number.isSafeInteger(numeric) && numeric >= 0)
+            rows.set(numeric, pinCrossCatalogValue(row, identity) as JsonRecord);
+        }
+        relations[resource][server] = rows;
+      }
+    }
+    this.sourceRelations = relations;
   }
   private async load() {
     const signal = this.catalogRequests.begin();
@@ -1220,7 +1254,21 @@ export class HomeDashboard extends LitElement {
     const featured = this.featuredEvent();
     const event = featured?.entry;
     const eventServer = event?.sourceServer ?? this.sourceServer();
+    // A restricted edition has no page of its own; its spotlight stays unlinked.
+    const eventPage = isPublicReleaseServer(eventServer) ? eventServer : undefined;
+    const eventHref = event && eventPage
+      ? entityHref({ server: eventPage, locale: this.locale as Locale, kind: "events", id: event.id })
+      : "";
+    const trackerHref = eventPage ? `/${eventPage}/${this.locale}/events/tracker/` : "";
+    const storyHref = eventPage && event
+      ? event.details.homeStoryId
+        ? entityHref({ server: eventPage, locale: this.locale as Locale, kind: "stories", id: String(event.details.homeStoryId) })
+        : resourceCollectionHref("/catalog/stories/event", eventPage, this.locale as Locale)
+      : "";
     const mark = event ? this.exclusiveMark(event.details) : null;
+    const markImage = mark
+      ? html`<img class="catalog-server-availability" src=${mark.image} alt=${mark.label} title=${mark.label} width="18" height="18" />`
+      : nothing;
     const title = event ? localizedText(event.details.title, this.locale) || event.title : "";
     const countdown = event ? this.eventPhrase(event.startAt, event.endAt) : "";
     const targets = event
@@ -1272,33 +1320,43 @@ export class HomeDashboard extends LitElement {
           </span>
         `;
       });
-    const sourceCharacters = this.crossServerCatalogs.characters?.entries.flatMap((entry) => {
-      const variant = entry.perServer[eventServer as OfficialCatalogServer];
-      return variant ? [variant.row] : [];
-    }) ?? this.characters;
+    // A restricted edition's characters are deduplicated out of the merged
+    // entries when a formal source also names them; that source's document keeps them.
+    const sourceCharacters = eventPage
+      ? (this.crossServerCatalogs.characters?.entries.flatMap((entry) => {
+          const variant = entry.perServer[eventServer as OfficialCatalogServer];
+          return variant ? [variant.row] : [];
+        }) ?? this.characters)
+      : [...(this.sourceRelations.characters[eventServer]?.values() ?? [])];
     const bonusCharacters = sourceCharacters
       .filter((character) =>
         unique.some((target) => target.homeTargetKind === "band" && Number(target.bandId) === Number(character.bandId)),
       )
-      .map(
-        (character) => html`
-          <a
-            class="home-event__character"
-            aria-label=${localizedText(character.characterName, this.locale)}
-            title=${localizedText(character.characterName, this.locale)}
-            href=${entityHref({ server: eventServer, locale: this.locale as Locale, kind: "characters", id: String(character.characterId) })}
-          >
-            <img
-              src=${String(character.faceImage || character.thumbnailImage || CHARACTER_AVATAR(character.characterId))}
-              width="32"
-              height="32"
-              alt=""
-              loading="lazy"
-            />
-            <span>${localizedText(character.characterName, this.locale)}</span>
-          </a>
-        `,
-      );
+      .map((character) => {
+        const name = localizedText(character.characterName, this.locale);
+        const content = html`
+          <img
+            src=${String(character.faceImage || character.thumbnailImage || CHARACTER_AVATAR(character.characterId))}
+            width="32"
+            height="32"
+            alt=""
+            loading="lazy"
+          />
+          <span>${name}</span>
+        `;
+        return eventPage
+          ? html`
+              <a
+                class="home-event__character"
+                aria-label=${name}
+                title=${name}
+                href=${entityHref({ server: eventPage, locale: this.locale as Locale, kind: "characters", id: String(character.characterId) })}
+              >
+                ${content}
+              </a>
+            `
+          : html`<span class="home-event__character" aria-label=${name} title=${name}>${content}</span>`;
+      });
     const bonusContents = html`
       <div class="home-event__targets">${bonusTargets}</div>
       <div class="home-event__characters">${bonusCharacters}</div>
@@ -1310,24 +1368,35 @@ export class HomeDashboard extends LitElement {
           event
             ? html`
                 <div class="home-event__card">
-                  <a
-                    class="home-event__media media-loading"
-                    href=${entityHref({ server: eventServer, locale: this.locale as Locale, kind: "events", id: event.id })}
-                    aria-label=${`${title} · ${countdown}`}
-                  >
-                    ${eventArtwork(String(event.details.backgroundImage || event.image), String(event.details.logo || ""), title, false, this.locale)}
-                    <span class="home-event__overline">${uiText(this.locale, "navigation.events")}</span>
-                    <span class="home-event__countdown tabular" role="timer" aria-live="off">${countdown}</span>
-                  </a>
+                  ${
+                    eventHref
+                      ? html`
+                          <a
+                            class="home-event__media media-loading"
+                            href=${eventHref}
+                            aria-label=${`${title} · ${countdown}`}
+                          >
+                            ${eventArtwork(String(event.details.backgroundImage || event.image), String(event.details.logo || ""), title, false, this.locale)}
+                            <span class="home-event__overline">${uiText(this.locale, "navigation.events")}</span>
+                            <span class="home-event__countdown tabular" role="timer" aria-live="off">${countdown}</span>
+                          </a>
+                        `
+                      : html`
+                          <span class="home-event__media media-loading">
+                            ${eventArtwork(String(event.details.backgroundImage || event.image), String(event.details.logo || ""), title, false, this.locale)}
+                            <span class="home-event__overline">${uiText(this.locale, "navigation.events")}</span>
+                            <span class="home-event__countdown tabular" role="timer" aria-live="off">${countdown}</span>
+                          </span>
+                        `
+                  }
                   <div class="home-event__body">
                     <header class="home-event__heading">
                       <h3>
-                        <a
-                          href=${entityHref({ server: eventServer, locale: this.locale as Locale, kind: "events", id: event.id })}
-                        >
-                          ${title}
-                          ${mark ? html`<img class="catalog-server-availability" src=${mark.image} alt=${mark.label} title=${mark.label} width="18" height="18" />` : nothing}
-                        </a>
+                        ${
+                          eventHref
+                            ? html`<a href=${eventHref}>${title}${markImage}</a>`
+                            : html`<span>${title}${markImage}</span>`
+                        }
                       </h3>
                       <p class="home-event__range">
                         <time datetime=${new Date(event.startAt).toISOString()}>${this.formatDate(event.startAt)}</time>
@@ -1351,35 +1420,47 @@ export class HomeDashboard extends LitElement {
                       }
                     </header>
                     <div class="home-event__bonuses">${bonusContents}</div>
-                    <nav class="button-group home-event__links" aria-label=${uiText(this.locale, "navigation.events")}>
-                      <a
-                        class="button button--tonal home-event__action"
-                        href=${entityHref({ server: eventServer, locale: this.locale as Locale, kind: "events", id: event.id })}
-                        aria-label=${this.text("viewDetails", "View details")}
-                        title=${this.text("viewDetails", "View details")}
-                      >
-                        ${icon("event_note", 20)}
-                        <span>${this.text("viewDetails", "View details")}</span>
-                      </a>
-                      <a
-                        class="button button--tonal home-event__action"
-                        href=${`/${eventServer}/${this.locale}/events/tracker/`}
-                        aria-label=${this.text("eventTracker", "Event tracker")}
-                        title=${this.text("eventTracker", "Event tracker")}
-                      >
-                        ${icon("monitoring", 20)}
-                        <span>${this.text("eventTracker", "Event tracker")}</span>
-                      </a>
-                      <a
-                        class="button button--tonal home-event__action"
-                        href=${event.details.homeStoryId ? entityHref({ server: eventServer, locale: this.locale as Locale, kind: "stories", id: String(event.details.homeStoryId) }) : resourceCollectionHref("/catalog/stories/event", eventServer, this.locale as Locale)}
-                        aria-label=${this.text("eventStory", "Event story")}
-                        title=${this.text("eventStory", "Event story")}
-                      >
-                        ${icon("auto_stories", 20)}
-                        <span>${this.text("eventStory", "Event story")}</span>
-                      </a>
-                    </nav>
+                    ${
+                      eventHref
+                        ? html`
+                            <nav class="button-group home-event__links" aria-label=${uiText(this.locale, "navigation.events")}>
+                              <a
+                                class="button button--tonal home-event__action"
+                                href=${eventHref}
+                                aria-label=${this.text("viewDetails", "View details")}
+                                title=${this.text("viewDetails", "View details")}
+                              >
+                                ${icon("event_note", 20)}
+                                <span>${this.text("viewDetails", "View details")}</span>
+                              </a>
+                              <a
+                                class="button button--tonal home-event__action"
+                                href=${trackerHref}
+                                aria-label=${this.text("eventTracker", "Event tracker")}
+                                title=${this.text("eventTracker", "Event tracker")}
+                              >
+                                ${icon("monitoring", 20)}
+                                <span>${this.text("eventTracker", "Event tracker")}</span>
+                              </a>
+                              ${
+                                storyHref
+                                  ? html`
+                                      <a
+                                        class="button button--tonal home-event__action"
+                                        href=${storyHref}
+                                        aria-label=${this.text("eventStory", "Event story")}
+                                        title=${this.text("eventStory", "Event story")}
+                                      >
+                                        ${icon("auto_stories", 20)}
+                                        <span>${this.text("eventStory", "Event story")}</span>
+                                      </a>
+                                    `
+                                  : nothing
+                              }
+                            </nav>
+                          `
+                        : nothing
+                    }
                   </div>
                 </div>
               `
@@ -1467,6 +1548,11 @@ export class HomeDashboard extends LitElement {
                   const rarity = this.marksFor(card).get(`RarityIconCenter_${rarityName}.png`) || "";
                   const images = (card.images || {}) as JsonRecord;
                   const releasedAt = timestamp(card.releasedAt);
+                  const cardServer = this.rowServer(card);
+                  // A restricted edition has no page of its own; its card stays a picture here.
+                  const cardHref = isPublicReleaseServer(cardServer)
+                    ? entityHref({ server: cardServer, locale: this.locale as Locale, kind, id })
+                    : undefined;
                   return tile({
                     title,
                     subtitle: related.content,
@@ -1484,7 +1570,8 @@ export class HomeDashboard extends LitElement {
                     adornment: related.adornment,
                     serverMark: this.exclusiveMark(card) ?? undefined,
                     image: String(images.thumbnail || card.thumbnail || card.image || ""),
-                    href: entityHref({ server: this.rowServer(card), locale: this.locale as Locale, kind, id }),
+                    href: cardHref,
+                    static: !cardHref,
                     aspectRatio: 1,
                     marks: [
                       attribute ? { at: "start", image: attribute, label: this.text("attribute", "Attribute") } : null,
@@ -1579,6 +1666,11 @@ export class HomeDashboard extends LitElement {
                     // The catalogue's own song tile, built by the same shared
                     // code — identical anatomy; only the date mark is added.
                     const release = this.releaseLabel(timestamp(song.publishedAt));
+                    const songServer = this.rowServer(song);
+                    // A restricted edition has no page of its own; its song stays a picture here.
+                    const songHref = isPublicReleaseServer(songServer)
+                      ? entityHref({ server: songServer, locale: this.locale as Locale, kind: "songs", id: String(song.musicId || song.id) })
+                      : "";
                     const options = songTile(
                       song,
                       {
@@ -1595,18 +1687,14 @@ export class HomeDashboard extends LitElement {
                         attributeMark: (entry) => this.attributeMark(entry.musicType, entry),
                         attributeLabel: () => String(song.musicType || ""),
                       },
-                      entityHref({
-                        server: this.rowServer(song),
-                        locale: this.locale as Locale,
-                        kind: "songs",
-                        id: String(song.musicId || song.id),
-                      }),
+                      songHref,
                       [release ? { at: "bottom-start" as const, text: release } : null],
                     );
                     return tile({
                       ...options,
                       label: [options.label, release].filter(Boolean).join(" · "),
                       serverMark: this.exclusiveMark(song) ?? undefined,
+                      static: !songHref,
                     });
                   })}
                 </div>

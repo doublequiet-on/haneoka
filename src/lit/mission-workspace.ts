@@ -18,6 +18,7 @@ import {
 import { syncEntityNavigation, updateEntityHeading } from "../lib/detail-navigation";
 import { beginLoading, type LoadingReporter } from "../lib/loading-progress";
 import { entityHref, parseResourceRoute, resourcePath, type ReleaseServer } from "../lib/resource-route";
+import { isPublicReleaseServer } from "../lib/release-server";
 import { fetchCrossServerCatalog } from "../lib/cross-server/fetch";
 import { crossCatalogPresentation, type CrossCatalogPresentation } from "../lib/cross-server/presentation";
 import { OFFICIAL_CATALOG_SERVERS, type OfficialCatalogServer } from "../lib/cross-server/catalog";
@@ -201,9 +202,12 @@ export class MissionWorkspace extends LitElement {
   private missionEntry(mission: Mission) {
     return this.unionMissions?.entries.get(mission) || this.unionMissions?.byId.get(`${this.server}:${mission.id}`);
   }
+  /** A restricted edition has no page of its own, so its row keeps the current view. */
   private entityLink(mission: Mission) {
+    const server = this.missionEntry(mission)?.displayServer || this.server;
+    if (!isPublicReleaseServer(server)) return undefined;
     return entityHref({
-      server: this.missionEntry(mission)?.displayServer || this.server,
+      server,
       locale: this.locale as Locale,
       kind: "missions",
       id: mission.id,
@@ -416,11 +420,13 @@ export class MissionWorkspace extends LitElement {
           <span class="mission-group__count tabular">${group.rows.length}</span>
         </header>
         <ul class="mission-list" role="list">
-          ${group.rows.map(
-            (mission) => html`
+          ${group.rows.map((mission) => {
+            const href = this.entityLink(mission);
+            const title = this.name(mission.title) || "—";
+            return html`
               <li class="mission-row">
                 <span class="mission-row__condition">
-                  <a href=${this.entityLink(mission)}>${this.name(mission.title) || "—"}</a>
+                  ${href ? html`<a href=${href}>${title}</a>` : html`<span>${title}</span>`}
                   ${this.goal(mission)}
                   ${(() => {
                     const entry = this.missionEntry(mission);
@@ -433,8 +439,8 @@ export class MissionWorkspace extends LitElement {
                   )}
                 </span>
               </li>
-            `,
-          )}
+            `;
+          })}
         </ul>
       </section>
     `;
