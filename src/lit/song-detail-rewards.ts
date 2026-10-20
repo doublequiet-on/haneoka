@@ -26,8 +26,6 @@ export interface SongRewardRenderOptions {
   /** This song's chart rates by difficulty, and the song analysis address. */
   chartRates?: { greatFactor: number; charts: Record<string, ChartRates> };
   analysisHref?: string;
-  /** The Gekisou stage pattern, grouped with the room scores of the same mode. */
-  gekisou?: Item;
 }
 
 export interface SongSummaryRenderOptions {
@@ -192,6 +190,7 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
         )}
       </dl>
     </section>
+    ${renderGekisouStages({ item, gekisou, label })}
     ${
       scoring
         ? html`
@@ -205,6 +204,67 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
   `;
 }
 
+
+/** The song-level Gekisou stage pattern, shown after the chart figures. */
+export function renderGekisouStages({
+  item,
+  gekisou,
+  label,
+}: {
+  item: Item;
+  gekisou?: Item;
+  label(key: string, fallback: string): string;
+}) {
+  const itemGekisou = (item.gekisou as Item | undefined) || {};
+  const gekisouData = gekisou || {};
+  const missionPattern = Array.isArray(gekisouData.missionPattern)
+    ? gekisouData.missionPattern
+    : Array.isArray(itemGekisou.missionPattern)
+      ? itemGekisou.missionPattern
+      : [];
+  const missionTypes = Array.isArray(gekisouData.missionTypes)
+    ? gekisouData.missionTypes
+    : Array.isArray(itemGekisou.missionTypes)
+      ? itemGekisou.missionTypes
+      : missionPattern;
+  const missionIcons = (gekisouData.icons || itemGekisou.icons || {}) as Record<string, string>;
+  const segments = Array.isArray(gekisouData.segments) ? (gekisouData.segments as Item[]) : [];
+  const stageCount = Math.max(missionTypes.length, missionPattern.length, segments.length);
+  const stageTypes = Array.from({ length: stageCount }, (_, index) => missionTypes[index] ?? missionPattern[index]);
+  const cells = stageTypes.flatMap((type, index) => {
+    const mission = gekisouMission(type);
+    if (!mission) return [];
+    const image = missionIcons[mission.icon];
+    return html`
+      <li>
+        ${
+          image
+            ? html`
+                <span
+                  class="song-gekisou-stage__icon"
+                  style=${`mask-image:url("${image}");-webkit-mask-image:url("${image}")`}
+                  aria-hidden="true"
+                ></span>
+              `
+            : nothing
+        }
+        <span>
+          <small>${label("gekisouSegment", "Gekisou stage")} ${index + 1}</small>
+          <strong>${label(mission.key, mission.fallback)}</strong>
+        </span>
+      </li>
+    `;
+  });
+  return cells.length
+    ? html`
+        <section class="detail-section song-detail-section song-gekisou-section">
+          ${renderDetailSectionHeading(label("gekisouStages", "Gekisou stages"), "effects")}
+          <ol class="song-gekisou-stages">${cells}</ol>
+        </section>
+      `
+    : nothing;
+}
+
 export function renderSongRewards({
   item,
   chart,
@@ -214,7 +274,6 @@ export function renderSongRewards({
   locale,
   chartRates,
   analysisHref,
-  gekisou,
 }: SongRewardRenderOptions) {
   const rates = chartRates?.charts[String(chart.difficulty ?? "")] ?? null;
   const targets = rates
@@ -395,56 +454,7 @@ export function renderSongRewards({
         </section>
       `
     : nothing;
-  const itemGekisou = (item.gekisou as Item | undefined) || {};
-  const gekisouData = gekisou || {};
-  const missionPattern = Array.isArray(gekisouData.missionPattern)
-    ? gekisouData.missionPattern
-    : Array.isArray(itemGekisou.missionPattern)
-      ? itemGekisou.missionPattern
-      : [];
-  const missionTypes = Array.isArray(gekisouData.missionTypes)
-    ? gekisouData.missionTypes
-    : Array.isArray(itemGekisou.missionTypes)
-      ? itemGekisou.missionTypes
-      : missionPattern;
-  const missionIcons = (gekisouData.icons || itemGekisou.icons || {}) as Record<string, string>;
-  const segments = Array.isArray(gekisouData.segments) ? (gekisouData.segments as Item[]) : [];
-  const stageCount = Math.max(missionTypes.length, missionPattern.length, segments.length);
-  const stageTypes = Array.from({ length: stageCount }, (_, index) => missionTypes[index] ?? missionPattern[index]);
-  const gekisouCells = stageTypes.flatMap((type, index) => {
-    const mission = gekisouMission(type);
-    if (!mission) return [];
-    const image = missionIcons[mission.icon];
-    return html`
-      <li>
-        ${
-          image
-            ? html`
-                <span
-                  class="song-gekisou-stage__icon"
-                  style=${`mask-image:url("${image}");-webkit-mask-image:url("${image}")`}
-                  aria-hidden="true"
-                ></span>
-              `
-            : nothing
-        }
-        <span>
-          <small>${label("gekisouSegment", "Gekisou stage")} ${index + 1}</small>
-          <strong>${label(mission.key, mission.fallback)}</strong>
-        </span>
-      </li>
-    `;
-  });
-  const stages = gekisouCells.length
-    ? html`
-        <section class="detail-section song-detail-section song-gekisou-section">
-          ${renderDetailSectionHeading(label("gekisouStages", "Gekisou stages"), "effects")}
-          <ol class="song-gekisou-stages">${gekisouCells}</ol>
-        </section>
-      `
-    : nothing;
   return html`
-    ${targets}
     ${
       hasScore || hasCombo
         ? html`
@@ -459,6 +469,6 @@ export function renderSongRewards({
           `
         : nothing
     }
-    ${stages}${rooms}
+    ${targets}${rooms}
   `;
 }

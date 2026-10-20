@@ -7148,7 +7148,6 @@ export class CatalogScreen extends LitElement {
         locale: this.settings.locale,
         chartRates: this.detailAux.chartRates as import("./song-detail-rewards").SongRewardRenderOptions["chartRates"],
         analysisHref: resourceCollectionHref("catalog/song-meta", this.dataServer(), this.settings.locale as Locale),
-        gekisou: this.songGekisouMeta(item),
       }) ?? nothing
     );
   }
