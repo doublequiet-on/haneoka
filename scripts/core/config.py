@@ -134,6 +134,7 @@ def load_server_config(server: str = "jp-cbt") -> ServerConfig:
         "cdnDiscovery",
         "remoteRootMirrors",
         "masterRemoteRootMirrors",
+        "allowCrossOriginMaster",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -243,6 +244,9 @@ def load_server_config(server: str = "jp-cbt") -> ServerConfig:
         raise ValueError(f"invalid masterVersionEndpoint: {file}")
     if master_version_endpoint:
         _validate_service_endpoint(master_version_endpoint, file)
+    allow_cross_origin_master = value.get("allowCrossOriginMaster", False)
+    if not isinstance(allow_cross_origin_master, bool):
+        raise ValueError(f"invalid allowCrossOriginMaster: {file}")
     mirrors = {}
     for key in ("remoteRootMirrors", "masterRemoteRootMirrors"):
         urls = value.get(key, [])
@@ -405,7 +409,7 @@ def load_server_config(server: str = "jp-cbt") -> ServerConfig:
         if (
             master_url.scheme != "https"
             or not master_url.hostname
-            or master_url.netloc != asset_url.netloc
+            or (master_url.netloc != asset_url.netloc and not allow_cross_origin_master)
             or master_url.username is not None
             or master_url.password is not None
             or master_url.query

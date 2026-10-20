@@ -18,6 +18,7 @@ on:
           - jp-test-03
           - jp-test-04
           - jp-test-05
+          - jp-test-06
           - jp-cbt
           - intl-cbt
       github_environment:
