@@ -137,6 +137,28 @@ def restore_stamp_inputs(root: Path, index: dict, delta) -> None:
                 delta.fetch_release_path(relative, target)
 
 
+def delta_input_restorer(root: Path, delta):
+    """Restore one unchanged build-tree input that a delta build only declared.
+
+    Reusable bundles keep their media and object archives in the pinned base
+    release instead of materializing them locally.  A stage that actually needs
+    such a file restores exactly that path, byte- and hash-verified, from the
+    base release.  Returns ``False`` when the base release does not declare the
+    path, leaving the caller's original hard failure untouched.
+    """
+
+    def restore(relative: str) -> bool:
+        relative = validate_release_path(relative)
+        if delta.entry(relative) is None:
+            return False
+        target = root / relative
+        if not target.is_file():
+            delta.fetch_release_path(relative, target)
+        return target.is_file()
+
+    return restore
+
+
 def stage_records(root: Path, server: str, source_id: str, rows: list[dict], records: list[dict], recipe: str,
                   production_recipe: dict | None = None, *, unchanged_source_ids: frozenset[str] = frozenset()) -> dict:
     import numpy as np
@@ -277,8 +299,10 @@ def build_textless_stamps(server: str, source_id: str, build_id: str, *, model: 
     retained = unchanged_source_records(own, server, source_id, entities)
     native_ids = available - set(retained)
     restore_stamp_inputs(layout.root, index, delta)
+    restore_input = delta_input_restorer(layout.root, delta) if delta is not None else None
     inventory = (producer.catalog_inventory(layout.api / "stamps.json", layout.root, layout.assets, server,
-                                           stamp_ids=native_ids, allow_unavailable=True)
+                                           stamp_ids=native_ids, allow_unavailable=True,
+                                           restore_input=restore_input)
                  if native_ids else {'records': [], 'unavailable': []})
     unavailable.extend(inventory['unavailable'])
     current = {str(row["stampId"]): row for row in inventory["records"]}
