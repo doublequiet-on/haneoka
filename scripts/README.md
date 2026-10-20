@@ -7,6 +7,111 @@ catalog, runtime, and Sonolus data and can publish releases to Cloudflare R2.
 Operators must have permission to access and process every input. Do not commit
 packages, credentials, authorization headers, or generated releases.
 
+## Static render transport and entity projections
+
+`seal-render --inputs <frozen-manifest>` emits render manifest v2. Only shared,
+unplanned files with matching path, bytes and SHA-256 may refer to verified
+frozen common content. `merge-render` requires the same manifest, restores those
+references and verifies the full route and client-asset sets. Without `--inputs`,
+sealing emits the original fully carried v1 transport. A merge rejects mixed
+transport versions. To roll back transport, omit `--inputs` from both render
+commands and regenerate every partition; never publish an unverified sparse part.
+
+Prepare captures base entity/story payloads individually in the existing input
+store. Frozen rendering reads those records directly and fails on a missing or
+mismatched record. Old captures do not contain these records and must be prepared
+again. Reverting this change requires regenerating inputs under the reverted
+source identity rather than mixing captures across revisions.
+
+The final entity projector supplies SSR full mode and an explicit core mode.
+Core mode requires a base payload from the four-resource core builder and does
+not generate chart rates. Both paths share the final entity assembly; collections
+reuse `catalogCollectionData`.
+
+Offline acceptance commands (Node 24, no game input or production credentials):
+
+```sh
+node scripts/verify/static-render-transport.mjs .output/build-speed/transport.json
+node scripts/verify/catalog-page-projector.mjs
+node scripts/verify/frozen-entity-projection.mjs
+node scripts/verify/catalog-page-snapshot.mjs
+```
+
+The transport comparison uses separate empty output trees and the same fixed
+inputs. OS file caching is uncontrolled. Its compressed byte count uses a
+deterministic gzip fixture encoding, not the workflow's tar.zst artifacts.
+The captured f173 run in `verify/fixtures/build-speed-baseline.json` is an
+observation from the supplied plan, not a controlled performance comparison.
+Measure real tar.zst bytes and prepare-plus-render cost with the same released
+input before attributing production savings to these changes.
+
+## Core page snapshots
+
+`catalog-pages.yml` follows successful complete public resource publication. It
+builds the current candidate and the deployed producer's actual source commit
+separately. Each execution covers jp/intl, all four core kinds and all five
+locales; a locale cannot publish a partial collection or detail index. The job
+checks authoritative R2 pointers again after publishing and catches up at most
+three times. A continuously changing vector fails visibly rather than reporting
+that a stale snapshot is current.
+
+With the existing R2 environment and locked dependencies installed:
+
+```sh
+export PYTHONPATH=scripts
+python scripts/publish/catalog_pages.py stage
+export CATALOG_PAGE_RELEASE_ROOTS="$(cat .output/catalog-page-inputs/roots.json)"
+STATIC_BUILD_INPUT_MODE= node scripts/build/catalog-pages.mjs --publish
+python scripts/publish/catalog_pages.py check-current
+```
+
+Staging downloads catalog/metadata JSON from completed release CAS entries,
+validating each size and digest. It does not download game bundles or media.
+The producer requires explicit immutable local roots and does not fall back to
+online current when a local dependency is missing. Inputs and source trees are
+separate from generated snapshots. R2 writes use conditional creation; content,
+indexes and manifest are read back before the immutable readiness object.
+
+The scoped API adds `projection=page-data&contract=catalog-page-v1`. Discovery at
+`/api/v1/servers/{server}/release` takes locale/resource and optional id; its small
+descriptor gives a fixed snapshot URL and digest. Fixed reads validate the full
+selector, resource release, revision and snapshot. Current reads revalidate with
+ETag; immutable payloads can be cached for one year. Missing readiness returns
+pending; deletion requires a verified complete index. Source failure, corrupt
+page data, unsupported contract and explicit source unavailability remain
+different errors. The decompressed page limit is 64 MiB and each browser request
+has an eight-second timeout. Visible pages check every 60 seconds and on return
+to visibility. A core change uses descriptor/body/recheck; computed data is
+checked independently. Hidden, cancelled or superseded reads cannot commit.
+
+The full build exports existing chart-rate capture records with
+`publish-page-computed.mjs`; it does not recompute them in the fast job. Receipts
+bind server, source, release, engine and the v6 recipe. Core snapshots remain
+immutable when computations become ready. In-progress chart-player pages stay
+on their existing data.
+
+`STATIC_BUILD_INPUT_ROOT` points to the capture directory containing `capture.json`
+and `content/`. Run `node scripts/build/publish-page-computed.mjs --verify-only`
+to validate these real captured records and construct receipts in memory without
+R2 credentials or publication. This does not verify remote bucket permissions.
+
+`config/catalog-page-rollout.json` selects enabled kinds. A new frontend backfills
+its executing projector revision before exposing the matching registration in
+ASSETS. To disable adoption, deploy an empty enabledKinds list, or revert the
+client integration; static first paint remains available. To roll back resource
+data, use the existing verified resource-pointer rollback. The old vector selects
+its retained ready snapshot; never overwrite a readiness key to simulate rollback.
+Retain page snapshots and their referenced resource releases for the intended
+rollback window. Existing CAS and static-document GC namespaces do not sweep
+`catalog-pages/v1/`; no automatic page snapshot deletion is introduced here.
+
+Set `PIPELINE_MEASUREMENTS_DIR` to save per-command resource measurements, and
+`PIPELINE_INITIAL_CACHE` to declare the actual initial cache condition. Reports
+include command/source identity, source revision, options, wall time, process
+CPU and the existing stage's reported transfer/reuse fields. Missing counters
+are not synthesized. Invocation identity is not a content digest of game input.
+These reports are separate artifacts and do not affect release identities.
+
 ## Setup
 
 Requirements: Python 3.13, FFmpeg, `vgmstream-cli`, Node.js 24, and pnpm.
@@ -354,3 +459,13 @@ success.
 Haneoka-authored pipeline files are licensed under [MPL-2.0](../LICENSE).
 Inputs, generated resources, and third-party tools retain their own terms; see
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
+### 页面快照的成本与启用
+
+`config/catalog-page-rollout.json` 默认 `enabledKinds: []`。默认整站构建、资源更新和 PR 验证不发布页面快照或计算 receipt，不产生这条链路的 R2 写入与新增存储。PR CI 复用五语分片构建，使用 `verification_only`，不读取生产 R2 凭据，也不生成可部署 Worker publication。生产构建继续保留授权 runtime 与 publication 校验。
+
+快照需要显式配置启用的核心类型。发布前先复用同一版本的完整 ready；已存在的内容对象只读验证，不重复 PUT，也不列举 bucket。新增正文以确定性 gzip 写入 `.json.gz`，摘要仍绑定解压后的原始 JSON；旧 `.json` 保持可读。先上传内容并远端回读，最后写入 ready。
+
+新资源向量或投影版本仍可能使整批快照更新，压缩不会减少首次发布的对象数量。启用前应以实际输入测量新增 PUT 数和压缩字节数；当前保持关闭。重复完整发布不新增对象；本地验证不向生产 R2 写入对象。
+
+PR 的公开完整前端校验使用 optional Cubism 策略；没有 Core 时跳过原生模型 metadata 提取，生产部署仍要求完整授权运行时。

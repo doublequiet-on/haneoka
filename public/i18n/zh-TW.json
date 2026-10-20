@@ -379,6 +379,7 @@
     }
   },
   "catalog": {
+    "pageData": { "chartPending": "譜面計算待就緒" },
     "fields": {
       "bands": "樂團",
       "band": "樂團",

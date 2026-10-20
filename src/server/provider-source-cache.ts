@@ -2,7 +2,7 @@
 // Input: 缓存根、HTTP 输入和并发限制。
 // Output: 供应方响应读取器与可复用的捕获记录。
 // Pos: [Map](L2-2.md)；供应方静态快照的输入存储适配。
-// Effects/Dependencies: HTTP 缓存可能联网；原子写本地快照、摘要和读取记录。
+// Effects/Dependencies: HTTP 缓存可能联网；按来源限流退避并遵守 Retry-After；原子写本地快照、摘要和读取记录。
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -19,6 +19,17 @@ interface InputRecord {
   bytes: number;
   fetchedAt: string;
   httpCache?: ProviderHttpCapture;
+}
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const REQUEST_ATTEMPTS = 6;
+const RETRY_BUDGET_MS = 5 * 60_000;
+function retryDelay(response: Response, attempt: number): number {
+  const header = response.headers.get("retry-after");
+  const announced = header && /^\d+$/u.test(header)
+    ? Number(header) * 1000
+    : header ? Date.parse(header) - Date.now() : 0;
+  const backoff = response.status === 429 ? Math.min(60_000, 5000 * 2 ** attempt) : 1000 * 2 ** attempt;
+  return Math.max(backoff, Number.isFinite(announced) ? announced : 0);
 }
 const sha = (body: string | Uint8Array) => createHash("sha256").update(body).digest("hex");
 function atomicFile(file: string, body: string | Uint8Array) {
@@ -47,6 +58,7 @@ export function createProviderSourceCache(root: string, concurrency = 4) {
     for (const record of previous.inputs) records.set(sha(`${record.method}\u0000${record.url}`), record);
   }
   const waiters: Array<() => void> = [];
+  const cooldowns = new Map<string, number>();
   let active = 0, hotBytes = 0, hits = 0;
   let consistencyError: Error | undefined;
   const acquire = () => active < concurrency ? (active++, Promise.resolve()) : new Promise<void>(resolve => waiters.push(resolve));
@@ -79,16 +91,40 @@ export function createProviderSourceCache(root: string, concurrency = 4) {
         }
         await acquire();
         try {
+          const origin = new URL(url).origin;
+          const deadline = Date.now() + RETRY_BUDGET_MS;
+          const pause = async (delay: number) => {
+            init?.signal?.throwIfAborted();
+            if (Date.now() + delay >= deadline) throw new Error(`Provider retry budget exhausted for ${origin}`);
+            await new Promise<void>((resolve, reject) => {
+              const aborted = () => { clearTimeout(timer); reject(init!.signal!.reason); };
+              const timer = setTimeout(() => { init?.signal?.removeEventListener("abort", aborted); resolve(); }, delay);
+              init?.signal?.addEventListener("abort", aborted, { once: true });
+            });
+          };
           let response: Response | undefined;
           let httpCache: ProviderHttpCapture | undefined;
-          for (let attempt = 0; ; attempt++) {
+          for (let attempt = 0; attempt < REQUEST_ATTEMPTS; attempt++) {
+            while ((cooldowns.get(origin) || 0) > Date.now()) await pause(cooldowns.get(origin)! - Date.now());
+            init?.signal?.throwIfAborted();
+            if (Date.now() >= deadline) throw new Error(`Provider retry budget exhausted for ${origin}`);
             try {
-              const result = await http.get(request, { ...init, signal: init?.signal || AbortSignal.timeout(45_000) });
+              const result = await http.get(request, { ...init, signal: init?.signal || AbortSignal.timeout(Math.min(45_000, deadline - Date.now())) });
               response = result.response; httpCache = result.capture;
-              if (![408, 425, 429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break;
-              await response.arrayBuffer();
-            } catch (error) { if (attempt === 2) throw error; }
-            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+            } catch (error) {
+              http.assertConsistent();
+              init?.signal?.throwIfAborted();
+              if (attempt === REQUEST_ATTEMPTS - 1) throw error;
+              await pause(1000 * 2 ** attempt);
+              continue;
+            }
+            if (!RETRYABLE_STATUS.has(response.status)) break;
+            const delay = retryDelay(response, attempt);
+            if (response.status === 429 || response.headers.has("retry-after"))
+              cooldowns.set(origin, Math.max(cooldowns.get(origin) || 0, Date.now() + delay));
+            if (attempt === REQUEST_ATTEMPTS - 1) break;
+            await response.arrayBuffer();
+            await pause(delay);
           }
           const body = Buffer.from(await response!.arrayBuffer());
           const record: InputRecord = {

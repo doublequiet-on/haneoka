@@ -8,6 +8,9 @@ on:
       resource_servers:
         type: string
         default: intl,jp
+      verification_only:
+        type: boolean
+        default: false
     outputs:
       frontend_artifact:
         value: ${{ jobs.merge.outputs.artifact }}
@@ -33,6 +36,7 @@ jobs:
       STATIC_BUILD_INPUT_ROOT: data/static-build/inputs
       PROVIDER_STATIC_SNAPSHOT: data/provider-static/snapshots/${{ github.run_id }}
       ASTRO_TELEMETRY_DISABLED: "1"
+      HANEOKA_CUBISM_RUNTIME_POLICY: ${{ inputs.verification_only && 'optional' || 'required' }}
     outputs:
       inputs_sha: ${{ steps.freeze.outputs.inputs_sha }}
       artifact: ${{ steps.freeze.outputs.artifact }}
@@ -61,6 +65,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm dependencies:verify
       - uses: ./.github/actions/setup-cubism-runtime
+        if: ${{ !inputs.verification_only }}
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -146,6 +151,29 @@ jobs:
             node scripts/build/team-builder-engine.mjs
             node scripts/build/package-build-cache.mjs record team-engine
           fi
+      - name: Resolve page snapshot rollout
+        id: catalog-pages
+        run: node --input-type=module -e 'import fs from "node:fs"; const rollout = JSON.parse(fs.readFileSync("config/catalog-page-rollout.json", "utf8")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${rollout.enabledKinds.length > 0}\n`);'
+      - name: Backfill core snapshots before registering the new reader
+        if: ${{ !inputs.verification_only && steps.catalog-pages.outputs.enabled == 'true' }}
+        env:
+          PYTHONPATH: scripts
+          STATIC_BUILD_INPUT_MODE: ""
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          python -m pip install boto3
+          for attempt in 1 2 3; do
+            python scripts/publish/catalog_pages.py stage
+            export CATALOG_PAGE_RELEASE_ROOTS="$(cat .output/catalog-page-inputs/roots.json)"
+            node scripts/build/catalog-pages.mjs --publish
+            if python scripts/publish/catalog_pages.py check-current; then break; fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+          done
+      - name: Register page snapshot reader
+        run: node scripts/build/catalog-pages.mjs --register
       - uses: actions/cache/save@v6
         if: steps.package-cache.outputs.cache-hit != 'true'
         with:
@@ -175,6 +203,15 @@ jobs:
           node scripts/build/prepare-static-inputs.mjs
           STATIC_BUILD_PHASE=prepare pnpm exec astro build
           node scripts/build/static-build-inputs.mjs compact-catalog-cache --root "$PWD" --capture "$STATIC_BUILD_INPUT_ROOT"
+      - name: Publish completed chart computations without changing core snapshots
+        if: ${{ !inputs.verification_only && steps.catalog-pages.outputs.enabled == 'true' }}
+        env:
+          PYTHONPATH: scripts
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: node scripts/build/publish-page-computed.mjs
       - name: Verify and freeze complete shared inputs
         id: freeze
         run: |
@@ -249,6 +286,7 @@ jobs:
       inputs_artifact: ${{ needs.prepare.outputs.artifact }}
       inputs_sha: ${{ needs.prepare.outputs.inputs_sha }}
       node_version: ${{ needs.prepare.outputs.node_version }}
+      runtime_policy: ${{ inputs.verification_only && 'optional' || 'required' }}
       page_groups: ${{ inputs.page_groups }}
       resource_servers: ${{ inputs.resource_servers }}
 
@@ -266,6 +304,7 @@ jobs:
       STATIC_PAGE_GROUPS: ${{ inputs.page_groups }}
       STATIC_RESOURCE_SERVERS: ${{ inputs.resource_servers }}
       STATIC_CATALOG_SOURCE: http
+      HANEOKA_CUBISM_RUNTIME_POLICY: ${{ inputs.verification_only && 'optional' || 'required' }}
     outputs:
       artifact: ${{ steps.archive.outputs.artifact }}
     steps:
@@ -310,6 +349,7 @@ jobs:
       - name: Check Worker types
         run: pnpm typecheck:worker
       - name: Prepare verified Worker publication
+        if: ${{ !inputs.verification_only }}
         run: node scripts/deploy/worker-publication.mjs prepare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -317,7 +357,11 @@ jobs:
       - name: Archive complete qualified publication
         id: archive
         run: |
-          tar --use-compress-program="zstd -T2 -3" -cf .output/worker-publication.tar.zst .output/deployment .output/public .output/static-documents/publication.json .output/static-documents/references.json
+          if [ "${{ inputs.verification_only }}" = "true" ]; then
+            tar --use-compress-program="zstd -T2 -3" -cf .output/worker-publication.tar.zst .output/public .output/static-documents/publication.json .output/static-documents/references.json
+          else
+            tar --use-compress-program="zstd -T2 -3" -cf .output/worker-publication.tar.zst .output/deployment .output/public .output/static-documents/publication.json .output/static-documents/references.json
+          fi
           echo "artifact=worker-publication-${{ github.sha }}-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:

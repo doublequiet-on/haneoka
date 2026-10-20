@@ -1,0 +1,98 @@
+name: Publish core page snapshots
+on:
+  workflow_call:
+    inputs:
+      github_environment:
+        type: string
+        required: true
+    secrets:
+      cloudflare_account_id:
+        required: true
+      r2_access_key_id:
+        required: true
+      r2_secret_access_key:
+        required: true
+  workflow_dispatch:
+    inputs:
+      github_environment:
+        type: environment
+        required: true
+permissions:
+  contents: read
+jobs:
+  revisions:
+    runs-on: ubuntu-latest
+    outputs:
+      sources: ${{ steps.resolve.outputs.sources }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        env:
+          CANDIDATE: ${{ github.sha }}
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const rollout = JSON.parse(fs.readFileSync('config/catalog-page-rollout.json', 'utf8'));
+          if (!rollout.enabledKinds.length) {
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'sources=[]\n');
+            process.exit(0);
+          }
+          const response = await fetch('https://haneoka.org/catalog-page-producer.json', { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+          const sources = new Set([process.env.CANDIDATE]);
+          if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+            const active = await response.json();
+            if (active.contract !== 'catalog-page-v1' || !/^[a-f0-9]{40}$/.test(active.sourceSha)) throw new Error('Invalid deployed page producer');
+            sources.add(active.sourceSha);
+          } else if (response.status >= 500) throw new Error('Deployed producer unavailable');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sources=${JSON.stringify([...sources])}\n`);
+          JS
+  publish:
+    needs: revisions
+    if: needs.revisions.outputs.sources != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJSON(needs.revisions.outputs.sources) }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.github_environment }}
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: scripts
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.cloudflare_account_id }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.r2_access_key_id }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.r2_secret_access_key }}
+      AWS_EC2_METADATA_DISABLED: "true"
+      R2_BUCKET: hotdori-assets
+      STATIC_BUILD_INPUT_MODE: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.source }}
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install boto3
+      - run: node scripts/external-repositories.mjs checkout
+      - uses: ./.dependencies/vega/.github/actions/setup-wasm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - name: Publish fixed snapshots and catch a newer public vector
+        run: |
+          for attempt in 1 2 3; do
+            python scripts/publish/catalog_pages.py stage
+            export CATALOG_PAGE_RELEASE_ROOTS="$(cat .output/catalog-page-inputs/roots.json)"
+            node scripts/build/catalog-pages.mjs --publish
+            if python scripts/publish/catalog_pages.py check-current; then exit 0; fi
+          done
+          echo "Public resource vector changed after all bounded catch-up attempts" >&2
+          exit 1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: catalog-page-receipt-${{ matrix.source }}-${{ github.run_id }}
+          path: .output/catalog-pages/snapshot.json

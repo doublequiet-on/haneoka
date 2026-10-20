@@ -379,6 +379,7 @@
     }
   },
   "catalog": {
+    "pageData": { "chartPending": "谱面计算待就绪" },
     "fields": {
       "bands": "乐队",
       "band": "乐队",

@@ -7,6 +7,9 @@ import { semanticOwnersConflict } from "../src/lib/cross-server/content";
 import { handleContentAccessRequest } from "./content-access";
 import { publicStampManifest } from "../src/lib/stamp-maker/public-manifest";
 import { projectUiMarks, withUiMarksProjection } from "../src/lib/ui-marks.ts";
+import catalogPageRollout from "../config/catalog-page-rollout.json";
+import { handlePageData, type PageDataBindings } from "./catalog-page-data";
+import { PageDataError, type PageSource } from "../src/lib/catalog-page-contract";
 import { fnv1a32Shard } from "../src/lib/hash-partition.ts";
 import { refreshCommunityRanking, COMMUNITY_RANKING_CRON } from "./community-ranking";
 import { handleCommunityBootstrap } from "./community-bootstrap";
@@ -673,11 +676,11 @@ async function handleReleaseRegistryApi(
   return response;
 }
 
-async function currentRelease(env: Env, server: ResourceServerRoute): Promise<Release | null> {
+async function currentRelease(env: Env, server: ResourceServerRoute, fresh = false): Promise<Release | null> {
   const key = `${server.resourcePrefix}/current.json`;
   const now = Date.now();
   const cached = pointerCache.get(key);
-  if (cached && cached.expiresAt > now) {
+  if (!fresh && cached && cached.expiresAt > now) {
     pointerCache.delete(key);
     pointerCache.set(key, cached);
     return cached.value;
@@ -2289,6 +2292,39 @@ async function handleCatalogApi(
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+function catalogPageBindings(env: Env, request: Request): PageDataBindings {
+  return {
+    read: async (key) => {
+      try {
+        if (key.startsWith("catalog-pages/v1/objects/")) {
+          const compressed = await env.ASSET_BUCKET.get(`${key}.gz`);
+          if (compressed) return new Uint8Array(await new Response(compressed.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+        }
+        const object = await env.ASSET_BUCKET.get(key);
+        return object ? new Uint8Array(await object.arrayBuffer()) : null;
+      } catch { throw new PageDataError("page_data_incomplete", 503); }
+    },
+    producer: async () => {
+      if (!catalogPageRollout.enabledKinds.length) return { ...catalogPageRollout };
+      const response = await env.ASSETS.fetch(new Request(new URL("/catalog-page-producer.json", request.url)));
+      return response.ok && response.headers.get("content-type")?.includes("application/json") ? response.json() : null;
+    },
+    vector: async () => {
+      const vector: PageSource[] = [];
+      for (const slug of ["jp", "intl"] as const) {
+        const route = await activeResourceServer(env, slug);
+        if (!route) { vector.push({ state: "inactive", server: slug }); continue; }
+        let release: Release | null;
+        try { release = await currentRelease(env, route, true); }
+        catch { throw new PageDataError("source_unavailable", 503); }
+        if (!release) throw new PageDataError("source_unavailable", 503);
+        vector.push({ state: "published", server: slug, releaseId: release.releaseId, sourceId: release.sourceId });
+      }
+      return vector;
+    },
+  };
+}
+
 async function handleCatalogApiRequest(
   env: Env,
   ctx: ExecutionContext,
@@ -2297,6 +2333,8 @@ async function handleCatalogApiRequest(
 ): Promise<Response | null> {
   const match = /^\/api\/v1\/servers\/([^/]+)\/(.+)$/.exec(pathname);
   if (!match) return null;
+  const pageData = await handlePageData(request, catalogPageBindings(env, request));
+  if (pageData) return pageData;
   const rawServer = match[1];
   const rawTail = match[2];
   if (!rawServer || !rawTail) return errorResponse(request, 404, "route_not_found", "API route not found");
@@ -3513,7 +3551,7 @@ function previewDetailShell(request: Request, shell: Response, route: ResourceRo
         const config = JSON.parse(element.getAttribute("config") || "{}");
         element.setAttribute(
           "config",
-          JSON.stringify({ ...config, server: route.server, entityId: route.id, entityContext: true, chartPage: route.view === "chart" }),
+          JSON.stringify({ ...config, server: route.server, entityKind: route.kind, entityId: route.id, entityContext: true, chartPage: route.view === "chart" }),
         );
       }
       element.setInnerContent("");
@@ -3547,6 +3585,7 @@ async function serveCanonicalResourceDocument(
   env: Env,
   ctx: ExecutionContext,
   publicationId: string | null,
+  pageReady = false,
 ): Promise<Response | null> {
   const requestedUrl = new URL(request.url);
   const announcement = announcementDocumentRequest(requestedUrl.pathname);
@@ -3593,7 +3632,7 @@ async function serveCanonicalResourceDocument(
   const direct = await env.ASSETS.fetch(request);
   if (direct.status !== 404) return direct;
 
-  const availability = await documentEntityAvailability(env, route as ResourceRoute & { id: string });
+  const availability: DocumentEntityAvailability | null = pageReady ? { entity: {} } : await documentEntityAvailability(env, route as ResourceRoute & { id: string });
   if (!availability) return new Response("Not found", { status: 404 });
 
   const url = new URL(request.url);
@@ -3606,7 +3645,7 @@ async function serveCanonicalResourceDocument(
   const lookup = staticDocumentLookupPath(url.pathname);
   const document = lookup ? await serveStaticDocument(shellRequest, env, ctx, lookup, publicationId) : null;
   const shell = document || (await env.ASSETS.fetch(shellRequest));
-  if (!isPublicResourceServer(route.server) && shell.ok)
+  if ((!isPublicResourceServer(route.server) || pageReady) && shell.ok)
     return previewDetailShell(request, shell, route as ResourceRoute & { id: string });
   return shell.status === 404 ? new Response("Not found", { status: 404 }) : shell;
 }
@@ -3861,6 +3900,15 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
     (async () => {
       const redirect = await staticDocumentRedirect(assetRequest, env, publicationId);
       if (redirect) return redirect;
+      let pageReady = false;
+      const pageRoute = parseResourceRoute(url.pathname);
+      if (catalogPageRollout.enabledKinds.length && pageRoute?.id && ["jp", "intl"].includes(pageRoute.server) && ["cards", "support-cards", "events", "songs"].includes(pageRoute.kind)) {
+        const query = new URL(`/api/v1/servers/${pageRoute.server}/release`, url);
+        query.search = new URLSearchParams({ projection: "page-data", contract: "catalog-page-v1", locale: pageRoute.locale, resource: pageRoute.kind, id: pageRoute.id }).toString();
+        const lookup = await handlePageData(new Request(query), catalogPageBindings(env, request));
+        if (lookup?.status === 404) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+        if (lookup?.ok) pageReady = (await lookup.json() as { state?: string }).state === "ready";
+      }
       const provider = providerEntityFromUrl(url);
       const view = staticViewFromUrl(url);
       const corePath = staticDocumentLookupPath(view || url.pathname);
@@ -3877,7 +3925,7 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
         if (hit.status !== 404) return hit;
       }
       return (
-        (await serveCanonicalResourceDocument(assetRequest, env, ctx, publicationId)) || serveStaticAsset(assetRequest, env)
+        (await serveCanonicalResourceDocument(assetRequest, env, ctx, publicationId, pageReady)) || serveStaticAsset(assetRequest, env)
       );
     })(),
     Promise.resolve(previewSettings),

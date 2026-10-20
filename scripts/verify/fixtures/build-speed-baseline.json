@@ -1,0 +1,20 @@
+{
+  "schema": "haneoka-build-observation-v1",
+  "provenance": "User supplied Haneoka build acceleration plan, 2026-10-19; not remeasured locally",
+  "commit": "f173ed24fc1a3f236fce71ff9138a3c5be6c4701",
+  "run": "39231491200",
+  "inputIdentity": "not recorded in attachment",
+  "initialCache": "not controlled; zero native JSON HTTP requests observed",
+  "controlledComparison": false,
+  "seconds": {
+    "prepareJob": 280,
+    "dataAndRoutes": 126,
+    "renderWallWindow": 789,
+    "mergeJob": 310,
+    "deployJob": 946,
+    "publicationDownload": 605,
+    "frontendTotal": 2337
+  },
+  "publicationArtifactBytes": 2494700519,
+  "documents": 44088
+}

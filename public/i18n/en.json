@@ -379,6 +379,7 @@
     }
   },
   "catalog": {
+    "pageData": { "chartPending": "Chart calculations pending" },
     "fields": {
       "bands": "Bands",
       "band": "Band",

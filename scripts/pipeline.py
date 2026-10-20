@@ -27,6 +27,7 @@ from build.live2d import build_live2d
 from build.release import assemble_release
 from build.spine import build_spine
 from core.config import ServerConfig, load_server_config
+from core.build_metrics import measure, observe
 from core.contracts import SOURCE_SCHEMA
 from core.fingerprints import build_fingerprint, stage_recipe, legacy_stage_recipes, resource_build_options, STAGE_ROOTS
 from core.manifests import read_json, stable_json, write_json
@@ -100,6 +101,8 @@ def build_id(config: ServerConfig, source_id: str) -> str:
 
 
 def _print(value: object) -> None:
+    if os.environ.get("PIPELINE_MEASUREMENTS_DIR"):
+        observe(json.loads(redact_private_text(stable_json(value))))
     sys.stdout.write(redact_private_text(stable_json(value, pretty=True)))
 
 
@@ -1774,7 +1777,8 @@ def main() -> int:
             options["ktx2"] = True
         os.environ["HANEOKA_RESOURCE_BUILD_OPTIONS"] = json.dumps(options)
     try:
-        args.run(args)
+        with measure(args):
+            args.run(args)
     except DiscoveryUnavailable as error:
         if not args.defer_unavailable or args.command not in {"resolve-server", "probe-identity", "probe-source", "ingest"}:
             raise
