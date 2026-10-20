@@ -41,7 +41,7 @@ import {
   type OfficialCatalogServer,
 } from "../lib/cross-server/catalog";
 import { fetchCrossServerCatalogs } from "../lib/cross-server/fetch";
-import { isCrossCatalogResource } from "../lib/cross-server/definitions";
+import { crossCatalogRows, isCrossCatalogResource } from "../lib/cross-server/definitions";
 import { canUseStaticCatalogScope, showRestrictedContent } from "../lib/content-visibility";
 import { crossServerPublicCache } from "../lib/cross-server/cache";
 import { fetchCrossServerDetail } from "../lib/cross-server/detail";
@@ -167,7 +167,7 @@ import {
   returnStateFromLocation,
   type ResourceKind,
 } from "../lib/resource-route";
-import { normalizeReleaseServer, type ReleaseServer } from "../lib/release-server";
+import { isPublicReleaseServer, normalizeReleaseServer, type ReleaseServer } from "../lib/release-server";
 import { LOCALES, type Locale } from "../i18n/locales";
 import { metaScatter } from "./shared/meta-scatter";
 
@@ -951,6 +951,8 @@ export class CatalogScreen extends LitElement {
   private unionDetail?: Awaited<ReturnType<typeof fetchCrossServerDetail>> & {
     exclusive?: OfficialCatalogServer | null;
   };
+  /** Browse summary the active in-page union detail was opened from. */
+  private unionDetailBase?: Item;
   private unionRequests = new RequestScope();
   private unionResource(): CrossCatalogResource | undefined {
     const resource = this.profile.collection || this.settings.resource;
@@ -1170,6 +1172,9 @@ export class CatalogScreen extends LitElement {
     if (restoring && this.isConnected) {
       this.restoreFacets(navigationDocumentUrl().searchParams);
       this.restoreLocationState();
+      const restored = this.selectedId && !this.selected ? this.itemForNativeId(this.selectedId) : undefined;
+      // A restricted item has no static page; reopen its in-page detail after reload.
+      if (restored && !this.itemEntityLink(restored)) void this.open(restored);
     }
     this.ensureSongMeta();
     if (this.settings.nativeMetaReference) void this.loadNativeMetaReference(this.settings.nativeMetaReference);
@@ -1188,28 +1193,39 @@ export class CatalogScreen extends LitElement {
     for (const server of OFFICIAL_CATALOG_SERVERS) {
       const identity = dto.identities[server];
       if (!identity) continue;
-        const ownCharacters = new Map<number, Item>(),
-          ownBands = new Map<number, Item>();
-        for (const entry of catalogs.characters?.entries || []) {
+      const ownCharacters = new Map<number, Item>(),
+        ownBands = new Map<number, Item>();
+      const addRows = (
+        resource: "characters" | "bands",
+        catalog: CrossCatalogDTO | undefined,
+        target: Map<number, Item>,
+      ) => {
+        // A restricted variant shared with a formal source is deduplicated out of
+        // the merged entries, but that source's cards still need its own
+        // character/band rows; the raw per-source document keeps every row.
+        const document = catalog?.documents?.[server];
+        if (document !== undefined) {
+          for (const [id, row] of Object.entries(crossCatalogRows(resource, document))) {
+            const numeric = Number(id);
+            if (Number.isSafeInteger(numeric) && numeric >= 0)
+              target.set(numeric, this.pinUnionRow(row as Item, identity));
+          }
+          return;
+        }
+        for (const entry of catalog?.entries || []) {
           const variant = entry.perServer[server];
           if (
             variant &&
             variant.identity.releaseId === identity.releaseId &&
             variant.identity.sourceId === identity.sourceId
           )
-            ownCharacters.set(Number(variant.id), this.unionDetailRow(crossServerDetail(entry, server)));
+            target.set(Number(variant.id), this.unionDetailRow(crossServerDetail(entry, server)));
         }
-        for (const entry of catalogs.bands?.entries || []) {
-          const variant = entry.perServer[server];
-          if (
-            variant &&
-            variant.identity.releaseId === identity.releaseId &&
-            variant.identity.sourceId === identity.sourceId
-          )
-            ownBands.set(Number(variant.id), this.unionDetailRow(crossServerDetail(entry, server)));
-        }
-        characters[server] = ownCharacters;
-        bands[server] = ownBands;
+      };
+      addRows("characters", catalogs.characters, ownCharacters);
+      addRows("bands", catalogs.bands, ownBands);
+      characters[server] = ownCharacters;
+      bands[server] = ownBands;
     }
     const itemEntries = new WeakMap<Item, CrossCatalogEntry>();
     const items = dto.entries.map((entry) => this.unionPrimaryRow(entry, itemEntries));
@@ -1335,8 +1351,60 @@ export class CatalogScreen extends LitElement {
     const detail = this.unionDetail;
     return catalogSourceChoices(detail, this.settings.locale, {
       activeSource: detail?.activeServer,
-      href: source => detail?.perServer[source]?.href,
+      onSelect: (source) => void this.selectUnionSource(source),
     });
+  }
+  /**
+   * Restricted editions have no canonical page of their own, so switching to one
+   * loads its detail in place instead of navigating to a hidden-server URL.
+   */
+  private async selectUnionSource(source: string) {
+    if (!this.unionResource() || !this.isConnected) return;
+    const current = this.unionDetail;
+    const active = current?.perServer[current.activeServer];
+    const target = current?.perServer[source];
+    const base = this.unionDetailBase ?? this.selected;
+    if (!current || !active || !target || !base || isPublicReleaseServer(target.identity.server)) return;
+    const matches = (candidate: CrossCatalogEntry) => {
+      const variant = candidate.perServer[current.activeServer];
+      return Boolean(
+        variant &&
+          variant.id === active.id &&
+          variant.identity.releaseId === active.identity.releaseId &&
+          (!active.identity.sourceId || variant.identity.sourceId === active.identity.sourceId),
+      );
+    };
+    const signal = this.unionRequests.begin();
+    try {
+      const resource = this.unionResource()!;
+      let dto = this.unionCatalog?.resource === resource ? this.unionCatalog : undefined;
+      if (!dto) {
+        const catalogs = await fetchCrossServerCatalogs(
+          [resource],
+          this.dataServer() as OfficialCatalogServer,
+          this.settings.locale,
+          { signal },
+        );
+        if (!this.unionRequests.current(signal)) return;
+        dto = catalogs[resource];
+        if (!dto) return;
+        this.unionCatalog = dto;
+      }
+      const entry = dto.entries.find(matches);
+      if (!entry) return;
+      const detail = await fetchCrossServerDetail(entry, source, { signal });
+      if (!this.unionRequests.current(signal) || this.unionDetail !== current) return;
+      if (!detail.fullSources.includes(source)) return;
+      this.unionDetail = { ...detail, exclusive: entry.exclusive };
+      this.unionDetailBase = base;
+      this.selected = { ...base, ...this.unionDetailRow(detail) };
+      this.detailAux = {};
+      this.resultCache = undefined;
+      this.restoreDetailQuery();
+      this.requestUpdate();
+    } catch {
+      /* Keep the current variant when the restricted source cannot be read. */
+    }
   }
   private viewingServerNotice() {
     const detail = this.unionDetail;
@@ -1394,6 +1462,8 @@ export class CatalogScreen extends LitElement {
       )
         return;
       this.unionDetail = { ...detail, exclusive: entry.exclusive };
+      this.unionDetailBase = payload.item;
+      this.unionCatalog = dto;
       this.items = [{ ...payload.item, ...this.unionDetailRow(detail) }];
       this.selected = this.items[0];
       this.resultCache = undefined;
@@ -2199,7 +2269,10 @@ export class CatalogScreen extends LitElement {
     const entry = this.unionEntry(item);
     const variant = entry?.perServer[entry.displayServer];
     const id = variant?.id || (this.profile.perDifficulty ? String(item.musicId || "") : "") || this.itemId(item);
-    return this.entityLink(id, difficulty, variant?.identity.server || this.dataServer());
+    const server = variant?.identity.server || this.dataServer();
+    // Restricted sources have no static entity page; open their detail in place.
+    if (!isPublicReleaseServer(server)) return undefined;
+    return this.entityLink(id, difficulty, server as ReleaseServer);
   }
   private label(key: string, fallback: string) {
     const alias = this.settings.labelAliases?.[key] || catalogLabelPath(key) || key;
@@ -2424,6 +2497,7 @@ export class CatalogScreen extends LitElement {
       cross.fullSources.includes(cross.activeServer)
     ) {
       this.unionDetail = cross;
+      this.unionDetailBase = payload.item;
       this.items = [{ ...payload.item, ...this.unionDetailRow(cross) }];
     }
     this.gameMarks.clear();
@@ -2490,6 +2564,7 @@ export class CatalogScreen extends LitElement {
     this.unionRequests.cancel();
     this.unionCatalog = undefined;
     this.unionDetail = undefined;
+    this.unionDetailBase = undefined;
     this.unionCharacters = {};
     this.unionBands = {};
     this.unionMarks = {};
@@ -4280,6 +4355,27 @@ export class CatalogScreen extends LitElement {
     if (!this.isConnected) return;
     const signal = this.detailRequests.begin();
     const id = this.itemId(summary);
+    const unionEntry = this.unionEntry(summary);
+    const unionVariant = unionEntry?.perServer[unionEntry.displayServer];
+    if (unionEntry && unionVariant && !isPublicReleaseServer(unionVariant.identity.server)) {
+      try {
+        const detail = await fetchCrossServerDetail(unionEntry, unionEntry.displayServer, { signal });
+        if (!this.detailRequests.current(signal) || this.selectedId !== id) return;
+        if (detail.fullSources.includes(unionEntry.displayServer)) {
+          this.unionDetail = { ...detail, exclusive: unionEntry.exclusive };
+          this.unionDetailBase = summary;
+          this.selected = { ...summary, ...this.unionDetailRow(detail) };
+          this.detailAux = {};
+          this.resultCache = undefined;
+          this.restoreDetailQuery();
+          this.setEntityReady(true);
+          this.requestUpdate();
+          return;
+        }
+      } catch {
+        /* Fall back to the pinned collection summary below. */
+      }
+    }
     const growth = !this.isProvider() && ["member", "support", "band-item"].includes(this.profile.presentation);
     const growthPin = growth && this.nativeCatalogPin?.server === this.dataServer() ? this.nativeCatalogPin : undefined;
     const growthSourceUrl = (resource: string, entity = "") => {
@@ -4463,6 +4559,8 @@ export class CatalogScreen extends LitElement {
   private close() {
     this.resetCommentsActivation();
     this.detailRequests.cancel();
+    this.unionDetail = undefined;
+    this.unionDetailBase = undefined;
     this.selected = null;
     this.selectedId = "";
     this.setEntityReady(false);
