@@ -2436,6 +2436,7 @@
       "useInSearch": "팀 검색에 사용",
       "markOwned": "보유로 표시",
       "required": "항상 포함",
+      "requiredOnePerCharacter": "캐릭터당 필수 카드 1장",
       "showCards": "표시",
       "showOwned": "보유",
       "showAll": "전체",
@@ -2509,7 +2510,8 @@
         "calculateAll": "모든 곡 계산",
         "fiveCharacters": "서로 다른 캐릭터 5명 이상이 필요합니다",
         "eventTables": "이벤트 소모 테이블",
-        "requiredMembers": "필수 멤버의 캐릭터가 중복됩니다",
+        "requiredMembers": "필수 카드에서 {character} 캐릭터가 중복됩니다",
+        "requiredMemberCount": "필수 멤버가 5명을 넘습니다",
         "photoBindings": "스냅이 중복 장착되었습니다",
         "correctionHelp": "이벤트 보상 입력 수정 중",
         "back": "뒤로"

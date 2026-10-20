@@ -123,11 +123,14 @@ export function validatePtRequest(master: EngineMaster, request: EngineRequest):
   const required = new Set([...c.requiredMembers, ...c.bindings.map(([key]) => key), ...(c.leader ? [c.leader] : [])]);
   for (const key of [...required, ...c.excludedMembers])
     if (!members.has(key) || (required.has(key) && c.excludedMembers.includes(key))) add("constraint", key);
-  if (
-    required.size > 5 ||
-    new Set([...required].map((key) => members.get(key)?.card.characterId)).size !== required.size
-  )
-    add("constraint", "required-members");
+  const requiredCharacters = new Map<number, number>();
+  for (const key of required) {
+    const member = members.get(key);
+    if (member) requiredCharacters.set(member.card.characterId, (requiredCharacters.get(member.card.characterId) ?? 0) + 1);
+  }
+  for (const [characterId, count] of requiredCharacters)
+    if (count > 1) add("constraint", `required-members.${characterId}`);
+  if (required.size > 5) add("constraint", "required-member-count");
   const bound = c.bindings.map(([, key]) => key).filter((key): key is string => key !== null);
   const requiredPhotos = new Set([...c.requiredSnaps, ...bound]);
   if (

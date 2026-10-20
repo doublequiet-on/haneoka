@@ -2436,6 +2436,7 @@
       "useInSearch": "Use in team search",
       "markOwned": "Mark as owned",
       "required": "Always include",
+      "requiredOnePerCharacter": "One required card per character",
       "showCards": "Show",
       "showOwned": "Owned",
       "showAll": "All",
@@ -2509,7 +2510,8 @@
         "calculateAll": "Calculate every song",
         "fiveCharacters": "At least five different characters",
         "eventTables": "Event consumption tables",
-        "requiredMembers": "Required members share a character",
+        "requiredMembers": "Two required cards share {character}",
+        "requiredMemberCount": "More than five required members",
         "photoBindings": "A snapshot is bound twice",
         "correctionHelp": "Editing an input for event rewards",
         "back": "Back"

@@ -256,6 +256,10 @@ export function renderCardEditor(host: TeamBuilder): TemplateResult | typeof not
   };
   const p = prefix(kind);
   const owned = kind === "members" ? host.view.members.get(cardId) : host.view.snaps.get(cardId);
+  const characterId = kind === "members" ? catalog.member(cardId)?.characterId : undefined;
+  const characterRequired = characterId !== undefined && !owned?.lock && [...host.view.members.values()].some(
+    (row) => row.cardId !== cardId && row.lock && catalog.member(row.cardId)?.characterId === characterId,
+  );
   const write = (field: string, value: BoxValue) => {
     const changes = [{ key: `${p}.${cardId}.${field}`, value }];
     // Lowering training or limit break lowers the cap; a level above it cannot exist in the game.
@@ -327,8 +331,8 @@ export function renderCardEditor(host: TeamBuilder): TemplateResult | typeof not
     const limits = catalog.snapLimits(cardId, row?.rank ?? null)!;
     fields = html`${steps(host.t("limitBreak", "Limit break"), "rnk", row?.rank ?? null, limits.rank)}${levelField(row?.level ?? null, limits.levelCap)}`;
   }
-  const flag = (label: string, field: "use" | "lock", value: boolean) => html`
-    <label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${live(value)} @change=${(event: Event) => write(field, (event.target as HTMLInputElement).checked)}></md-checkbox><span>${label}</span></label>
+  const flag = (label: string, field: "use" | "lock", value: boolean, disabled = false) => html`
+    <label class="tb-check"><md-checkbox touch-target="wrapper" ?disabled=${disabled} .checked=${live(value)} @change=${(event: Event) => write(field, (event.target as HTMLInputElement).checked)}></md-checkbox><span>${label}</span></label>
   `;
   return html`
     <dialog ${modal(close)} class="dialog-host" aria-labelledby="tb-editor-title" @click=${close}>
@@ -345,7 +349,7 @@ export function renderCardEditor(host: TeamBuilder): TemplateResult | typeof not
         <div class="tb-editor__fields">${fields}</div>
         ${ptField(host, fieldKey("use"), html`<div class="cluster">
           ${flag(host.t("useInSearch", "Use in team search"), "use", owned?.use ?? false)}
-          ${flag(host.t("required", "Always include"), "lock", owned?.lock ?? false)}
+          ${flag(characterRequired ? host.t("requiredOnePerCharacter", "One required card per character") : host.t("required", "Always include"), "lock", owned?.lock ?? false, characterRequired)}
         </div>`)}
         <footer class="row row--wrap tb-editor__actions">
           <button class="button button--text" type="button" @click=${() => host.write(maxChanges(host, { kind, id: cardId, owned }))}>${icon("upgrade", 18)}${host.t("fullGrowth", "Full growth")}</button>

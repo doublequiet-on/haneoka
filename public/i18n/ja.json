@@ -2436,6 +2436,7 @@
       "useInSearch": "編成検索に使う",
       "markOwned": "所持にする",
       "required": "必ず含める",
+      "requiredOnePerCharacter": "必須カードはキャラクターごとに1枚",
       "showCards": "表示",
       "showOwned": "所持",
       "showAll": "すべて",
@@ -2509,7 +2510,8 @@
         "calculateAll": "全楽曲を計算",
         "fiveCharacters": "異なるキャラクターが 5 人以上必要です",
         "eventTables": "イベント消費テーブル",
-        "requiredMembers": "必須メンバーのキャラクターが重複しています",
+        "requiredMembers": "必須カードで{character}が重複しています",
+        "requiredMemberCount": "必須メンバーが5人を超えています",
         "photoBindings": "スナップが重複しています",
         "correctionHelp": "イベント報酬の入力を編集中",
         "back": "戻る"

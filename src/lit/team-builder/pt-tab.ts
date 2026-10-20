@@ -308,10 +308,16 @@ function inputLabel(host: TeamBuilder, target: string): string {
     minBonus: host.t("minBonus", "Minimum event bonus (%)"),
     member: host.t("members", "Members"),
     snap: host.t("snapshots", "Snapshots"),
-    "required-members": host.t("pt.requiredMembers", "Required members share a character"),
+    "required-member-count": host.t("pt.requiredMemberCount", "More than five required members"),
     "photo-bindings": host.t("pt.photoBindings", "A snapshot is bound twice"),
   };
   if (titles[target]) return titles[target];
+  if (key === "required-members" && field) {
+    const characterId = Number(field);
+    return host.t("pt.requiredMembers", "Two required cards share {character}", {
+      character: catalog.characterName(characterId) || `#${characterId}`,
+    });
+  }
   const fields: Record<string, string> = {
     level: host.t("level", "Level"),
     awake: host.t("training", "Training"),

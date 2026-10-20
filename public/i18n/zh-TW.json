@@ -2436,6 +2436,7 @@
       "useInSearch": "用於組隊搜尋",
       "markOwned": "標記為已擁有",
       "required": "必須使用",
+      "requiredOnePerCharacter": "同一角色僅限一張必帶卡",
       "showCards": "顯示",
       "showOwned": "已擁有",
       "showAll": "全部",
@@ -2509,7 +2510,8 @@
         "calculateAll": "計算全部歌曲",
         "fiveCharacters": "至少需要五名不同角色",
         "eventTables": "活動消耗檔位",
-        "requiredMembers": "必帶成員角色重複",
+        "requiredMembers": "必帶成員中「{character}」重複",
+        "requiredMemberCount": "必帶成員超過五人",
         "photoBindings": "留影重複綁定",
         "correctionHelp": "正在修改活動收益所需的輸入",
         "back": "返回"
