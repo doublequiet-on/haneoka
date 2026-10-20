@@ -45,6 +45,13 @@ community levels do not enter the default official list. Withdrawal removes
 public chart and media access; deleted chart payloads are retained for 30 days before cleanup. Project backups include audio,
 cover and publication settings, and import as a new local project.
 
+Event rewards are organized into farming recommendations and resource planning.
+Farming keeps its own play, reward and input conditions, including ordinary,
+Gekiso, challenge and skip routes. Existing reward weights and CP conversion remain available.
+Automatic and manual Gekiso scoring use a Luck sample count of 0 for nominal expectations;
+a positive count averages fixed seeds 0 through n-1. Manual Gekiso evaluation
+and replacement suggestions share the selected accuracy, placement and sample count.
+
 ## Development
 
 Start with the [repository map](L1.md) and [development guide](docs/DEV_GUIDE.md)

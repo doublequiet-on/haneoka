@@ -1,3 +1,4 @@
+import { songMissions } from "../../lib/catalog-filters";
 import { boostControl } from "./boost-control";
 /** Team search: goal, songs, play, candidates and constraints; results beside them. */
 import { html, nothing, type TemplateResult } from "lit";
@@ -14,6 +15,7 @@ import { renderResults } from "./results";
 import { SCORE_GOALS, scoreGoal, scoreText } from "./score-goal";
 import type { BuildSettings, GoalKind } from "./types";
 import type { TeamBuilder } from "../team-builder";
+import { farmingConditions, missionSummary, parseOpponents } from "./workspace-state";
 import { ptField } from "./pt-fields";
 
 const GOALS = [
@@ -23,11 +25,20 @@ const GOALS = [
   { id: "potential", icon: "auto_awesome" },
 ] as const;
 
-export function comboBonusControl(host: TeamBuilder): TemplateResult {
-  return html`<md-outlined-text-field type="number" min="1" step="1" inputmode="numeric"
+export function gekisoSamplesControl(host: TeamBuilder): TemplateResult {
+  return html`<md-outlined-text-field type="number" min="0" step="1" inputmode="numeric"
+    label=${host.t("pt.luckSamples", "Luck samples")} .value=${String(host.settings.gekisoSeeds)}
+    @change=${(e:Event)=>host.updateSettings({gekisoSeeds:Math.max(0,Math.floor(Number((e.target as HTMLInputElement).value)||0))})}></md-outlined-text-field>`;
+}
+
+export function comboBonusControl(host: TeamBuilder): TemplateResult | typeof nothing {
+  if (!host.hasComboSongs()) return nothing;
+  return html`<md-outlined-text-field id="tb-combo" type="number" min="1" step="1" inputmode="numeric"
     label=${host.t("minComboBonus", "Minimum COMBO BONUS")} prefix-text="×"
-    .value=${live(String(host.settings.minComboBonus))}
-    @change=${(event: Event) => host.updateSettings({ minComboBonus: Math.max(1, Math.floor(Number((event.target as HTMLInputElement).value) || 1)) })}
+    .value=${live(host.settings.minComboBonus === 1 ? "" : String(host.settings.minComboBonus))}
+    placeholder=${host.t("unlimitedCombo", "No minimum")}
+    ?error=${host.submitted && (!Number.isInteger(host.settings.minComboBonus) || host.settings.minComboBonus < 1)}
+    @change=${(event: Event) => host.updateSettings({ minComboBonus: (event.target as HTMLInputElement).value === "" ? 1 : Number((event.target as HTMLInputElement).value) })}
   ></md-outlined-text-field>`;
 }
 
@@ -54,10 +65,12 @@ export function songList(
   change: (songs: SongRef[]) => void,
   single = false,
   allowedSongIds?: number[],
+  fieldId = "tb-songs",
 ): TemplateResult {
   const catalog = host.catalog!;
   return html`
-    <div class="tb-songs">
+    <div class="tb-songs" id=${fieldId} tabindex="-1">
+      <span class="tb-results__meta">${host.t("chartCount", "{count} charts", { count: songs.filter(song => (!allowedSongIds || allowedSongIds.includes(song.songId)) && catalog.difficultyRows(song.songId).some(row => Number(row.difficulty) === song.difficulty)).length })}</span>
       ${songs.length ? html`<div class="tb-songs__list" role="region" aria-label=${host.t("songs", "Songs")} tabindex="0">${songs.map(
         (song, index) => html`
           <div class="list-item list-item--two-line tb-song">
@@ -66,7 +79,7 @@ export function songList(
             </span>
             <span class="list-item__body">
               <strong class="list-item__headline clamp-1">${catalog.songTitle(song.songId)}</strong>
-              <span class="list-item__supporting">${catalog.difficultyLabel(song.songId, song.difficulty)}</span>
+              <span class="list-item__supporting">${catalog.difficultyLabel(song.songId, song.difficulty)}${host.searchSettings.goal === "gekiso" || host.tab === "pt" && host.settings.rewardMode === "recommendation" && host.searchSettings.ptMode === "gekiso" ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}${(allowedSongIds && !allowedSongIds.includes(song.songId)) || !catalog.difficultyRows(song.songId).some(row => Number(row.difficulty) === song.difficulty) ? ` · ${host.t("unavailable", "Unavailable")}` : ""}</span>
             </span>
             <span class="list-item__trailing">
               ${iconButton({ icon: "close", label: host.common("common.actions.remove", "Remove"), onClick: () => change(songs.filter((_, at) => at !== index)) })}
@@ -79,7 +92,8 @@ export function songList(
         type="button"
         @click=${() => {
           host.songPicker = {
-            songs: songs.filter((song) => !allowedSongIds || allowedSongIds.includes(song.songId)),
+            songs: songs.map(song => ({ ...song })),
+            context: `${host.tab}:${host.searchSettings.goal}:${single ? "single" : allowedSongIds ? "restricted" : "songs"}`,
             single,
             query: "",
             filtersOpen: false,
@@ -160,8 +174,7 @@ export function eventSection(host: TeamBuilder, s = host.searchSettings): Templa
   `;
 }
 
-export function playSection(host: TeamBuilder, s = host.searchSettings): TemplateResult {
-  const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
+export function playSection(host: TeamBuilder, s = host.searchSettings, set = (patch: Partial<BuildSettings>) => host.updateSettings(patch)): TemplateResult {
   const slider = (label: string, key: "great" | "good" | "miss", max: number) => html`
     <div class="tb-field">
       <span class="tb-field__label">
@@ -214,7 +227,7 @@ export function playSection(host: TeamBuilder, s = host.searchSettings): Templat
                   `
                 : nothing
             }
-              <div class="tb-field">
+              ${host.hasMission("JustCount", s.songs) ? html`<div class="tb-field">
                 <span class="tb-field__label">
                   JUST
                   <output>${s.just}%</output>
@@ -229,7 +242,7 @@ export function playSection(host: TeamBuilder, s = host.searchSettings): Templat
                   aria-label="JUST"
                   @change=${(e: Event) => set({ just: Number((e.target as HTMLInputElement).value) })}
                 ></md-slider>
-              </div>
+              </div>` : nothing}
             </div>
           `
         : s.playMode === "custom"
@@ -252,51 +265,29 @@ export function renderCandidates(host: TeamBuilder): TemplateResult {
   const cards = host.engineCards();
   const toggleIn = (list: number[], value: number) =>
     list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
-  const required =
-    [...view.members.values()].filter((row) => row.use && row.lock).length +
-    [...view.snaps.values()].filter((row) => row.use && row.lock).length;
+  const fixedMembers = [...new Set([
+    ...(s.scope === "box" ? [...view.members.values()].filter(row => row.use && row.lock).map(row => row.cardId) : []),
+    ...s.bindings.map(([id]) => id), ...(s.leader === null ? [] : [s.leader]),
+  ])];
+  const fixedSnaps = [...new Set([
+    ...(s.scope === "box" ? [...view.snaps.values()].filter(row => row.use && row.lock).map(row => row.cardId) : []),
+    ...s.bindings.flatMap(([, id]) => id === null ? [] : [id]),
+  ])];
+  const required = fixedMembers.length + fixedSnaps.length;
   const ownedMembers = cards.members.map(row => row.cardId);
   const bands = Object.keys(catalog.data.bands)
     .map(Number)
     .filter((id) => catalog.bandName(id));
   const content = html`
     <div class="stack">
-      ${segmented({
-        label: host.t("scope", "Cards"),
-        value: s.scope,
-        options: [
-          { value: "box", label: host.t("scopeBox", "My cards"), icon: "style" },
-          { value: "theoretical", label: host.t("scopeAll", "All cards, full growth"), icon: "auto_awesome_motion" },
-        ],
-        onSelect: (scope) => set({ scope }),
-      })}
-      ${
-        s.scope === "box" && !(activity && s.rewardMode === "recommendation")
-          ? html`
-              <div class="tb-field">
-                <span class="tb-field__label">${host.t("unknownPolicy", "Growth not entered")}</span>
-                ${segmented({
-              label: host.t("unknownPolicy", "Growth not entered"),
-              value: s.unknownPolicy,
-              grow: false,
-              options: [
-                { value: "max", label: host.t("unknownMax", "Count as max") },
-                { value: "min", label: host.t("unknownMin", "Count as minimum") },
-              ],
-              onSelect: (unknownPolicy) => set({ unknownPolicy }),
-            })}
-              </div>
-            `
-          : nothing
-      }
       <div class="tb-field">
-        <span class="tb-field__label">${host.common("catalog.fields.attribute", "Attribute")}</span>
+        <span class="tb-field__label">${host.t("cardAttribute", "Card attribute")}</span>
         <div class="cluster">
           ${[1, 2, 3, 4, 5].map((id) => filterChip({ label: catalog.attributeName(id), image: catalog.attributeIcon(id) || undefined, selected: s.attributes.includes(id), onToggle: () => set({ attributes: toggleIn(s.attributes, id) }) }))}
         </div>
       </div>
       <div class="tb-field">
-        <span class="tb-field__label">${host.common("catalog.fields.band", "Band")}</span>
+        <span class="tb-field__label">${host.t("memberBand", "Member band")}</span>
         <div class="cluster">
           ${bands.map((id) => filterChip({ label: catalog.bandName(id), image: catalog.bandIcon(id) || undefined, selected: s.bands.includes(id), onToggle: () => set({ bands: toggleIn(s.bands, id) }) }))}
         </div>
@@ -366,7 +357,7 @@ export function renderCandidates(host: TeamBuilder): TemplateResult {
           ${iconButton({ icon: "close", label: host.common("common.actions.remove", "Remove"), onClick: () => set({ bindings: s.bindings.filter((_, at) => at !== index) }) })}
         </li>`)}
       </ul>` : nothing}
-      ${activity && s.rewardMode === "recommendation" ? nothing : html`<div class="row row--wrap">
+      ${activity && s.rewardMode !== "plan" ? nothing : html`<div class="row row--wrap">
         <md-outlined-select
           label=${host.t("resultCount", "Results")}
           .value=${String(s.k)}
@@ -378,39 +369,59 @@ export function renderCandidates(host: TeamBuilder): TemplateResult {
             `,
           )}
         </md-outlined-select>
-        <md-outlined-select
-          label=${host.t("timeLimit", "Time limit")}
-          .value=${String(s.timeLimit ?? 0)}
-          @change=${(e: Event) => {
-          const v = Number((e.target as HTMLInputElement).value);
-          set({ timeLimit: v || null });
-        }}
-        >
-          ${[3, 5, 15, 60, 0].map(
-            (limit) => html`
-              <md-select-option value=${String(limit)}>
-                <div slot="headline">${limit ? `${limit} s` : host.t("noLimit", "Until proven")}</div>
-              </md-select-option>
-            `,
-          )}
-        </md-outlined-select>
+
       </div>`}
     </div>
   `;
-  return accordion({
-    id: "tb-candidates",
-    className: "surface tb-accordion",
-    leading: icon("tune", 20),
-    label: host.t("candidates", "Cards and limits"),
-    supportingText: `${host.t("candidateSummary", "{members} members · {snaps} snaps", { members: cards.members.length, snaps: cards.snaps.length })}${required ? ` · ${host.t("requiredCount", "{count} required", { count: required })}` : ""}`,
-    content: activity ? ptField(host, "constraints", content) : content,
-    expanded: host.expanded.has("candidates"),
-    onExpandedChange: (expanded) => {
-      if (expanded) host.expanded.add("candidates");
-      else host.expanded.delete("candidates");
-      host.requestUpdate();
-    },
-  });
+  return html`<section class="surface stack" id="tb-cards" tabindex="-1">
+    ${sectionHeading({ icon: "style", label: host.t("scope", "Cards") })}
+      ${segmented({
+        label: host.t("scope", "Cards"),
+        value: s.scope,
+        options: [
+          { value: "box", label: host.t("scopeBox", "My cards"), icon: "style" },
+          { value: "theoretical", label: host.t("scopeAll", "All cards, full growth"), icon: "auto_awesome_motion" },
+        ],
+        onSelect: (scope) => set({ scope }),
+      })}
+      ${activity && s.rewardMode !== "plan" && s.scope === "box" ? html`<span class="tb-results__meta">${host.t("manualGrowth", "Recorded growth for owned cards; full growth for unowned cards")}</span>` : nothing}
+      ${
+        s.scope === "box" && (!activity || s.rewardMode === "plan")
+          ? html`
+              <div class="tb-field">
+                <span class="tb-field__label">${host.t("unknownPolicy", "Growth not entered")}</span>
+                ${segmented({
+              label: host.t("unknownPolicy", "Growth not entered"),
+              value: s.unknownPolicy,
+              grow: false,
+              options: [
+                { value: "max", label: host.t("unknownMax", "Count as max") },
+                { value: "min", label: host.t("unknownMin", "Count as minimum") },
+              ],
+              onSelect: (unknownPolicy) => set({ unknownPolicy }),
+            })}
+              </div>
+            `
+          : nothing
+      }
+
+    ${activity && s.rewardMode !== "plan" && s.scope === "box" ? html`
+      <md-outlined-select label=${host.t("unknownPolicy", "Growth not entered")}
+        .value=${farmingConditions(s.farming).requireGrowth ? "required" : s.unknownPolicy}
+        ?disabled=${s.farming.play === "gekiso"}
+        @change=${(e:Event)=> { const value = (e.target as HTMLInputElement).value;
+          host.updateFarming(value === "required" ? {requireGrowth:true} : {requireGrowth:false,unknownPolicy:value as "min"|"max"}); }}>
+        <md-select-option value="required"><div slot="headline">${host.t("farm.requireGrowth", "Complete before calculating")}</div></md-select-option>
+        <md-select-option value="min"><div slot="headline">${host.t("unknownMin", "Count as minimum")}</div></md-select-option>
+        <md-select-option value="max"><div slot="headline">${host.t("unknownMax", "Count as max")}</div></md-select-option>
+      </md-outlined-select>` : nothing}
+    <span class="tb-results__meta">${host.t("candidateSummary", "{members} member cards · {snaps} Snapshots", { members: cards.members.length, snaps: cards.snaps.length })}${required ? ` · ${host.t("requiredCount", "{count} fixed", { count: required })}` : ""}</span>
+    ${required ? html`<div class="cluster">${fixedMembers.map(id => html`<span class="tb-chip">${catalog.cardName("members", id)}</span>`)}${fixedSnaps.map(id => html`<span class="tb-chip">${catalog.cardName("snaps", id)}</span>`)}</div>` : nothing}
+    ${!view.members.size ? html`<button class="button button--text" @click=${() => host.setTab("box")}>${host.t("enterCards", "Enter cards")}</button>` : nothing}
+    ${accordion({ id: "tb-candidates", className: "tb-accordion", leading: icon("tune", 20), label: host.t("candidates", "Cards and limits"),
+      content: activity ? ptField(host, "constraints", content) : content,
+      expanded: host.expanded.has("candidates"), onExpandedChange: expanded => { if (expanded) host.expanded.add("candidates"); else host.expanded.delete("candidates"); host.requestUpdate(); } })}
+  </section>`;
 }
 
 export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): TemplateResult {
@@ -419,22 +430,12 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
   const challenge = s.goal === "event" ? s.route === "challenge" : (s.goal === "score" || s.goal === "power") && s.challengeRules;
   const allowedSongIds = challenge ? challengeSongs : s.goal === "event" || s.goal === "plan" ? host.catalog!.normalEventSongIds(s.eventId) : undefined;
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
-  const cards = host.engineCards();
-  const goal = host.goal();
-  const missing = !cards.members.length
-    ? host.t("needCards", "Add cards in My cards, or search all cards at full growth.")
-    : !goal
-      ? s.goal === "event" || s.goal === "plan"
-        ? host.t("needEventSongs", "Choose an event and songs.")
-        : host.t("needSongs", "Choose at least one song.")
-      : "";
   const needsSongs =
     s.goal === "score" ||
     s.goal === "gekiso" ||
     s.goal === "plan" ||
     (s.goal === "event" && s.route !== "skip") ||
     (s.goal === "power" && s.powerSong);
-  const progress = host.progress;
   return html`
     <div class="tb-build">
       <div class="tb-config stack">
@@ -470,27 +471,18 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
           ${
             s.goal === "score" || s.goal === "gekiso"
               ? html`
-                  ${
-                    s.goal === "score"
-                      ? html`<md-outlined-select
+                  <md-outlined-select
                           label=${host.t("criterion", "Score goal")}
                           .value=${scoreGoal(s)}
                           @change=${(e: Event) => {
                             const value = (e.target as HTMLInputElement).value as keyof typeof SCORE_GOALS;
-                            set(value === "at-least" || value === "capped" ? { scoreTarget: value, criterion: "mean" } : { scoreTarget: "none", criterion: value });
+                            set(s.goal === "gekiso" && (value === "mean" || value === "max" || value === "min") ? { criterion: value } : value === "at-least" || value === "capped" ? { scoreTarget: value, criterion: "mean" } : { scoreTarget: "none", criterion: value });
                           }}
                         >
-                          ${(["mean", "max", "min", "at-least", "capped"] as const).map(
+                          ${(s.goal === "score" ? (["mean", "max", "min", "at-least", "capped"] as const) : (["mean", "max", "min"] as const)).map(
                             (value) => html`<md-select-option value=${value}><div slot="headline">${scoreText(host, SCORE_GOALS[value].label)}</div></md-select-option>`,
                           )}
-                        </md-outlined-select>`
-                      : segmented({
-                          label: host.t("criterion", "Score goal"),
-                          value: s.criterion,
-                          options: (["mean", "max", "min"] as const).map((value) => ({ value, label: scoreText(host, SCORE_GOALS[value].label) })),
-                          onSelect: (criterion) => set({ criterion }),
-                        })
-                  }
+                        </md-outlined-select>
                   <p class="supporting-text tb-goal-hint">${scoreText(host, SCORE_GOALS[scoreGoal(s)].help)}</p>
                   ${
                     scoreGoal(s) === "at-least" || scoreGoal(s) === "capped"
@@ -515,26 +507,19 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
             s.goal === "gekiso"
               ? html`
                   ${comboBonusControl(host)}
-                  ${segmented({
-                    label: host.t("gekisoRank", "Placement in each range"),
-                    value: String(s.gekisoRank),
-                    options: [1, 2, 3, 4, 5].map((rank) => ({ value: String(rank), label: `${rank}` })),
-                    onSelect: (value) => set({ gekisoRank: Number(value) }),
-                  })}
-                  <span class="tb-field__label">${host.t("gekisoOpponents", "Opponents' scores in each range")}</span>
-                  <div class="tb-number-grid">
-                    ${[0, 1, 2].map(
-                      (range) => html`<md-outlined-text-field
-                        label=${host.t("gekisoRange", "Range {n}", { n: range + 1 })}
-                        inputmode="numeric"
-                        .value=${live(s.gekisoOpponents?.[range] ?? "")}
-                        @change=${(e: Event) => {
-                          const next = [...(s.gekisoOpponents ?? ["", "", ""])] as BuildSettings["gekisoOpponents"];
-                          next[range] = (e.target as HTMLInputElement).value;
-                          set({ gekisoOpponents: next });
-                        }}
-                      ></md-outlined-text-field>`,
-                    )}
+                  ${gekisoSamplesControl(host)}
+                  <div id="tb-placement" class="stack" tabindex="-1">
+                    ${segmented({ label: host.t("placementMode", "Placement basis"), value: s.gekisoPlacementMode,
+                      options: [{value:"rank",label:host.t("placementRank", "Specified placement")},{value:"opponents",label:host.t("placementOpponents", "Opponent scores")}],
+                      onSelect: gekisoPlacementMode => set({ gekisoPlacementMode }) })}
+                    ${s.gekisoPlacementMode === "rank" ? segmented({ label: host.t("gekisoRank", "Placement in each range"), value: String(s.gekisoRank),
+                      options: [1,2,3,4,5].map(rank => ({value:String(rank),label:String(rank)})), onSelect: value => set({gekisoRank:Number(value)}) }) : html`
+                      <div class="tb-number-grid">${[0,1,2].map(range => html`<div class="stack">
+                        <md-outlined-text-field label=${`${host.t("gekisoRange", "Range {n}", {n:range+1})} · ${missionSummary([...new Set(s.songs.map(song => songMissions(host.catalog!.song(song.songId))[range]!))])}`}
+                          .value=${live(s.gekisoOpponents[range])} ?error=${host.submitted && parseOpponents(s.gekisoOpponents).invalid[range]}
+                          @change=${(event: Event) => { const next = [...s.gekisoOpponents] as BuildSettings["gekisoOpponents"]; next[range] = (event.target as HTMLInputElement).value; set({gekisoOpponents:next}); }}></md-outlined-text-field>
+                        <span class="tb-results__meta">${parseOpponents(s.gekisoOpponents).ranges[range]!.length ? host.t("opponentCount", "{count} opponents", {count:parseOpponents(s.gekisoOpponents).ranges[range]!.length}) : host.t("emptyOpponentRank", "1st place (no opponents entered)")}</span>
+                      </div>`)}</div>`}
                   </div>
                 `
               : nothing
@@ -578,85 +563,16 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                 `
               : nothing
           }
+          ${s.goal === "score" || s.goal === "gekiso" ? html`<details class="fold"><summary>${host.t("play", "Play")} · ${s.playMode === "ap" ? host.t("playAp", "All Perfect") : host.t("playCustom", "My accuracy")}</summary>${playSection(host)}</details>` : nothing}
         </section>` : nothing}
-        ${
-          s.goal === "event"
-            ? html`
-                <section class="surface stack">
-                  ${sectionHeading({ icon: "emoji_events", label: host.t("eventSetup", "Event") })}
-                  ${eventSection(host)}
-                  ${segmented({
-                label: host.t("route", "Play"),
-                value: s.route,
-                options: [
-                  { value: "live", label: host.t("routeLive", "Normal live"), icon: "play_arrow" },
-                  { value: "challenge", label: host.t("routeChallenge", "Challenge live"), icon: "swords" },
-                  { value: "skip", label: host.t("routeSkip", "Skip"), icon: "fast_forward" },
-                ],
-                onSelect: (route) =>
-                  set({ route, measure: route !== "live" && s.measure === "challenge-points" ? "points" : s.measure }),
-              })}
-                  <label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${s.fullRanking}
-                    @change=${(e: Event) => set({ fullRanking: (e.target as HTMLInputElement).checked })}></md-checkbox>
-                    <span>${host.t("fullRanking", "Full reward ranking")}</span></label>
-                  <md-outlined-select
-                    label=${host.t("measure", "Maximize")}
-                    .value=${s.weighted ? "weighted" : s.measure}
-                    @change=${(e: Event) => {
-                      const value = (e.target as HTMLInputElement).value;
-                      set(value === "weighted" ? { weighted: true } : { weighted: false, measure: value as BuildSettings["measure"] });
-                    }}
-                  >
-                    ${[
-                      ["points", host.t("measurePoints", "Event points")],
-                      ["items", host.t("measureItems", "Shop items")],
-                      ...(s.route === "live" ? [["challenge-points", host.t("measureCp", "Challenge points")]] : []),
-                      ["weighted", host.t("measureWeighted", "Weighted rewards")],
-                    ].map(([value, label]) => html`<md-select-option value=${value!}><div slot="headline">${label}</div></md-select-option>`)}
-                  </md-outlined-select>
-                  ${
-                    s.weighted
-                      ? html`<div class="tb-number-grid">
-                          ${(
-                            [
-                              ["weightPoints", host.t("weightPoints", "Weight per event point")],
-                              ["weightItems", host.t("weightItems", "Weight per shop item")],
-                              ...(s.route === "live" ? [["weightCp", host.t("weightCp", "Weight per challenge point")]] : []),
-                            ] as [keyof BuildSettings, string][]
-                          ).map(
-                            ([key, label]) => html`<md-outlined-text-field
-                              type="number"
-                              min="0"
-                              step="any"
-                              inputmode="decimal"
-                              label=${label}
-                              .value=${live(String(s[key]))}
-                              @change=${(e: Event) => set({ [key]: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) } as Partial<BuildSettings>)}
-                            ></md-outlined-text-field>`,
-                          )}
-                        </div>`
-                      : nothing
-                  }
-                  ${
-                s.route === "challenge"
-                  ? segmented({
-                      label: host.t("cpPerLive", "Challenge points per live"),
-                      value: String(s.challengePoints),
-                      options: [200, 400, 800, 1600].map((cp) => ({ value: String(cp), label: `${cp}` })),
-                      onSelect: (value) => set({ challengePoints: Number(value) }),
-                    })
-                  : boostControl(host, s.boosts, (boosts) => set({ boosts }))
-              }
-                </section>
-              `
-            : nothing
-        }
         ${
           s.goal === "plan"
             ? html`
                 <section class="surface stack">
                   ${sectionHeading({ icon: "cycle", label: host.t("planSetup", "Resource plan") })}
                   ${eventSection(host)}
+                  <details class="fold"><summary>${host.t("play", "Play")} · ${s.playMode === "ap" ? host.t("playAp", "All Perfect") : host.t("playCustom", "My accuracy")}</summary>${playSection(host)}</details>
+                  <span class="tb-results__meta">${host.t("farm.memory", "Character / song memory bonuses")}: ${host.t("farm.included", "Included")}</span>
                   <div class="tb-number-grid">
                     <md-outlined-text-field
                       type="number"
@@ -676,7 +592,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                   </div>
                   ${segmented({ label: host.t("cpPerLive", "Challenge points per live"), value: String(s.challengePoints), options: [200, 400, 800, 1600].map((cp) => ({ value: String(cp), label: `${cp}` })), onSelect: (value) => set({ challengePoints: Number(value) }) })}
                   <span class="tb-field__label">${host.t("planChallengeSongs", "Challenge songs")}</span>
-                  ${songList(host, s.planChallengeSongs, (planChallengeSongs) => set({ planChallengeSongs }), false, challengeSongs)}
+                  ${songList(host, host.settings.planChallengeSongs, (planChallengeSongs) => set({ planChallengeSongs }), false, challengeSongs, "tb-challenge-songs")}
                 </section>
               `
             : nothing
@@ -686,22 +602,41 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
             ? html`
                 <section class="surface stack">
                   ${sectionHeading({ icon: "library_music", label: challenge ? host.t("planChallengeSongs", "Challenge songs") : s.goal === "plan" ? host.t("planNormalSongs", "Normal-live songs") : host.t("songs", "Songs"), count: s.songs.length || undefined })}
-                  ${songList(host, s.goal === "power" ? s.songs.slice(0, 1) : s.songs, (songs) => set({ songs }), s.goal === "power", allowedSongIds)}
-                </section>
-              `
-            : nothing
-        }
-        ${
-          s.goal === "score" || s.goal === "gekiso" || s.goal === "plan" || (s.goal === "event" && s.route !== "skip")
-            ? html`
-                <section class="surface stack">
-                  ${sectionHeading({ icon: "piano", label: host.t("play", "Play") })}${playSection(host)}
+                  ${songList(host, s.goal === "power" ? s.songs : host.settings.songs, (songs) => set({ songs }), s.goal === "power", allowedSongIds)}
                 </section>
               `
             : nothing
         }
         ${renderCandidates(host)}
+        ${renderBuildRun(host)}
+      </div>
+      <div class="tb-results-column">${renderResults(host)}</div>
+    </div>
+  `;
+}
+
+export function renderBuildRun(host: TeamBuilder, showTimeLimit = true): TemplateResult {
+  const s = host.searchSettings, progress = host.progress;
+  return html`
         <div class="tb-run">
+                  ${showTimeLimit ? html`<md-outlined-select
+          label=${host.t("timeLimit", "Time limit")}
+          .value=${String(s.timeLimit ?? 0)}
+          @change=${(e: Event) => {
+          const v = Number((e.target as HTMLInputElement).value);
+          host.updateSettings({ timeLimit: v || null });
+        }}
+        >
+          ${[3, 5, 15, 60, 0].map(
+            (limit) => html`
+              <md-select-option value=${String(limit)}>
+                <div slot="headline">${limit ? `${limit} s` : host.t("noLimit", "Until proven")}</div>
+              </md-select-option>
+            `,
+          )}
+        </md-outlined-select>` : nothing}
+          ${host.submitted && host.inputIssues().length ? html`<div class="surface stack" role="alert">${host.inputIssues().map(issue => html`<button class="button button--text" @click=${() => host.focusInput(issue.field)}>${issue.message}</button>`)}</div>` : nothing}
+          ${host.results || host.tab === "pt" && host.pt.job ? html`<button class="button button--text" @click=${() => host.querySelector(".tb-results-column")?.scrollIntoView({block:"start"})}>${host.t("viewResults", "View results")}</button>` : nothing}
           ${
             host.taskKind === "build"
               ? html`
@@ -718,16 +653,12 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                   <button
                     class="button button--full tb-run__button"
                     type="button"
-                    ?disabled=${host.running || !!missing}
+                    ?disabled=${host.running}
                     @click=${() => void host.run()}
                   >
-                    ${host.running ? host.t("sc.busy", "Another calculation is running") : missing ? html`<span class="tb-run__reason">${missing}</span>` : html`${icon("search", 20)}${host.t("findTeams", "Find teams")}`}
+                    ${host.running ? host.t("sc.busy", "Another calculation is running") : html`${icon("search", 20)}${host.tab === "pt" ? s.goal === "plan" ? host.t("farm.planRun", "Calculate resource plan") : s.route === "skip" ? host.t("farm.skipRun", "Recommend skip team") : host.t("farm.run", "Recommend songs and teams") : host.t("findTeams", "Find teams")}`}
                   </button>
                 `
           }
-        </div>
-      </div>
-      <div class="tb-results-column">${renderResults(host)}</div>
-    </div>
-  `;
+        </div>`;
 }

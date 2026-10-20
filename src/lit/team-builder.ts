@@ -28,19 +28,21 @@ import type { EngineHit, EngineRequest, EngineResponse, Goal, TeamEvaluation, Gr
 import { BoxStore, type BoxSnapshot } from "../lib/team-builder/sync/box-store";
 import { engineInputs, readBox, type BoxView } from "../lib/team-builder/sync/box-view";
 import type { BoxValue } from "../lib/team-builder/sync/box-doc";
-import { rovingKeydown } from "./ui/controls";
+import { rovingKeydown, segmented } from "./ui/controls";
 import { clearAppBarActions, setAppBarActions, setAppBarSearch } from "../lib/app-bar";
 import { LazyImages } from "./ui/lazy-images";
 import { icon } from "./ui/icon";
-import { DEFAULT_SETTINGS, type BoxFilters, type BuildSettings, type Tab } from "./team-builder/types";
+import { DEFAULT_SETTINGS, type BoxFilters, type BuildSettings, type FarmingSettings, type Tab } from "./team-builder/types";
+import { farmingMode, farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
 import { renderBuildTab } from "./team-builder/build-tab";
 import { snackbar } from "../lib/snackbar";
 import { renderBoxTab, renderCardEditor, renderUndoAction } from "./team-builder/box-tab";
 import { renderAccountTab } from "./team-builder/account-tab";
-import { renderTeamsTab, renderSongComparisonTab } from "./team-builder/teams-tab";
+import { renderTeamsTab, renderManualTeamTab, renderSongComparisonTab } from "./team-builder/teams-tab";
 import { renderSongPicker, type SongPickerState } from "./team-builder/song-picker";
 import { ImportController } from "./team-builder/importers";
 import { Catalog } from "./team-builder/catalog";
+import { songMissions } from "../lib/catalog-filters";
 import { PtController, renderPtTab } from "./team-builder/pt-tab";
 import { SongComparison } from "./team-builder/song-comparison";
 
@@ -80,6 +82,7 @@ export class TeamBuilder extends LitElement {
   view: BoxView | null = null;
   store: BoxStore | null = null;
   engine: EngineClient | null = null;
+  farmResultMode: "recommendation" | "event" | null = null;
   imports: ImportController = new ImportController(this);
   pt = new PtController(this);
   songComparison = new SongComparison(this);
@@ -103,6 +106,7 @@ export class TeamBuilder extends LitElement {
   private resetTasks() {
     this.songComparison.dispose();
     this.pt.dispose();
+    this.farmResultMode = null;
     this.engine?.cancel();
     this.task = null;
     this.running = false;
@@ -115,10 +119,20 @@ export class TeamBuilder extends LitElement {
     this.activeManualContext = "";
     this.activeContext = "";
     ++this.runGeneration;
+    this.results = null;
+    this.resultInputs = null;
+    this.resultSettings = null;
+    this.resultsFor = "";
+    this.songPicker = null;
+    this.songPickerPreferences.clear();
   }
 
+  buildMode: "automatic" | "manual" = "automatic";
   tab: Tab = "build";
   settings: BuildSettings = { ...DEFAULT_SETTINGS };
+  submitted = false;
+  lastTaskTab: Tab = "build";
+  songPickerPreferences = new Map<string, Partial<SongPickerState>>();
   filters: BoxFilters = { kind: "members", query: "", show: "owned", bands: [], characters: [], attributes: [], rarities: [], facets: {} };
   filtersOpen = false;
   selection = new Set<string>();
@@ -126,7 +140,7 @@ export class TeamBuilder extends LitElement {
   songPicker: SongPickerState | null = null;
   results: EngineResponse | null = null;
   resultSettings: BuildSettings | null = null;
-  resultInputs: Pick<EngineRequest, "members" | "snaps" | "unknownPolicy"> | null = null;
+  resultInputs: EngineRequest | null = null;
   resultTab = "overall";
   resultsFor = "";
   running = false;
@@ -195,6 +209,7 @@ export class TeamBuilder extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     clearAppBarActions(SYNC_OWNER);
+    clearAppBarActions("team-builder-resources");
     this.releaseSearch?.();
     this.releaseSearch = undefined;
     this.dataController?.abort();
@@ -342,12 +357,11 @@ export class TeamBuilder extends LitElement {
     if (versionChanged || ownerChanged) {
       this.view = readBox(snapshot.entries);
       const stored = this.view.prefs[SETTINGS_KEY.slice(5)];
-      if (stored && typeof stored === "object") this.settings = { ...DEFAULT_SETTINGS, ...(stored as Partial<BuildSettings>) };
+      this.settings = restoreBuildSettings(stored && typeof stored === "object" ? stored as Partial<BuildSettings> : {});
       if (this.settings.goal === "event" || this.settings.goal === "plan") {
         this.settings = { ...this.settings, rewardMode: this.settings.goal, goal: "score" };
         if (ownerChanged) this.tab = "pt";
       }
-      this.settings = this.compatibleSettings(this.settings);
       this.songComparison.restore();
     }
     this.requestUpdate();
@@ -365,9 +379,19 @@ export class TeamBuilder extends LitElement {
     }
   }
   updateSettings(patch: Partial<BuildSettings>) {
-    this.settings = this.compatibleSettings({ ...this.settings, ...patch });
+    this.settings = { ...this.settings, ...patch };
     this.write([{ key: SETTINGS_KEY, value: this.settings as unknown as BoxValue }]);
     this.requestUpdate();
+  }
+  updateFarming(patch: Partial<FarmingSettings>) {
+    const farming = { ...this.settings.farming, ...patch };
+    const rewardMode = this.settings.rewardMode === "plan" ? "plan" : farmingMode(farming);
+    if (rewardMode !== this.settings.rewardMode) {
+      this.cancel();
+      this.compare = [];
+      this.pt.showIssues = false;
+    }
+    this.updateSettings({ farming, rewardMode });
   }
   openSongComparison(formation?: typeof this.manual) {
     if (formation) {
@@ -378,6 +402,7 @@ export class TeamBuilder extends LitElement {
     this.setTab("song-comparison");
   }
   setTab(tab: Tab) {
+    if (["build", "pt", "song-comparison"].includes(tab)) this.lastTaskTab = tab;
     this.tab = tab;
     this.requestUpdate();
     void this.updateComplete.then(() => this.querySelector<HTMLElement>(".tb-tabpanel")?.focus({ preventScroll: true }));
@@ -437,8 +462,9 @@ export class TeamBuilder extends LitElement {
     });
     return { members, snaps, player: this.view?.player, unknownPolicy: this.settings.unknownPolicy };
   }
-  manualGoal(): Extract<Goal, { kind: "score" }> {
-    const s = this.settings;
+  manualGoal(): Extract<Goal, { kind: "score" | "gekiso" }> {
+    const s = this.effectiveSettings(this.settings.manualScoreMode);
+    if (this.settings.manualScoreMode === "gekiso") return { ...this.gekisoGoal({ ...s, gekisoPlacementMode: "rank", minComboBonus: 1 }), criterion: "mean" };
     return {
       kind: "score", songs: s.songs, criterion: "mean",
       play: s.playMode === "ap" ? { great: 0, good: 0, bad: 0, miss: 0 } : { great: s.great / 100, good: s.good / 100, bad: 0, miss: s.miss / 100, missEvery: s.missEvery || 0 },
@@ -452,21 +478,81 @@ export class TeamBuilder extends LitElement {
     return JSON.stringify([this.manualContext(), this.engineCards(), this.view && engineInputs(this.view, true)]);
   }
   get searchSettings(): BuildSettings {
-    const goal = this.tab === "pt" && this.settings.rewardMode !== "recommendation" ? this.settings.rewardMode : this.settings.goal;
-    return this.compatibleSettings({ ...this.settings, goal });
+    const settings = this.tab === "pt" && this.settings.rewardMode !== "plan" ? farmingSettings(this.settings) : this.settings;
+    const goal = this.tab === "build" && this.buildMode === "manual" ? settings.manualScoreMode : this.tab === "pt" ? settings.rewardMode === "plan" ? "plan" : "event" : settings.goal;
+    return this.compatibleSettings({ ...settings, goal });
   }
-  private compatibleSettings(settings: BuildSettings): BuildSettings {
-    if (!this.catalog || settings.eventId === null) return settings;
-    const goal = this.tab === "pt" ? settings.rewardMode : this.tab === "teams" ? "score" : settings.goal;
+  hasMission(type: string, songs = this.effectiveSettings().songs): boolean {
+    return songs.some(song => songMissions(this.catalog!.song(song.songId)).includes(type));
+  }
+  hasComboSongs(songs = this.effectiveSettings().songs): boolean {
+    return this.hasMission("Combo", songs);
+  }
+  effectiveSettings(mode?: string): BuildSettings { return this.compatibleSettings(this.settings, mode); }
+  private compatibleSettings(settings: BuildSettings, mode?: string): BuildSettings {
+    if (mode === "recommendation" || this.tab === "pt" && settings.rewardMode !== "plan" && !mode) settings = farmingSettings(settings);
+    if (!this.catalog) return settings;
+    const goal = mode ?? (this.tab === "pt" ? settings.rewardMode : this.tab === "teams" || this.tab === "build" && this.buildMode === "manual" ? settings.manualScoreMode : settings.goal);
     const challengeIds = new Set(this.catalog.challengeSongs(settings.eventId).map((row) => row.liveMusicId));
     const challenge = goal === "event" ? settings.route === "challenge" : (goal === "score" || goal === "power") && settings.challengeRules;
     const normalEvent = goal === "event" || goal === "plan" || goal === "recommendation";
-    const allowed = challenge ? challengeIds : normalEvent ? new Set(this.catalog.normalEventSongIds(settings.eventId)) : undefined;
+    const allowed = challenge ? challengeIds : normalEvent && settings.eventId !== null ? new Set(this.catalog.normalEventSongIds(settings.eventId)) : undefined;
+    const exists = (song: { songId: number; difficulty: number }) => this.catalog!.difficultyRows(song.songId).some(row => Number(row.difficulty) === song.difficulty);
+    const availableSongs = settings.songs.filter(song => exists(song) && (!allowed || allowed.has(song.songId)));
+    const songs = goal === "power" ? settings.powerSong ? availableSongs.slice(0, 1) : [] : goal === "potential" || goal === "event" && settings.route === "skip" ? [] : availableSongs;
     return {
       ...settings,
-      songs: allowed ? settings.songs.filter((song) => allowed.has(song.songId)) : settings.songs,
-      planChallengeSongs: settings.planChallengeSongs.filter((song) => challengeIds.has(song.songId)),
+      minComboBonus: this.hasComboSongs(songs) ? settings.minComboBonus : 1,
+      just: this.hasMission("JustCount", songs) ? settings.just : 100,
+      ptJust: this.hasMission("JustCount", songs) ? settings.ptJust : 100,
+      songs,
+      planChallengeSongs: settings.planChallengeSongs.filter((song) => exists(song) && challengeIds.has(song.songId)),
     };
+  }
+  inputIssues(recommendation = false): { field: string; message: string }[] {
+    const s = this.searchSettings, issues: { field: string; message: string }[] = [];
+    const add = (field: string, key: string, fallback: string) => issues.push({ field, message: this.t(key, fallback) });
+    if (!this.engineCards().members.length) add("tb-cards", "needCardsShort", "Choose cards");
+    if (!recommendation && !this.goal()) add("tb-songs", "needConditions", "Choose the required event, charts or target");
+    const gekiso = recommendation ? s.ptMode === "gekiso" : s.goal === "gekiso";
+    if (gekiso && (!Number.isInteger(s.minComboBonus) || s.minComboBonus < 1)) add("tb-combo", "invalidCombo", "Enter a positive integer");
+    if (!recommendation && s.goal === "gekiso" && s.gekisoPlacementMode === "opponents") {
+      const parsed = parseOpponents(s.gekisoOpponents);
+      if (parsed.empty) add("tb-placement", "needOpponents", "Enter opponent scores");
+      if (parsed.invalid.some(Boolean)) add("tb-placement", "invalidOpponents", "Use up to four positive scores per range");
+      if (s.songs.some(song => songMissions(this.catalog!.song(song.songId)).includes("Luck")))
+        add("tb-songs", "opponentsLuck", "This chart does not support opponent scores");
+    }
+    const fixed = new Set([
+      ...(s.scope === "box" ? [...(this.view?.members.values() ?? [])].filter(row => row.use && row.lock).map(row => row.cardId) : []),
+      ...s.bindings.map(([member]) => member), ...(s.leader === null ? [] : [s.leader]),
+    ]);
+    const cards = this.engineCards(), members = new Set(cards.members.map(row => row.cardId)), snaps = new Set(cards.snaps.map(row => row.cardId));
+    const characters = [...fixed].map(id => this.master?.members.get(id)?.characterId);
+    if (fixed.size > 5 || new Set(characters).size !== characters.length)
+      add("tb-cards", "fixedConflict", "Fixed members must be at most five different characters");
+    const fixedSnaps = new Set([
+      ...(s.scope === "box" ? [...(this.view?.snaps.values() ?? [])].filter(row => row.use && row.lock).map(row => row.cardId) : []),
+      ...s.bindings.flatMap(([, snap]) => snap === null ? [] : [snap]),
+    ]);
+    if ([...fixed].some(id => !members.has(id)) || [...fixedSnaps].some(id => !snaps.has(id)))
+      add("tb-cards", "fixedUnavailable", "A fixed card is unavailable in this selection");
+    if (fixedSnaps.size > 5 || new Set(s.bindings.map(([member]) => member)).size !== s.bindings.length ||
+      new Set(s.bindings.flatMap(([, snap]) => snap === null ? [] : [snap])).size !== s.bindings.filter(([, snap]) => snap !== null).length)
+      add("tb-cards", "fixedBindingConflict", "Fixed Snapshots or bindings conflict");
+    if (s.noSnaps && fixedSnaps.size) add("tb-cards", "fixedSnapConflict", "Remove fixed Snapshots or allow Snapshots");
+    return issues;
+  }
+  focusInput(field: string) {
+    const target = this.querySelector<HTMLElement>(`#${field}`);
+    target?.scrollIntoView({ block: "center" });
+    (target?.querySelector<HTMLElement>("input, button, md-outlined-text-field, md-outlined-select") ?? target)?.focus();
+  }
+  private gekisoGoal(s: BuildSettings): Extract<Goal, {kind:"gekiso"}> {
+    return { kind:"gekiso", songs:s.songs, criterion:s.criterion,
+      accuracy:{great:s.playMode === "ap" ? 0 : s.great / 100, just:s.just / 100, missEvery:s.playMode === "ap" ? 0 : s.missEvery || 0},
+      rank:s.gekisoPlacementMode === "opponents" ? 1 : s.gekisoRank, minComboBonus:s.minComboBonus,
+      ...(s.gekisoPlacementMode === "opponents" ? {opponents:parseOpponents(s.gekisoOpponents).ranges} : {}), seeds:s.gekisoSeeds };
   }
   goal(): Goal | null {
     const s = this.searchSettings;
@@ -475,6 +561,7 @@ export class TeamBuilder extends LitElement {
     if ((s.goal === "score" || s.goal === "power") && s.challengeRules && challengeId === null) return null;
     switch (s.goal) {
       case "power":
+        if (s.powerSong && !s.songs.length) return null;
         return { kind: "power", song: s.powerSong ? (s.songs[0] ?? null) : null, challengeEventId: challengeId };
       case "score":
         if (!s.songs.length || (s.scoreTarget !== "none" && !(s.targetScore && s.targetScore > 0))) return null;
@@ -486,30 +573,14 @@ export class TeamBuilder extends LitElement {
           challengeEventId: challengeId,
           ...(s.scoreTarget !== "none" ? { target: { kind: s.scoreTarget, score: s.targetScore! } } : {}),
         };
-      case "gekiso": {
-        const opponents = (s.gekisoOpponents ?? ["", "", ""]).map((text) =>
-          text.split(/[\s,，、]+/u).map(Number).filter((value) => Number.isFinite(value) && value > 0),
-        );
-        return s.songs.length
-          ? {
-              kind: "gekiso",
-              songs: s.songs,
-              criterion: s.criterion,
-              accuracy: { great: s.playMode === "ap" ? 0 : s.great / 100, just: s.just / 100, missEvery: s.playMode === "ap" ? 0 : s.missEvery || 0 },
-              rank: s.gekisoRank,
-              minComboBonus: s.minComboBonus,
-              ...(opponents.some((range) => range.length) ? { opponents } : {}),
-              seeds: 0,
-            }
-          : null;
-      }
+      case "gekiso": return s.songs.length ? this.gekisoGoal(s) : null;
       case "event":
         if (s.eventId === null) return null;
         if (s.route !== "skip" && !s.songs.length) return null;
-        if (s.weighted && !(s.weightPoints > 0 || s.weightItems > 0)) return null;
+        if (s.weighted && !(s.weightPoints > 0 || s.weightItems > 0 || s.route === "live" && s.weightCp > 0)) return null;
         return {
           kind: "event",
-          measure: s.weighted ? (s.weightPoints > 0 ? "points" : "items") : s.measure,
+          measure: s.weighted ? (s.weightPoints > 0 ? "points" : s.weightItems > 0 ? "items" : "challenge-points") : s.measure,
           ...(s.weighted
             ? { weights: { points: s.weightPoints, items: s.weightItems, challengePoints: s.route === "live" ? s.weightCp : 0 } }
             : {}),
@@ -540,26 +611,27 @@ export class TeamBuilder extends LitElement {
   request(goal = this.goal()): EngineRequest | null {
     if (!goal || !this.view) return null;
     const cards = this.engineCards();
-    const s = this.settings;
+    const s = this.searchSettings;
     const theoretical = s.scope === "theoretical";
-    const memberKeys = new Set(cards.members.map((row) => row.key));
-    const snapKeys = new Set(cards.snaps.map((row) => row.key));
     const locked = (kind: "m" | "s") =>
       theoretical ? [] : [...(kind === "m" ? this.view!.members : this.view!.snaps).values()].filter((row) => row.lock && row.use).map((row) => `${kind}${row.cardId}`);
     return {
       members: cards.members,
       snaps: cards.snaps,
-      player: this.view.player,
+      player: this.tab === "pt" && s.rewardMode !== "plan" && (!s.farming.includeMemory || s.rewardMode === "recommendation")
+        ? { ...this.view.player,
+            characterMemory: Object.fromEntries([...(this.master?.characters.keys() ?? [])].map(id => [id, 0])),
+            musicMemory: Object.fromEntries([...(this.master?.songs.keys() ?? [])].map(id => [id, 0])) }
+        : this.view.player,
       unknownPolicy: theoretical ? "max" : s.unknownPolicy,
       goal,
       constraints: {
-        requiredMembers: locked("m").filter((key) => memberKeys.has(key)),
+        requiredMembers: locked("m"),
         excludedMembers: [],
-        requiredSnaps: locked("s").filter((key) => snapKeys.has(key)),
+        requiredSnaps: locked("s"),
         excludedSnaps: [],
-        leader: s.leader !== null && memberKeys.has(`m${s.leader}`) ? `m${s.leader}` : null,
+        leader: s.leader !== null ? `m${s.leader}` : null,
         bindings: s.bindings
-          .filter(([member, snap]) => memberKeys.has(`m${member}`) && (snap === null || snapKeys.has(`s${snap}`)))
           .map(([member, snap]) => [`m${member}`, snap === null ? null : `s${snap}`]),
         noSnaps: s.noSnaps,
         minBonusPercent: goal.kind === "event" || goal.kind === "plan" ? s.minBonus : null,
@@ -574,6 +646,14 @@ export class TeamBuilder extends LitElement {
     return JSON.stringify([this.snapshot?.owner, this.loadedServer, this.data?.identity, this.data?.crossServer?.identities, this.request()]);
   }
   async run(verify = false) {
+    if (this.tab === "pt" && this.settings.rewardMode === "recommendation") { await this.pt.start(false); return; }
+    this.submitted = true;
+    if (this.tab === "pt" && this.settings.rewardMode !== "plan") {
+      this.pt.sync();
+      if (this.pt.issues.length) { this.pt.showIssues = true; this.requestUpdate(); await this.updateComplete; await this.pt.focusIssue(this.pt.issues[0]!); return; }
+    }
+    const issues = this.inputIssues();
+    if (issues.length) { this.requestUpdate(); await this.updateComplete; this.focusInput(issues[0]!.field); return; }
     const started = clock();
     const request = this.request();
     if (!request || !this.engine || this.running) return;
@@ -581,12 +661,8 @@ export class TeamBuilder extends LitElement {
     if (!task) return;
     const contextKey = this.calculationContext();
     const generation = ++this.runGeneration;
-    const settings = this.searchSettings;
-    const inputs = {
-      members: request.members.map((row) => ({ ...row })),
-      snaps: request.snaps.map((row) => ({ ...row })),
-      unknownPolicy: request.unknownPolicy,
-    };
+    const settings = structuredClone({ ...this.searchSettings, unknownPolicy: request.unknownPolicy });
+    const inputs = structuredClone(request);
     request.contextKey = contextKey;
     if (verify) {
       request.timeLimitMs = null;
@@ -610,6 +686,7 @@ export class TeamBuilder extends LitElement {
       this.resultsFor = contextKey;
       this.resultSettings = settings;
       this.resultInputs = inputs;
+      if (settings.goal === "event" && this.tab === "pt") this.farmResultMode = "event";
       if (
         this.resultTab !== "overall" &&
         !response.results.some(
@@ -622,14 +699,14 @@ export class TeamBuilder extends LitElement {
     const loading = beginLoading(this.t("searching", "Searching teams"));
     try {
       accept(await this.engine.run(request, (done, total) => {
-        if (contextKey !== this.calculationContext()) return;
+        if (generation !== this.runGeneration || contextKey !== this.calculationContext()) return;
         this.progress = { ...this.progress!, done, total };
         this.requestUpdate();
       }, snapshot => {
         if (snapshot.contextKey === contextKey) accept(snapshot.response);
       }));
     } catch (error) {
-      if (contextKey === this.calculationContext() && !(error instanceof DOMException && error.name === "AbortError")) this.error = this.t("searchFailed", "The search failed: {reason}", { reason: error instanceof Error ? error.message : String(error) });
+      if (generation === this.runGeneration && contextKey === this.calculationContext() && !(error instanceof DOMException && error.name === "AbortError")) this.error = this.t("searchFailed", "The search failed: {reason}", { reason: error instanceof Error ? error.message : String(error) });
     } finally {
       loading.finish();
       if (generation === this.runGeneration) {
@@ -672,17 +749,15 @@ export class TeamBuilder extends LitElement {
     else this.engine?.cancel();
   }
   get stale() {
-    return !!this.results && this.resultsFor !== this.calculationContext();
+    return !!this.results && (this.tab === "pt" && this.settings.rewardMode === "recommendation" || this.resultsFor !== this.calculationContext());
   }
 
   private renderTabs(): TemplateResult {
+    if (!["build", "song-comparison", "pt"].includes(this.tab)) return html`<button class="button button--text" @click=${() => this.setTab(this.lastTaskTab)}>${this.t("backToTask", "Back to task")}</button>`;
     const tabs = [
       { id: "build", icon: "groups", label: this.t("tabBuild", "Build"), count: null },
       { id: "song-comparison", icon: "music_note", label: this.t("sc.tab", "Gekiso songs"), count: null },
       { id: "pt", icon: "emoji_events", label: this.t("pt.tab", "Event rewards"), count: null },
-      { id: "box", icon: "style", label: this.t("tabBox", "My cards"), count: this.view ? this.view.members.size + this.view.snaps.size : null },
-      { id: "account", icon: "trending_up", label: this.t("tabAccount", "Account bonuses"), count: null },
-      { id: "teams", icon: "bookmark", label: this.t("tabTeams", "Teams"), count: this.view?.teams.length || null },
     ] as const;
     return html`
       <nav class="tabs tabs--pills tb-tabs" role="tablist" aria-label=${this.t("title", "Team builder")}
@@ -701,6 +776,12 @@ export class TeamBuilder extends LitElement {
   }
   /** Sync status lives in the app bar; the box search uses the app-bar search field. */
   private syncAppBar() {
+    const resources = ([ ["box", "tabBox", "My cards"], ["account", "tabAccount", "Account bonuses"], ["teams", "tabTeams", "Teams"] ] as const).map(([tab, key, label]) => html`<button class="button button--text" aria-pressed=${this.tab === tab} @click=${(event: Event) => { (event.currentTarget as HTMLElement).closest("details")?.removeAttribute("open"); this.setTab(tab); }}>${this.t(key, label)}</button>`);
+    setAppBarActions("team-builder-resources", html`<div class="tb tb-resources">
+      <div class="cluster tb-resources__desktop">${resources}</div>
+      <details class="tb-resources__mobile"><summary class="button button--text">${this.t("resources", "Resources")}</summary><div class="surface stack">${resources}</div></details>
+    </div>`, this);
+
     const snapshot = this.snapshot;
     const status = snapshot?.status ?? "local";
     const signedOut = !snapshot?.owner || status === "signed-out";
@@ -755,19 +836,20 @@ export class TeamBuilder extends LitElement {
     }
     if (this.pt.correcting && this.tab !== "pt") this.pt.sync();
     this.songComparison.sync();
+    const buildPanel = () => html`<div class="stack">
+      ${segmented({ label: this.t("buildMode", "Team building"), value: this.buildMode,
+        options: [{ value: "automatic", label: this.t("automaticTeam", "Find a team") }, { value: "manual", label: this.t("manualTeam", "Build a team by hand") }],
+        onSelect: mode => { this.buildMode = mode; this.requestUpdate(); } })}
+      ${this.buildMode === "manual" ? renderManualTeamTab(this) : renderBuildTab(this)}
+    </div>`;
     const panel =
-      this.tab === "pt" ? renderPtTab(this) : this.tab === "build" ? renderBuildTab(this) : this.tab === "box" ? renderBoxTab(this) : this.tab === "account" ? renderAccountTab(this) : this.tab === "song-comparison" ? renderSongComparisonTab(this) : renderTeamsTab(this);
+      this.tab === "pt" ? renderPtTab(this) : this.tab === "build" ? buildPanel() : this.tab === "box" ? renderBoxTab(this) : this.tab === "account" ? renderAccountTab(this) : this.tab === "song-comparison" ? renderSongComparisonTab(this) : renderTeamsTab(this);
     return html`
       <div class="team-builder tb">
         <header class="tb-header">
           ${this.renderTabs()}
         </header>
         <section id="tb-panel" class="tb-tabpanel" role="tabpanel" tabindex="-1">${panel}</section>
-        <p class="tb-credit">
-          ${this.t("credit", "Team-building algorithm from Haneoka")} —
-          <a href="https://haneoka.org" rel="noopener">haneoka.org</a> ·
-          <a href="https://github.com/haneoka-gakuen/ournotes-team-builder" rel="noopener">${this.t("creditSource", "Source code")}</a>
-        </p>
         ${renderCardEditor(this)}
         ${this.songPicker ? renderSongPicker(this) : nothing}
         ${this.imports.render()}

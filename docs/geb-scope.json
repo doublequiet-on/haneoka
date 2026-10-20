@@ -207,7 +207,9 @@
     "src/lit/runtime/chart-simulator.ts",
     "src/lit/runtime/audio-dock.ts",
     "worker/community-charts.ts",
-    "worker/community-chart-media.ts"
+    "worker/community-chart-media.ts",
+    "src/lit/team-builder/workspace-state.ts",
+    "src/lit/team-builder/song-picker.ts"
   ],
   "entry_documents": [
     "AGENTS.md",

@@ -1,0 +1,64 @@
+// L3 — GEB
+// Input: Saved build preferences, opponent drafts and chart selections.
+// Output: Migrated farming drafts, effective reward conditions, validated opponents and selection transactions.
+// Pos: [Map](../L2-2.md); team workspace input projection.
+// Effects/Dependencies: Pure transformations; no persistence or engine calls.
+import type { SongRef } from "../../lib/team-builder/engine/api";
+import { DEFAULT_FARMING, DEFAULT_SETTINGS, type BuildSettings, type FarmingSettings } from "./types";
+
+export const chartKey = (song: SongRef) => `${song.songId}:${song.difficulty}`;
+export const uniqueCharts = (songs: readonly SongRef[]): SongRef[] =>
+  [...new Map(songs.map(song => [chartKey(song), { ...song }])).values()];
+
+export function missionSummary(missions: readonly string[]): string {
+  const labels = missions.map(value => value === "Combo" ? "COMBO" : value === "Luck" ? "LUCK" : value === "JustCount" ? "JUST" : "—");
+  if (!labels.length || labels.every(value => value === "—")) return "";
+  return labels.every(value => value === labels[0]) ? `${labels[0]} ×${labels.length}` : labels.join(" · ");
+}
+
+export function parseOpponents(drafts: readonly string[]) {
+  const tokens = drafts.map(text => text.trim() ? text.trim().split(/[\s,，、]+/u) : []);
+  const ranges = tokens.map(range => range.map(Number).filter(value => Number.isFinite(value) && value > 0));
+  const invalid = tokens.map((range, index) => range.length > 4 || range.length !== ranges[index]!.length);
+  return { ranges, invalid, empty: ranges.every(range => !range.length) };
+}
+
+export function restoreBuildSettings(stored: Partial<BuildSettings> = {}): BuildSettings {
+  const settings = { ...structuredClone(DEFAULT_SETTINGS), ...stored };
+  if (stored.gekisoPlacementMode === undefined)
+    settings.gekisoPlacementMode = parseOpponents(settings.gekisoOpponents).empty ? "rank" : "opponents";
+  const mode = stored.goal === "event" || stored.goal === "plan" ? stored.goal : settings.rewardMode;
+  if (!stored.farming) {
+    const custom = mode === "event";
+    settings.farming = { ...DEFAULT_FARMING,
+      play: custom ? settings.route === "live" ? "solo" : settings.route : settings.ptMode,
+      measure: settings.measure === "items" || custom ? settings.measure : "points",
+      ptCycle: settings.ptCycle,
+      ...(custom ? Object.fromEntries(Object.keys(DEFAULT_FARMING).filter(key => key in settings).map(key => [key, settings[key as keyof BuildSettings]])) : {}),
+      requireGrowth: !custom, includeMemory: custom,
+    };
+  }
+  settings.rewardMode = mode === "plan" ? "plan" : farmingMode(settings.farming);
+  return settings;
+}
+
+/** Gekisou rewards retain the engine's AP / recorded-input contract; other play drafts survive the switch. */
+export function farmingConditions(draft: FarmingSettings): FarmingSettings {
+  if (draft.play !== "gekiso") return { ...draft, playMode: draft.play === "skip" ? "ap" : draft.playMode, measure: draft.play !== "solo" && draft.measure === "challenge-points" ? "points" : draft.measure };
+  return { ...draft, playMode: "ap", requireGrowth: true, unknownPolicy: "min", includeMemory: false,
+    measure: draft.measure === "items" ? "items" : "points", weighted: false, fullRanking: false, k: 1, timeLimit: null };
+}
+export function farmingMode(draft: FarmingSettings): "recommendation" | "event" {
+  const s = farmingConditions(draft);
+  return (s.play === "solo" || s.play === "gekiso") && s.playMode === "ap" && s.requireGrowth && !s.includeMemory &&
+    s.measure !== "challenge-points" && !s.weighted && !s.fullRanking && s.k === 1 && s.timeLimit === null ? "recommendation" : "event";
+}
+export function farmingSettings(settings: BuildSettings): BuildSettings {
+  const s = farmingConditions(settings.farming);
+  const mode = farmingMode(s);
+  return { ...settings, ...s, rewardMode: mode, goal: "event",
+    route: s.play === "solo" || s.play === "gekiso" ? "live" : s.play,
+    ptMode: s.play === "gekiso" ? "gekiso" : "solo",
+    unknownPolicy: s.requireGrowth ? "min" : s.unknownPolicy,
+    ptCycle: mode === "recommendation" && s.ptCycle };
+}

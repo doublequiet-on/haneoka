@@ -11,6 +11,7 @@ import { accordion } from "../ui/accordion";
 import { sectionHeading } from "./catalog";
 import { availableOnServer, songMetrics, type ComparisonRow } from "../../lib/team-builder/song-comparison";
 import { memberEventPercent, snapEventPercent } from "../../lib/team-builder/engine/power";
+import { resultSong } from "./results";
 import { playerState } from "../../lib/team-builder/engine/api";
 
 export const COMPARISON_TEXT = {
@@ -275,6 +276,8 @@ function eventBonus(host: TeamBuilder) {
 export function renderSongComparison(host: TeamBuilder) {
   const c = host.songComparison,
     s = c.settings,
+    result = c.resultSettings,
+    rows = c.resultRows,
     catalog = host.catalog!,
     t = (key: keyof typeof COMPARISON_TEXT, params?: Record<string, string | number>) => scText(host, key, params);
   const format = (value: number, digits = 0) =>
@@ -325,7 +328,7 @@ export function renderSongComparison(host: TeamBuilder) {
   `;
   const metricsCells = (row?: ComparisonRow) => {
     const score = row?.status === "complete" ? row.hit?.score?.mean : undefined;
-    const metrics = score === undefined ? null : songMetrics(host.master!, row!.song, s, score);
+    const metrics = score === undefined ? null : songMetrics(host.master!, row!.song, result, score);
     return html`
       <td class="tabular">${score === undefined ? "—" : format(score)}</td>
       <td class="tabular">${metrics ? format(metrics.contribution, 1) + "%" : "—"}</td>
@@ -337,7 +340,7 @@ export function renderSongComparison(host: TeamBuilder) {
     <th>${t("contribution")}</th>
     <th>${t("remaining")}</th>
   `;
-  const done = c.rows.filter((row) => row.status === "complete").length;
+  const done = rows.filter((row) => row.status === "complete").length;
   return html`
     <div class="sc tb-build">
       <div class="stack">
@@ -350,7 +353,7 @@ export function renderSongComparison(host: TeamBuilder) {
             type="button"
             @click=${() => c.choose()}
           >
-            ${t("choose")} · ${s.songs.length}
+            ${t("choose")} · ${c.rows.length}
           </button>
           ${select(
             "sc-target",
@@ -380,7 +383,7 @@ export function renderSongComparison(host: TeamBuilder) {
             ],
             (value) => c.update({ mode: value === "ap" || value === "custom" ? value : null }),
           )}
-          ${number("sc-just", t("just"), s.just, (value) => c.update({ just: value }), 100)}
+          ${host.hasMission("JustCount", c.effectiveSettings.songs) ? number("sc-just", t("just"), s.just, (value) => c.update({ just: value }), 100) : nothing}
           ${
             s.mode === "custom"
               ? html`
@@ -438,27 +441,29 @@ export function renderSongComparison(host: TeamBuilder) {
             ${c.running ? t("stop") : host.running ? t("busy") : t("start")}
           </button>
         </section>
+        <button class="button button--text" type="button" @click=${() => host.querySelector("#sc-results")?.scrollIntoView({ block: "start" })}>${host.t("viewResults", "View results")}</button>
         ${eventBonus(host)}
       </div>
-      <section class="surface stack">
+      <section id="sc-results" class="surface stack">
         ${sectionHeading({ icon: "music_note", label: t("title") })}
         <div class="cluster">
-          <span class="chip chip--static">${s.mode ? t(s.mode) : t("select")} · JUST ${s.just ?? "—"}%</span>
-          <span class="chip chip--static">${t("placement", { rank: s.rank ?? "—" })}</span>
-          <span class="chip chip--static">${s.players} · ${s.target}</span>
+          <span class="chip chip--static">${c.stale ? host.t("stale", "Conditions changed") : t("conditions")}</span>
+          <span class="chip chip--static">${result.mode ? t(result.mode) : t("select")} · JUST ${result.just ?? "—"}%</span>
+          <span class="chip chip--static">${t("placement", { rank: result.rank ?? "—" })}</span>
+          <span class="chip chip--static">${result.players} · ${result.target}</span>
         </div>
         <div class="cluster">
           <span class="chip chip--static">
-            GREAT ${s.mode === "ap" ? 0 : (s.great ?? "—")}% · MISS ${s.mode === "ap" ? 0 : (s.missEvery ?? "—")}
+            GREAT ${result.mode === "ap" ? 0 : (result.great ?? "—")}% · MISS ${result.mode === "ap" ? 0 : (result.missEvery ?? "—")}
           </span>
           <span class="chip chip--static">${t("noAssist")}</span>
         </div>
         <div class="row row--wrap">
-          <span role="status" class="tabular">${t("coverage", { done, total: c.rows.length })}</span>
+          <span role="status" class="tabular">${t("coverage", { done, total: rows.length })}</span>
         </div>
         <md-linear-progress
-          .value=${c.rows.length ? done / c.rows.length : 0}
-          aria-label=${t("coverage", { done, total: c.rows.length })}
+          .value=${rows.length ? done / rows.length : 0}
+          aria-label=${t("coverage", { done, total: rows.length })}
         ></md-linear-progress>
         ${select(
           "sc-sort",
@@ -472,7 +477,7 @@ export function renderSongComparison(host: TeamBuilder) {
           (value) => c.update({ sort: value as typeof s.sort }),
         )}
         ${
-          c.rows.length
+          rows.length
             ? html`
                 <div class="table-scroll" role="region" tabindex="0" aria-label=${t("title")}>
                   <table class="data-table sc-results">
@@ -491,13 +496,11 @@ export function renderSongComparison(host: TeamBuilder) {
                         const row = group.representative,
                           open = c.expanded.has(group.id),
                           completed = group.charts.filter((chart) => chart.status === "complete").length;
-                        const href = catalog.songOptions(group.id).href;
+
                         return html`
                           <tr data-sc-song=${group.id}>
                             <th scope="row">
-                              <a href=${href ?? `/${host.server}/${host.locale}/songs/${group.id}/`}>
-                                ${catalog.songTitle(group.id)}
-                              </a>
+                              ${resultSong(host, row?.song ?? group.charts[0]!.song)}
                               <button
                                 class="button button--text"
                                 type="button"
@@ -528,7 +531,7 @@ export function renderSongComparison(host: TeamBuilder) {
                                 <tbody>
                                   ${group.charts.map((chart) => {
                         const metrics = chart.hit?.score
-                          ? songMetrics(host.master!, chart.song, s, chart.hit.score.mean)
+                          ? songMetrics(host.master!, chart.song, result, chart.hit.score.mean)
                           : null;
                         const missions = host
                           .master!.songs.get(group.id)
@@ -550,7 +553,7 @@ export function renderSongComparison(host: TeamBuilder) {
                                 <dt>${t("score")}</dt>
                                 <dd>${chart.hit?.score ? format(chart.hit.score.mean) : "—"}</dd>
                                 <dt>${t("rank")}</dt>
-                                <dd>${missions} · ${s.rank ?? "—"}</dd>
+                                <dd>${missions} · ${result.rank ?? "—"}</dd>
                               </dl>
                               ${
                         chart.status === "failed" || chart.status === "cancelled"

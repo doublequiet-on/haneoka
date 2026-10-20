@@ -19,6 +19,7 @@ export function selectionPane(options: {
   query: string;
   search: (value: string) => void;
   filters: unknown;
+  quickFilters?: unknown;
   /** Stamp-style chip groups; existing other callers may still supply fields. */
   filterLayout?: "facets" | "fields";
   kind: "member" | "support" | "song" | "system";
@@ -60,6 +61,7 @@ export function selectionPane(options: {
           .value=${live(options.query)}
           @input=${(event: Event) => options.search((event.currentTarget as HTMLInputElement).value)}
         ></md-outlined-text-field>
+        ${options.quickFilters ?? nothing}
         <p role="status" class="team-builder__hint">${options.countLabel}</p>
         <div
           class=${`collection collection--${options.kind}`}

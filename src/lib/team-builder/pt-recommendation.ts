@@ -34,6 +34,7 @@ export interface PtJob {
   /** Missing on older jobs, which retain their original exhaustive chart scope. */
   scope?: PtScope;
   assumptions: string[];
+  presentation?: { scope: "box" | "theoretical" };
   createdAt: number;
   updatedAt: number;
   tasks: PtTask[];

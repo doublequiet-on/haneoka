@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from "lit";
 import { live } from "lit/directives/live.js";
 import "@material/web/progress/linear-progress.js";
 import type { TeamBuilder } from "../team-builder";
-import type { EngineRequest, SongRef } from "../../lib/team-builder/engine/api";
+import type { EngineRequest } from "../../lib/team-builder/engine/api";
 import { validatePtRequest, type PtIssue } from "../../lib/team-builder/engine/pt-eligibility";
 import {
   canonical,
@@ -21,14 +21,16 @@ import {
 } from "../../lib/team-builder/pt-recommendation";
 import { improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
 import { PtCheckpoint } from "../../lib/team-builder/pt-checkpoint";
-import { compareTable, renderHit } from "./results";
-import { renderBuildTab, renderCandidates, comboBonusControl } from "./build-tab";
+import { compareTable, renderHit, renderResults } from "./results";
+import { renderBuildTab, renderBuildRun, renderCandidates, comboBonusControl, eventSection, playSection, songList } from "./build-tab";
 import { sectionHeading } from "./catalog";
 import { boostControl } from "./boost-control";
-import type { SongPickerState } from "./song-picker";
-import { segmented } from "../ui/controls";
+import { rovingKeydown, segmented } from "../ui/controls";
 import { icon } from "../ui/icon";
 import { issueField, ptField } from "./pt-fields";
+import { farmingConditions, farmingMode, farmingSettings } from "./workspace-state";
+import type { FarmingSettings } from "./types";
+import { usesPtResults } from "./score-goal";
 
 export class PtController {
   private task: symbol | null = null;
@@ -36,10 +38,10 @@ export class PtController {
   running = false;
   showAll = false;
   get measure(): PtMeasure {
-    return this.host.settings.measure === "items" ? "items" : "points";
+    return farmingSettings(this.host.settings).measure === "items" ? "items" : "points";
   }
   set measure(measure: PtMeasure) {
-    this.host.updateSettings({ measure });
+    this.host.updateFarming({ measure });
   }
   storageError = false;
   error = "";
@@ -102,7 +104,8 @@ export class PtController {
     return this.host.snapshot?.owner ?? "local";
   }
   request(): EngineRequest | null {
-    const { view, settings: s } = this.host;
+    const { view } = this.host;
+    const s = this.host.effectiveSettings("recommendation");
     if (!view) return null;
     const request = this.host.request({
       kind: "event",
@@ -132,9 +135,9 @@ export class PtController {
     };
   }
   cycle(): PtCycleInput | null {
-    if (!this.host.settings.ptCycle) return null;
+    if (!this.host.effectiveSettings("recommendation").ptCycle) return null;
     return {
-      songs: [...this.host.settings.planChallengeSongs].sort(
+      songs: [...this.host.effectiveSettings("recommendation").planChallengeSongs].sort(
         (a, b) => a.songId - b.songId || a.difficulty - b.difficulty,
       ),
       consumption: this.host.settings.challengePoints,
@@ -144,12 +147,22 @@ export class PtController {
     return canonical([this.request(), this.cycle(), this.owner, this.host.data?.identity]);
   }
   sync() {
-    const request = this.request();
-    const signature = this.inputSignature();
+    const custom = this.host.settings.rewardMode === "event";
+    const request = custom ? this.host.request() : this.request();
+    const signature = custom ? canonical([request, this.host.settings.farming.requireGrowth, this.owner, this.host.data?.identity]) : this.inputSignature();
     if (signature !== this.signature) {
       if (this.running) this.stop();
       this.signature = signature;
       this.issues = [];
+      if (custom) {
+        if (request?.goal.kind === "event" && this.host.master && this.host.settings.farming.requireGrowth) {
+          // Reuse recorded-input qualification without imposing the AP-only search contract on custom rewards.
+          const qualified = { ...request, k: 1, player: { ...request.player, characterMemory: Object.fromEntries([...this.host.master.characters.keys()].map(id => [id, request.player.characterMemory[id] ?? 0])) }, goal: { ...request.goal, ranking: "pt-only" as const,
+            route: "live" as const, measure: "points" as const, play: { great: 0, good: 0, bad: 0, miss: 0 }, songs: [] } };
+          this.issues = validatePtRequest(this.host.master, qualified).filter(issue => ["practice", "player", "inventory", "constraint"].includes(issue.code));
+        }
+        return;
+      }
       if (request?.goal.kind === "event" && this.host.master) {
         for (const route of (this.cycle() ? ["live", "challenge"] : ["live"]) as ("live" | "challenge")[])
           for (const measure of [this.measure]) {
@@ -170,7 +183,7 @@ export class PtController {
   get stale() {
     return (
       !!this.job &&
-      (canonical([this.job.request, this.job.cycle, this.job.owner, this.host.data?.identity]) !== this.inputSignature() ||
+      (this.host.settings.rewardMode !== "recommendation" || canonical([this.job.request, this.job.cycle, this.job.owner, this.host.data?.identity]) !== this.inputSignature() ||
         this.job.owner !== this.owner ||
         this.job.dataFingerprint !== this.dataFingerprint)
     );
@@ -190,8 +203,11 @@ export class PtController {
       if (generation !== this.generation) return;
       for (const task of job?.tasks ?? []) if (task.status === "running") task.status = "queued";
       this.dataFingerprint = hash;
-      this.job = job;
-    } catch {
+      this.job = job?.dataFingerprint === hash ? job : null;
+      if (this.job && !this.host.farmResultMode) this.host.farmResultMode = "recommendation";
+      this.storageError = false;
+    } catch (error) {
+      console.warn("pt-checkpoint-restore", error);
       if (generation !== this.generation) return;
       this.dataFingerprint = hash;
       this.storageError = true;
@@ -214,12 +230,23 @@ export class PtController {
     this.running = false;
     this.job = null;
     this.restoreKey = "";
+    this.dataFingerprint = "";
+    this.storageError = false;
+    this.error = "";
   }
   async start(resume: boolean, scope?: PtScope) {
     // Results stream in as they are found; the search runs until every song is proven or it is stopped.
     const deadline = Infinity;
     this.sync();
     const host = this.host;
+    host.submitted = true;
+    const inputIssues = host.inputIssues(true);
+    if (inputIssues.length) {
+      host.requestUpdate();
+      await host.updateComplete;
+      host.focusInput(inputIssues[0]!.field);
+      return;
+    }
     if (this.issues.length) {
       this.showIssues = true;
       host.requestUpdate();
@@ -264,9 +291,11 @@ export class PtController {
           },
           cycle,
         );
+        job.presentation = { scope: host.settings.scope };
       }
       if (generation !== this.generation || signature !== this.inputSignature()) return;
       this.job = job;
+      host.farmResultMode = "recommendation";
       this.runner = new PtRunner(
         host.engine,
         this.store,
@@ -338,175 +367,100 @@ function inputLabel(host: TeamBuilder, target: string): string {
   return target;
 }
 
-function songButton(
-  host: TeamBuilder,
-  options: { label: string; icon: TemplateResult; count: number; disabled?: boolean; open: () => void },
-) {
-  return html`
-    <button
-      class="button button--tonal pt-song-choice"
-      type="button"
-      ?disabled=${options.disabled}
-      @click=${options.open}
-    >
-      ${options.icon}
-      <span>${options.label}</span>
-      <span class="tabular">${options.count}</span>
-    </button>
-  `;
-}
-
 function renderSetup(host: TeamBuilder): TemplateResult {
-  const pt = host.pt;
-  const t = (key: string, fallback: string) => host.t(`pt.${key}`, fallback);
-  const s = host.settings;
-  const catalog = host.catalog!;
-  const master = host.master!;
-  const events = catalog.events();
-  const eventId = s.eventId !== null && events.some((event) => event.id === s.eventId) ? s.eventId : (events[0]?.id ?? null);
-  if (eventId !== null && eventId !== s.eventId) queueMicrotask(() => host.updateSettings({ eventId }));
-  const picker = (songs: SongRef[], change: (songs: SongRef[]) => void, extra: Partial<SongPickerState> = {}) => {
-    host.songPicker = {
-      songs: songs.filter((song) => !extra.allowedSongIds || extra.allowedSongIds.includes(song.songId)),
-      single: false,
-      query: "",
-      filtersOpen: false,
-      bands: [],
-      attributes: [],
-      gekisouTypes: [],
-      difficulty: 3,
-      change,
-      ...extra,
-    };
-    host.requestUpdate();
-  };
+  const s = host.searchSettings, f = farmingConditions(host.settings.farming), catalog = host.catalog!;
+  const set = (patch: Partial<FarmingSettings>) => host.updateFarming(patch);
+  const event = s.eventId === null ? undefined : host.master!.events.get(s.eventId);
+  const challengeSongs = catalog.challengeSongs(s.eventId).map(row => row.liveMusicId);
+  const normal = !event || !!event.livePoints.size || !!event.liveRewards.length;
+  const challenge = !event || (!!event.challengePoints.size || !!event.challengeRewards.length) && challengeSongs.length > 0;
+  const plays = [
+    { value: "solo", label: host.t("routeLive", "Normal live"), icon: icon("play_arrow", 20), available: normal },
+    { value: "gekiso", label: host.t("pt.gekiso", "Gekisou"), icon: icon("local_fire_department", 20), available: normal },
+    { value: "challenge", label: host.t("routeChallenge", "Challenge live"), icon: icon("swords", 20), available: challenge },
+    { value: "skip", label: host.t("routeSkip", "Skip"), icon: icon("fast_forward", 20), available: normal },
+  ] as const;
+  const available = plays.filter(play => play.available).map(play => play.value);
+  const recommendation = s.rewardMode === "recommendation";
+  const numberField = (key: "weightPoints" | "weightItems" | "weightCp", label: string) => html`
+    <md-outlined-text-field type="number" min="0" step="any" label=${label} .value=${live(String(f[key]))}
+      @change=${(e: Event) => set({ [key]: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) })}></md-outlined-text-field>`;
   return html`
     <section class="surface stack">
       ${sectionHeading({ icon: "emoji_events", label: host.t("eventSetup", "Event") })}
-      ${segmented({
-        label: t("mode", "Play mode"),
-        value: s.ptMode,
-        options: [
-          { value: "solo", label: t("solo", "Solo"), icon: "person" },
-          { value: "gekiso", label: t("gekiso", "Gekisou"), icon: "local_fire_department" },
-        ],
-        onSelect: (value) => host.updateSettings({ ptMode: value as "solo" | "gekiso" }),
-      })}
-      ${segmented({ label: host.t("measure", "Reward"), value: pt.measure,
-        options: [{ value: "points", label: t("points", "Event points") }, { value: "items", label: t("items", "Items") }],
-        onSelect: value => { pt.measure = value as PtMeasure; pt.sync(); host.requestUpdate(); } })}
-      <label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${s.ptCycle}
-        @change=${(e: Event) => host.updateSettings({ ptCycle: (e.target as HTMLInputElement).checked })}></md-checkbox>
-        <span>${host.t("cpCycle", "Long-term CP conversion")}</span></label>
-      <div class="pt-form-grid">
-        ${ptField(
-          host,
-          "event",
-          html`
-            <md-outlined-select
-              label=${host.t("event", "Event")}
-              .value=${eventId === null ? "" : String(eventId)}
-              @change=${(e: Event) => host.updateSettings({ eventId: Number((e.target as HTMLInputElement).value), planChallengeSongs: [] })}
-            >
-              ${events.map(
-              (event) => html`
-                <md-select-option value=${String(event.id)}><div slot="headline">${event.name}</div></md-select-option>
-              `,
-            )}
-            </md-outlined-select>
-          `,
-        )}
-        ${ptField(
-          host,
-          "consumption",
-          boostControl(host, s.boosts, (boosts) => host.updateSettings({ boosts })),
-        )}
-        ${
-          s.ptMode === "gekiso"
-            ? html`
-                ${comboBonusControl(host)}
-                ${ptField(
-                host,
-                "gekiso-input",
-                html`
-                  <md-outlined-text-field
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    label=${t("baselineJust", "Baseline JUST (%)")}
-                    .value=${live(String(s.ptJust))}
-                    @change=${(e: Event) => host.updateSettings({ ptJust: Number((e.target as HTMLInputElement).value) })}
-                  ></md-outlined-text-field>
-                `,
-              )}
-                <md-outlined-text-field
-                  type="number"
-                  min="1"
-                  step="1"
-                  label=${t("luckSamples", "Luck samples")}
-                  .value=${live(String(s.ptLuckSamples))}
-                  @change=${(e: Event) => host.updateSettings({ ptLuckSamples: Number((e.target as HTMLInputElement).value) })}
-                ></md-outlined-text-field>
-              `
-            : nothing
-        }
+      ${ptField(host, "event", eventSection(host, s))}
+      <div class="tb-goals" role="radiogroup" aria-label=${host.t("pt.mode", "Play mode")}
+        @keydown=${rovingKeydown(available, f.play, play => set({ play }))}>
+        ${plays.filter(play => play.available || play.value === f.play).map(play => html`
+          <button class=${`tb-goal${f.play === play.value ? " is-selected" : ""}`} type="button" role="radio"
+            aria-checked=${f.play === play.value} tabindex=${f.play === play.value ? "0" : "-1"}
+            ?disabled=${!play.available} @click=${() => set({ play: play.value })}>
+            <span class="tb-goal__icon">${play.icon}</span><span>${play.label}</span></button>`)}
       </div>
+      <md-outlined-select label=${host.t("farm.reward", "Prioritize reward")} .value=${s.weighted ? "weighted" : s.measure}
+        @change=${(e: Event) => { const value = (e.target as HTMLInputElement).value;
+          set(value === "weighted" ? { weighted: true } : { weighted: false, measure: value as FarmingSettings["measure"] }); }}>
+        <md-select-option value="points"><div slot="headline">${host.t("measurePoints", "Event points")}</div></md-select-option>
+        <md-select-option value="items"><div slot="headline">${host.t("measureItems", "Shop items")}</div></md-select-option>
+        ${f.play === "solo" ? html`<md-select-option value="challenge-points"><div slot="headline">${host.t("measureCp", "Challenge points")}</div></md-select-option>` : nothing}
+        ${f.play !== "gekiso" ? html`<md-select-option value="weighted"><div slot="headline">${host.t("measureWeighted", "Weighted rewards")}</div></md-select-option>` : nothing}
+      </md-outlined-select>
+      ${s.weighted ? html`<div class="pt-form-grid">
+        ${numberField("weightPoints", host.t("weightPoints", "Weight per event point"))}
+        ${numberField("weightItems", host.t("weightItems", "Weight per shop item"))}
+        ${s.route === "live" ? numberField("weightCp", host.t("weightCp", "Weight per challenge point")) : nothing}
+      </div>` : nothing}
+      ${s.route === "challenge" ? segmented({ label: host.t("cpPerLive", "CP per live"), value: String(s.challengePoints),
+        options: host.master!.challengeBoosts.filter(row => row.consumed > 0).map(row => ({value:String(row.consumed),label:`${row.consumed} CP`})),
+        onSelect: value => host.updateSettings({challengePoints:Number(value)}) })
+        : ptField(host, "consumption", boostControl(host, s.boosts, boosts => host.updateSettings({boosts})))}
+      ${recommendation && (challenge || s.ptCycle) ? html`<label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${s.ptCycle}
+        @change=${(e: Event) => set({ptCycle:(e.target as HTMLInputElement).checked})}></md-checkbox>
+        <span>${host.t("farm.cpConversion", "Include challenge rewards from earned CP")}</span></label>` : nothing}
+      <span class="tb-results__meta">${s.ptCycle ? host.t("farm.converted", "Direct rewards + CP conversion") : host.t("farm.direct", "Direct rewards per play")}</span>
     </section>
-    <section class="surface stack">
-      ${sectionHeading({ icon: "library_music", label: host.t("songs", "Songs") })}
-      <div class="pt-form-grid">
-        ${ptField(
-          host,
-          "selection",
-          songButton(host, {
-            label: host.t("chooseSongs", "Choose songs"),
-            icon: icon("library_music", 20),
-            count: s.songs.length,
-            open: () => picker(s.songs, (songs) => host.updateSettings({ songs }), { allowedSongIds: catalog.normalEventSongIds(s.eventId) }),
-          }),
-        )}
-        ${s.ptCycle ? html` ${ptField(
-          host,
-          "challenge-selection",
-          songButton(host, {
-            label: t("chooseChallenge", "Challenge songs"),
-            icon: icon("swords", 20),
-            count: s.planChallengeSongs.length,
-            disabled: s.eventId === null,
-            open: () =>
-              picker(s.planChallengeSongs, (planChallengeSongs) => host.updateSettings({ planChallengeSongs }), {
-                allowedSongIds: master.challengeMusics
-                  .filter((row) => row.eventId === s.eventId)
-                  .map((row) => row.liveMusicId),
-                title: t("chooseChallenge", "Challenge songs"),
-              }),
-          }),
-        )}
-        ${ptField(
-          host,
-          "challenge-consumption",
-          html`
-            <md-outlined-select
-              label=${t("challengeCost", "CP per challenge")}
-              .value=${String(s.challengePoints)}
-              @change=${(e: Event) => host.updateSettings({ challengePoints: Number((e.target as HTMLInputElement).value) })}
-            >
-              ${master.challengeBoosts
-              .filter((row) => row.consumed > 0 && row.eventPointRate > 0 && row.rewardRate > 0)
-              .map(
-                (row) => html`
-                  <md-select-option value=${String(row.consumed)}>
-                    <div slot="headline">${row.consumed} CP</div>
-                  </md-select-option>
-                `,
-              )}
-            </md-outlined-select>
-          `,
-        )} ` : nothing}
-      </div>
-    </section>
+    ${s.route !== "skip" ? html`<section class="surface stack">
+      ${sectionHeading({icon:"library_music",label:host.t("songs", "Songs"),count:s.songs.length})}
+      ${ptField(host, "selection", songList(host, host.settings.songs, songs => host.updateSettings({songs}), false,
+        s.route === "challenge" ? challengeSongs : catalog.normalEventSongIds(s.eventId)))}
+      ${s.ptCycle ? html`
+        <span class="tb-field__label">${host.t("planChallengeSongs", "Challenge songs")}</span>
+        ${ptField(host, "challenge-selection", songList(host, host.settings.planChallengeSongs, planChallengeSongs => host.updateSettings({planChallengeSongs}), false, challengeSongs))}
+        ${ptField(host, "challenge-consumption", segmented({label:host.t("cpPerLive", "CP per live"),value:String(s.challengePoints),
+          options:host.master!.challengeBoosts.filter(row=>row.consumed>0).map(row=>({value:String(row.consumed),label:`${row.consumed} CP`})),onSelect:value=>host.updateSettings({challengePoints:Number(value)})}))}
+      ` : nothing}
+    </section>` : nothing}
     ${renderCandidates(host)}
+    <section class="surface stack">
+      ${sectionHeading({icon:"piano", label:host.t("farm.conditions", "Play and account conditions")})}
+      ${f.play === "gekiso" ? html`
+        <span class="tb-results__meta">${host.t("playAp", "All Perfect")} · ${host.t("gekisoPlacements", "Scoring placements")}: 1</span>
+        ${comboBonusControl(host)}
+        ${host.hasMission("JustCount") ? ptField(host, "gekiso-input", html`<md-outlined-text-field type="number" min="0" max="100" step="1"
+          label=${host.t("pt.baselineJust", "Baseline JUST (%)")} .value=${live(String(s.ptJust))}
+          @change=${(e:Event)=>host.updateSettings({ptJust:Number((e.target as HTMLInputElement).value)})}></md-outlined-text-field>`) : nothing}
+      ` : f.play !== "skip" ? playSection(host, s, patch => set(patch)) : nothing}
+      <details class="fold"><summary>${host.t("farm.advanced", "Advanced conditions")}</summary><div class="stack">
+        ${f.play === "gekiso" ? ptField(host, "gekiso-input", html`<md-outlined-text-field type="number" min="1" step="1"
+          label=${host.t("pt.luckSamples", "Luck samples")} .value=${live(String(s.ptLuckSamples))}
+          @change=${(e:Event)=>host.updateSettings({ptLuckSamples:Number((e.target as HTMLInputElement).value)})}></md-outlined-text-field>`)
+          : html`
+            <label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${f.includeMemory}
+              @change=${(e:Event)=>set({includeMemory:(e.target as HTMLInputElement).checked})}></md-checkbox><span>${host.t("farm.memory", "Character and song memory bonuses")}</span></label>
+            <label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${f.fullRanking}
+              @change=${(e:Event)=>set({fullRanking:(e.target as HTMLInputElement).checked})}></md-checkbox><span>${host.t("fullRanking", "Full reward ranking")}</span></label>
+            <md-outlined-select label=${host.t("resultCount", "Results")} .value=${String(f.k)}
+              @change=${(e:Event)=>set({k:Number((e.target as HTMLInputElement).value)})}>
+              ${[1,3,5,10,15,20].map(k=>html`<md-select-option value=${String(k)}><div slot="headline">${k}</div></md-select-option>`)}
+            </md-outlined-select>
+            <md-outlined-select label=${host.t("timeLimit", "Time limit")} .value=${String(f.timeLimit ?? 0)}
+              @change=${(e:Event)=>set({timeLimit:Number((e.target as HTMLInputElement).value)||null})}>
+              ${[0,3,5,15,60].map(value=>html`<md-select-option value=${String(value)}><div slot="headline">${value ? `${value} s` : host.t("noLimit", "Until proven")}</div></md-select-option>`)}
+            </md-outlined-select>
+          `}
+      </div></details>
+      <span class="tb-results__meta">${host.t("farm.memory", "Character and song memory bonuses")}: ${f.includeMemory ? host.t("farm.included", "Included") : host.t("farm.excluded", "Excluded")}</span>
+    </section>
   `;
 }
 
@@ -552,6 +506,8 @@ function renderRun(host: TeamBuilder): TemplateResult {
   const blocked = host.running || host.manualBusy || !pt.dataFingerprint;
   return html`
     <div class="tb-run">
+      ${host.submitted && host.inputIssues(true).length ? html`<div role="alert">${host.inputIssues(true).map(issue => html`<button class="button button--text" @click=${() => host.focusInput(issue.field)}>${issue.message}</button>`)}</div>` : nothing}
+      ${job || host.results ? html`<button class="button button--text" @click=${() => host.querySelector(".tb-results-column")?.scrollIntoView({ block: "start" })}>${host.t("viewResults", "View results")}</button>` : nothing}
       ${
         pt.running
           ? html`
@@ -566,7 +522,7 @@ function renderRun(host: TeamBuilder): TemplateResult {
                 ?disabled=${blocked}
                 @click=${() => void pt.start(false)}
               >
-                ${icon("search", 20)}${t("start", "Calculate")}
+                ${icon("search", 20)}${host.t("farm.run", "Recommend songs and teams")}
               </button>
             `
       }
@@ -614,14 +570,15 @@ function renderRanking(host: TeamBuilder): TemplateResult {
         <p class="state__title">${host.t("resultsEmpty", "Results appear here")}</p>
       </div>
     `;
-  const ranking = ptSongRanking(job, pt.measure);
-  const challenge = ptChallengeBest(job, pt.measure);
-  const gap = ptComplete(job) ? null : improvementPercent(job.tasks.filter(task => task.measure === pt.measure && task.route === "live").map(task => task.result ?? pendingSong(task.song)));
+  const measure = job.request.goal.kind === "event" && job.request.goal.measure === "items" ? "items" : "points";
+  const ranking = ptSongRanking(job, measure);
+  const challenge = ptChallengeBest(job, measure);
+  const gap = ptComplete(job) ? null : improvementPercent(job.tasks.filter(task => task.measure === measure && task.route === "live").map(task => task.result ?? pendingSong(task.song)));
   const shown = pt.showAll ? ranking : ranking.slice(0, job.scope === "top-one" ? 1 : 5);
   const number = (n: number) => new Intl.NumberFormat(host.locale, { maximumFractionDigits: 1 }).format(n);
   const settled = job.tasks.filter((task) => task.status === "complete" || task.status === "empty" || task.status === "pruned").length;
   return html`
-    <section class="stack" aria-live="polite">
+    <section id="pt-results" class="stack" aria-live="polite">
       <div class="pt-results-bar">
         <span class="tb-proof">${ptComplete(job) ? host.t("proven", "Proven optimal") : host.t("recommendation", "Recommendation")}${gap === null ? nothing : html` · ${host.t("improvementBound", "Up to {percent}% improvement", { percent: number(gap) })}`}</span>
         <span class="pt-progress tabular">${settled}/${job.tasks.length}</span>
@@ -689,31 +646,25 @@ function renderRanking(host: TeamBuilder): TemplateResult {
 
 export function renderPtTab(host: TeamBuilder): TemplateResult {
   const mode = host.settings.rewardMode;
-  if (mode === "recommendation") host.pt.sync();
+  if (mode !== "plan") host.pt.sync();
   const modes = html`<section class="surface stack">
-    ${sectionHeading({ icon: "flag", label: host.t("goal", "Goal") })}
     ${segmented({
-    label: host.t("goal", "Goal"), value: mode,
-    options: [
-      { value: "recommendation", label: host.t("recommendation", "Recommendation") },
-      { value: "event", label: host.t("rewardSearch", "Reward team search") },
-      { value: "plan", label: host.t("goalPlan", "Event resource plan") },
-    ],
-    onSelect: rewardMode => {
-      host.cancel();
-      host.compare = [];
-      host.pt.showIssues = false;
-      host.updateSettings({ rewardMode });
-    },
-  })}</section>`;
-  if (mode !== "recommendation") return renderBuildTab(host, modes);
-  return html`
-    <div class="tb-build pt-recommendation">
-      <div class="tb-config stack">
-        ${modes}${renderSetup(host)} ${host.pt.showIssues && host.pt.issues.length ? renderIssues(host) : nothing}
-        ${renderRun(host)}
-      </div>
-      <div class="tb-results-column">${renderRanking(host)}</div>
+      label: host.t("farm.task", "Event task"), value: mode === "plan" ? "plan" : "farm",
+      options: [
+        {value:"farm",label:host.t("farm.title", "Farming recommendations")},
+        {value:"plan",label:host.t("farm.plan", "Resource planning")},
+      ],
+      onSelect: value => { host.cancel(); host.compare = []; host.pt.showIssues = false;
+        host.updateSettings({rewardMode:value === "plan" ? "plan" : farmingMode(host.settings.farming)}); },
+    })}
+  </section>`;
+  if (mode === "plan") return renderBuildTab(host, modes);
+  return html`<div class="tb-build pt-recommendation">
+    <div class="tb-config stack">
+      ${modes}${renderSetup(host)}
+      ${host.pt.showIssues && host.pt.issues.length ? renderIssues(host) : nothing}
+      ${mode === "recommendation" ? renderRun(host) : renderBuildRun(host, false)}
     </div>
-  `;
+    <div class="tb-results-column">${usesPtResults(host) ? renderRanking(host) : renderResults(host)}</div>
+  </div>`;
 }

@@ -166,6 +166,7 @@ export interface HitScore {
   /** Score of every skill order, indexed like ORDERS (event → formation slot). */
   orders: number[];
   ranks: Record<string, number>;
+  rangeScores?: number[];
 }
 export interface EngineHit {
   comboBonus?: number | null;

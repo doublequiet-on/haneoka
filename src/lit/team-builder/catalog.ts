@@ -1,4 +1,6 @@
 import { CONTENT_SOURCE_IDS } from "../../lib/content-access-state";
+import { crossServerPublicCache } from "../../lib/cross-server/cache";
+import type { SongRef } from "../../lib/team-builder/engine/api";
 /** Names, tiles and growth helpers shared by the team builder views. */
 import { html, nothing } from "lit";
 import { clientText } from "../../i18n/client";
@@ -30,6 +32,32 @@ type GrowthValues = { level: number | null; rank: number | null; awake?: number 
 
 export class Catalog {
   visuals: Visuals | null = null;
+  private readonly songMetadata = new Map<string, Record<string, Record<string, { chart?: Record<string, unknown> }>>>();
+  private readonly metadataLoads = new Map<string, "loading" | "ready" | "error">();
+  songIdentity(id: number) {
+    const server = this.data.crossServer?.owners.songs?.[String(id)] ?? this.data.identity.server;
+    return this.data.crossServer?.identities[server] ?? this.data.identity;
+  }
+  chartMetadata(song: SongRef) {
+    return this.songMetadata.get(this.songIdentity(song.songId).server)?.[String(song.songId)]?.[String(song.difficulty)]?.chart;
+  }
+  metadataStatus(id: number) {
+    return this.metadataLoads.get(this.songIdentity(id).server);
+  }
+  loadSongMetadata(ids: readonly number[]) {
+    for (const id of ids) {
+      const identity = this.songIdentity(id);
+      if (this.metadataLoads.has(identity.server)) continue;
+      if (!identity.sourceId) { this.metadataLoads.set(identity.server, "error"); continue; }
+      this.metadataLoads.set(identity.server, "loading");
+      void crossServerPublicCache().readCollection("song-meta", { ...identity, sourceId: identity.sourceId })
+        .then(value => {
+          this.songMetadata.set(identity.server, value as Record<string, Record<string, { chart?: Record<string, unknown> }>>);
+          this.metadataLoads.set(identity.server, "ready");
+        }, () => this.metadataLoads.set(identity.server, "error"))
+        .finally(() => { if (this.host.catalog === this) this.host.requestUpdate(); });
+    }
+  }
   private performerRegistry?: PerformerRegistry;
   private readonly songRows = new Map<number, Record<string, unknown>>();
   constructor(
