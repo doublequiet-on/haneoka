@@ -64,6 +64,7 @@
     display: none;
   }
   .tb-box .tb-box__import-entry > .button,
+  .tb-box .tb-box__import-entry .segmented > button,
   .team-builder__box-review .button {
     min-height: 48px;
   }

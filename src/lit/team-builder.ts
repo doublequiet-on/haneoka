@@ -15,7 +15,7 @@ import "@material/web/slider/slider.js";
 import "@material/web/textfield/outlined-text-field.js";
 import { clientText } from "../i18n/client";
 import { beginLoading } from "../lib/loading-progress";
-import { readReleaseServer } from "../lib/release-server";
+import { readReleaseServer, writeReleaseServer } from "../lib/release-server";
 import { fetchCatalogVisuals } from "../lib/catalog-visuals";
 import { fetchCrossServerTeamBuilderData, mergeTeamBuilderData } from "../lib/team-builder/data/cross-server";
 import { canUseStaticCatalogScope, visibleContentServers } from "../lib/content-visibility";
@@ -310,6 +310,10 @@ export class TeamBuilder extends LitElement {
     return clientText(this.locale, (uiLabelPaths[key] ?? key), fallback);
   }
 
+  switchServer(server: string) {
+    void this.load(writeReleaseServer(server));
+  }
+
   async load(server: string) {
     if (this.loadedServer === server) return;
     this.dataController?.abort();
@@ -317,6 +321,23 @@ export class TeamBuilder extends LitElement {
     this.visualsController?.abort();
     this.catalogMetadataError = false;
     this.resetTasks();
+    if (this.loadedServer) {
+      this.imports.dispose();
+      this.unsubscribe?.();
+      this.unsubscribe = undefined;
+      this.store?.dispose();
+      this.store = null;
+      this.engine?.dispose();
+      this.engine = null;
+      this.snapshot = null;
+      this.view = null;
+      this.data = null;
+      this.catalog = null;
+      this.editing = null;
+      this.notice = "";
+      this.error = "";
+    }
+    this.server = server;
     this.loadedServer = server;
     this.loadError = "";
     this.requestUpdate();
@@ -325,19 +346,20 @@ export class TeamBuilder extends LitElement {
     try {
       if (this.pageData && staticScope) {
         await this.updateComplete;
+        if (loadController.signal.aborted) return;
         const visible = visibleContentServers(this.pageData.sources.map((source) => source.identity.server));
         if (this.data?.identity.server !== server || Object.keys(this.data.crossServer?.identities ?? {}).sort().join() !== [...visible].sort().join())
           this.preparePage(this.pageData, server, visible);
       }
       const seeded = staticScope && this.data?.identity.server === server && this.catalog?.visuals;
       const data = seeded ? this.data! : await fetchCrossServerTeamBuilderData(server, loadController.signal);
-      if (this.loadedServer !== server) return;
+      if (loadController.signal.aborted) return;
       this.data = data;
       this.master = compileFromTeamData(data);
       if (!seeded) this.catalog = new Catalog(this, data, this.master);
       this.pt = new PtController(this);
       await this.updateComplete;
-      if (!this.isConnected || this.loadedServer !== server) return;
+      if (!this.isConnected || loadController.signal.aborted) return;
       this.engine?.dispose();
       this.engine = new EngineClient(data, () => this.requestUpdate());
       // Compile the release in every Worker while the reader sets up the search.
@@ -351,7 +373,7 @@ export class TeamBuilder extends LitElement {
       void this.store.start();
       if (!seeded) void this.loadCatalogMetadata();
     } catch {
-      if (this.loadedServer === server) {
+      if (!loadController.signal.aborted) {
         this.loadError = this.t("loadFailed", "Card data could not be loaded.");
         this.loadedServer = "";
         if (this.pageData) { this.data = null; this.catalog = null; this.view = null; }
@@ -390,7 +412,7 @@ export class TeamBuilder extends LitElement {
       this.settings = restoreBuildSettings(stored && typeof stored === "object" ? stored as Partial<BuildSettings> : {});
       if (this.settings.goal === "event" || this.settings.goal === "plan") {
         this.settings = { ...this.settings, rewardMode: this.settings.goal, goal: "score" };
-        if (ownerChanged) this.tab = "pt";
+        if (ownerChanged && this.tab !== "box") this.tab = "pt";
       }
       this.songComparison.restore();
     }

@@ -1964,6 +1964,7 @@
       "resourceUnknownItems": "상점 보상 미확정",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "libraryServer": "보유 카드 서버",
         "otherSources": "저장 폴더 및 백업",
         "selectedEntries": "{count}개 선택",
         "servers": {

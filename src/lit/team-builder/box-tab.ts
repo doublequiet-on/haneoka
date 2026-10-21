@@ -166,7 +166,16 @@ export function renderBoxTab(host: TeamBuilder): TemplateResult {
     <div class=${`tb-box${host.pt.showIssues && host.pt.issues.some((issue) => issue.code === "inventory") ? " pt-field--invalid" : ""}`} data-pt-field="inventory" tabindex="-1">
       
       <div class="row row--wrap tb-box__import-entry">
-        <span class="chip">${host.t(`boxImport.servers.${host.data!.identity.server}`, host.data!.identity.server)}</span>
+        ${segmented({
+          label: host.t("boxImport.libraryServer", "Card library server"),
+          value: host.data!.identity.server,
+          grow: false,
+          options: [
+            { value: "jp", label: host.t("boxImport.servers.jp", "Japan") },
+            { value: "intl", label: host.t("boxImport.servers.intl", "International") },
+          ],
+          onSelect: (server) => host.switchServer(server),
+        })}
         <span class="row__spacer"></span>
           <button class="button button--tonal" type="button" @click=${() => host.imports.openBox()}>${icon("upload_file", 18)}${host.t("importBox", "Import")}</button>
           <button class="button button--text" type="button" @click=${() => host.imports.exportJson()}>${icon("download", 18)}${host.common("common.actions.export", "Export")}</button>

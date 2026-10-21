@@ -1964,6 +1964,7 @@
       "resourceUnknownItems": "ショップ報酬は未確定",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "libraryServer": "カード所持情報のサーバー",
         "otherSources": "セーブフォルダー・バックアップ",
         "selectedEntries": "{count}件選択中",
         "servers": {

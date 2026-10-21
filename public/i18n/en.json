@@ -1964,6 +1964,7 @@
       "resourceUnknownItems": "Shop rewards unresolved",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "libraryServer": "Card library server",
         "otherSources": "Save folders and backups",
         "selectedEntries": "{count} selected",
         "servers": {

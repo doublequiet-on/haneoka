@@ -1964,6 +1964,7 @@
       "resourceUnknownItems": "商店收益未确定",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "libraryServer": "卡库区服",
         "otherSources": "存档文件夹与备份",
         "selectedEntries": "已选 {count} 项",
         "servers": {
