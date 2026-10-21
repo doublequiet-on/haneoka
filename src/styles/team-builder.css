@@ -261,7 +261,6 @@
       overflow: auto;
       overscroll-behavior: contain;
       scrollbar-width: thin;
-      padding-block-end: var(--md-sys-spacing-2);
     }
   }
   .tb-config {
