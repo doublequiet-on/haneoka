@@ -2,7 +2,7 @@
 // Input: 页面资料、跨服选择、Box 状态与用户设置。
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
-// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期。
+// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；滚动避让吸顶／吸底控件以显示焦点。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
@@ -548,6 +548,25 @@ export class TeamBuilder extends LitElement {
     target?.scrollIntoView({ block: "center" });
     (target?.querySelector<HTMLElement>("input, button, md-outlined-text-field, md-outlined-select") ?? target)?.focus();
   }
+  private revealFocusedControl(event: FocusEvent) {
+    const target = event.target as HTMLElement;
+    if (!(event.composedPath()[0] as HTMLElement).matches(":focus-visible")) return;
+    if (target.closest("dialog") || !target.closest(".tb-config, .sc, .tb-results-column")) return;
+    const main = this.closest<HTMLElement>("#main-content");
+    if (!main) return;
+    const config = target.closest<HTMLElement>(".tb-config");
+    const scroller = config && getComputedStyle(config).overflowY === "auto" ? config : main;
+    const bounds = scroller.getBoundingClientRect(), page = main.getBoundingClientRect();
+    const header = this.querySelector(".tb-header")!.getBoundingClientRect();
+    const field = target.getBoundingClientRect();
+    const run = config?.querySelector(".tb-run");
+    const footer = run && !run.contains(target) ? run.getBoundingClientRect() : null;
+    const top = Math.max(bounds.top, page.top, header.bottom);
+    const bottom = Math.min(bounds.bottom, page.bottom, footer?.top ?? Infinity);
+    if (field.height > bottom - top) return;
+    if (field.top < top) scroller.scrollTop += field.top - top;
+    else if (field.bottom > bottom) scroller.scrollTop += field.bottom - bottom;
+  }
   private gekisoGoal(s: BuildSettings): Extract<Goal, {kind:"gekiso"}> {
     return { kind:"gekiso", songs:s.songs, criterion:s.criterion,
       accuracy:{great:s.playMode === "ap" ? 0 : s.great / 100, just:s.just / 100, missEvery:s.playMode === "ap" ? 0 : s.missEvery || 0},
@@ -849,7 +868,7 @@ export class TeamBuilder extends LitElement {
         <header class="tb-header">
           ${this.renderTabs()}
         </header>
-        <section id="tb-panel" class="tb-tabpanel" role="tabpanel" tabindex="-1">${panel}</section>
+        <section id="tb-panel" class="tb-tabpanel" role="tabpanel" tabindex="-1" @focusin=${this.revealFocusedControl}>${panel}</section>
         ${renderCardEditor(this)}
         ${this.songPicker ? renderSongPicker(this) : nothing}
         ${this.imports.render()}

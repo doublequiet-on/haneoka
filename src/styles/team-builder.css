@@ -467,7 +467,8 @@
 
   /* ---------- Results ---------- */
   .tb-results-column,
-  .tb-results {
+  .tb-results,
+  .team-builder #sc-results {
     min-width: 0;
     scroll-margin-top: 80px;
   }
