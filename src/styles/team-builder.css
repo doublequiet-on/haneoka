@@ -60,11 +60,71 @@
   .team-builder__box-review:not(:has(.collection)) .selection-pane__body {
     flex: 0 1 auto;
   }
-  .team-builder__box-review:not(:has(.collection)) .team-builder__fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .team-builder__box-review .selection-pane__footer:not(:has(> *)) {
     display: none;
+  }
+  .tb-box .tb-box__import-entry > .button,
+  .team-builder__box-review .button {
+    min-height: 48px;
+  }
+  .team-builder__box-review .team-builder__import-heading {
+    display: grid;
+    gap: var(--md-sys-spacing-1);
+    min-width: 0;
+  }
+  .team-builder__box-review .team-builder__import-server {
+    color: var(--md-sys-color-primary);
+    font-size: var(--md-sys-typescale-label-large-size);
+    overflow-wrap: anywhere;
+  }
+  .team-builder__box-review .team-builder__import-file > .button {
+    width: 100%;
+    min-height: 80px;
+    border-radius: var(--md-sys-shape-corner-large);
+  }
+  .team-builder__box-review .team-builder__import-policies {
+    display: grid;
+    gap: var(--md-sys-spacing-4);
+    padding: var(--md-sys-spacing-4);
+    border-radius: var(--md-sys-shape-corner-large);
+    background: var(--md-sys-color-surface-container-low);
+  }
+  .team-builder__box-review .team-builder__import-policies .detail-section-title {
+    margin: 0;
+  }
+  .team-builder__box-review .collection--member {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  }
+  .team-builder__box-review .team-builder__owned-card {
+    padding: var(--md-sys-spacing-3);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    background: var(--md-sys-color-surface-container-low);
+  }
+  .team-builder__box-review .team-builder__owned-card[data-selected] {
+    border-color: var(--md-sys-color-primary);
+  }
+  .team-builder__box-review .team-builder__import-count {
+    flex: 1;
+    font-size: var(--md-sys-typescale-label-large-size);
+    font-variant-numeric: tabular-nums;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .team-builder__box-review .segmented {
+    flex-wrap: wrap;
+    min-height: max-content;
+  }
+  .team-builder__box-review .segmented > button {
+    min-height: 48px;
+    white-space: normal;
+  }
+  @media (max-width: 480px) {
+    .team-builder__box-review .team-builder__import-policies .segmented {
+      display: grid;
+    }
+    .team-builder__box-review .team-builder__import-policies .segmented > button {
+      border-radius: var(--md-sys-shape-corner-small);
+    }
   }
   .team-builder__owned-card,
   .team-builder__screenshot-review .collection > div,

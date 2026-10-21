@@ -1964,6 +1964,8 @@
       "resourceUnknownItems": "ショップ報酬は未確定",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "otherSources": "セーブフォルダー・バックアップ",
+        "selectedEntries": "{count}件選択中",
         "servers": {
           "jp": "日本版",
           "intl": "グローバル版",

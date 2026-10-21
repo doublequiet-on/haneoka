@@ -1964,6 +1964,8 @@
       "resourceUnknownItems": "商店收益未確定",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "otherSources": "存檔資料夾與備份",
+        "selectedEntries": "已選 {count} 項",
         "servers": {
           "jp": "日服",
           "intl": "國際服",

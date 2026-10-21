@@ -1964,6 +1964,8 @@
       "resourceUnknownItems": "상점 보상 미확정",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "otherSources": "저장 폴더 및 백업",
+        "selectedEntries": "{count}개 선택",
         "servers": {
           "jp": "일본 서버",
           "intl": "글로벌 서버",

@@ -1964,6 +1964,8 @@
       "resourceUnknownItems": "Shop rewards unresolved",
       "boxImport": {
         "serverTransfer": "{source} → {target}",
+        "otherSources": "Save folders and backups",
+        "selectedEntries": "{count} selected",
         "servers": {
           "jp": "Japan",
           "intl": "International",
