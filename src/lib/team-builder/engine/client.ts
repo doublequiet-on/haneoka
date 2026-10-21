@@ -2,7 +2,7 @@
 // Input: 配队资料、Engine 请求及进度／快照／单 Worker 最终结果回调。
 // Output: EngineClient、搜索／成长／评价／解释结果及当前 Worker 阶段。
 // Pos: [Map](L2-2.md)；主线程到当前引擎 Worker 的生命周期与分片协调。
-// Effects/Dependencies: 创建和替换 Worker、消息通信及内存 Promise；取消会终止对应计算实例。
+// Effects/Dependencies: 创建和替换 Worker、消息通信及内存 Promise；取消与更高下界重试会替换对应实例。
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
 import type { TeamBuilderData } from "../data";
 import type { EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline } from "./api";
@@ -153,7 +153,7 @@ export class EngineClient {
   run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler): Promise<EngineResponse> {
     const started = clock();
     const generation = this.generation;
-    const task = { ...request, deadline: deadlineOf(request), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
+    const task = { ...request, timeLimitMs: null, deadline: deadlineOf(request), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
     let expired = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const waiting = new Promise<EngineResponse>(resolve => {
@@ -369,26 +369,50 @@ export class EngineClient {
         if (completeResponse(quick)) return quick;
         seeds = quick.results.flatMap(result => result.hits);
       }
-      const count = this.pool.length * SHARDS_PER_WORKER;
+      const sampledRewards = request.goal.kind === "event" && request.goal.gekiso;
+      const count = sampledRewards
+        ? (request.constraints.leader ? 1 : this.pool.length)
+        : this.pool.length * SHARDS_PER_WORKER;
       const responses = Array.from({ length: count }, () => emptyResponse(request));
       for (const response of responses) for (const result of response.results)
         result.hits = seeds.filter(hit => hit.song?.songId === result.song?.songId && hit.song?.difficulty === result.song?.difficulty).slice(0, request.k);
       let next = 0, done = 0;
       const merge = () => mergeShardResponses(responses, request.k, clock() - started);
+      const active = new Map<EngineWorker, { floor: number; retry: boolean }>();
       const runShard = async (engine: EngineWorker) => {
         while (!stopped && remaining(deadline) > 0 && next < count) {
           const index = next++;
-          const current = merge();
-          const floors = Object.fromEntries(current.results.filter(result => result.song && result.hits.length >= request.k).map(result => [`${result.song!.songId}:${result.song!.difficulty}`, result.hits[request.k - 1]!.key]));
-          const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds, shard: { index, count }, floors } }, undefined, value => {
-            if (stopped || value.contextKey !== request.contextKey || value.requestId !== request.requestId) return;
-            responses[index] = value.response;
+          while (!stopped && remaining(deadline) > 0) {
+            const current = merge();
+            const floors = Object.fromEntries(current.results.filter(result => result.song && result.hits.length >= request.k).map(result => [`${result.song!.songId}:${result.song!.difficulty}`, result.hits[request.k - 1]!.key]));
+            const job = { floor: Math.max(-Infinity, ...Object.values(floors)), retry: false };
+            active.set(engine, job);
+            let response: EngineResponse;
+            try {
+              response = await engine.send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: sampledRewards ? current.overall : seeds, shard: { index, count }, floors } }, undefined, value => {
+                if (stopped || job.retry || active.get(engine) !== job || value.contextKey !== request.contextKey || value.requestId !== request.requestId) return;
+                responses[index] = value.response;
+                publish(merge());
+              });
+            } catch (error) {
+              if (job.retry && !stopped) continue;
+              throw error;
+            } finally {
+              active.delete(engine);
+            }
+            if (stopped) return;
+            responses[index] = response;
             publish(merge());
-          });
-          if (stopped) return;
-          responses[index] = response;
-          publish(merge());
-          progress?.(++done / count, 1);
+            progress?.(++done / count, 1);
+            if (sampledRewards && !request.noFloor && completeResponse(response)) {
+              const floor = response.overall[request.k - 1]?.key ?? -Infinity;
+              for (const [worker, running] of active) if (!running.retry && floor > running.floor) {
+                running.retry = true;
+                worker.cancel();
+              }
+            }
+            break;
+          }
         }
       };
       await Promise.all(this.pool.map(runShard));
