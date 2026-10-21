@@ -34,6 +34,7 @@ export interface BoxImportDialogState {
   preview: BoxPreview | null;
   confirmation: BoxConfirmation;
   serverLabel: string;
+  sourceServerLabel?: string;
   progress: { completed: number; total: number } | null;
   /** Owning UI supplies a localized, sanitized error; never the raw parser input. */
   error: string | null;
@@ -486,7 +487,9 @@ export function renderBoxImportDialog(state: BoxImportDialogState, actions: BoxI
                           }
                           ·
                           ${
-                            issue.field === "row"
+                            issue.code === "unavailable_target_card" || issue.code === "unavailable_target_entity"
+                              ? t("unavailableTarget", "Not in the target server's catalogue")
+                              : issue.field === "row"
                               ? t("listRowCheck", "Check the card ID, name, type and training values in this row.")
                               : html`
                                   ${actions.fieldName(issue.field)} · ${t("review", "Needs review")}
@@ -505,6 +508,9 @@ export function renderBoxImportDialog(state: BoxImportDialogState, actions: BoxI
       }
       </div>
       <footer class="selection-pane__footer team-builder__actions">
+        ${state.phase === "review" && state.sourceServerLabel ? html`
+          <span class="chip">${t("serverTransfer", "{source} → {target}", { source: state.sourceServerLabel, target: state.serverLabel })}</span>
+        ` : nothing}
         ${actions.onOpenHistory ? html`
           <button type="button" class="button button--tonal" @click=${actions.onOpenHistory}>
             ${icon("history")}${clientText(actions.locale ?? "ja", "catalog.gachaHistory.title", "Gacha history")}

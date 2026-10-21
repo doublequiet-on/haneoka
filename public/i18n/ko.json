@@ -1963,6 +1963,16 @@
       "resourcePairProgress": "단계 조합 {done}/{total}",
       "resourceUnknownItems": "상점 보상 미확정",
       "boxImport": {
+        "serverTransfer": "{source} → {target}",
+        "servers": {
+          "jp": "일본 서버",
+          "intl": "글로벌 서버",
+          "intl-test": "글로벌 테스트 서버",
+          "jp-cbt": "일본 CBT",
+          "intl-cbt": "글로벌 CBT"
+        },
+        "unavailableTarget": "대상 서버에 미수록",
+        "incompatibleServer": "이 서버의 카드 ID를 대상 서버와 대응시킬 수 없습니다.",
         "title": "카드 데이터 가져오기",
         "chooseFiles": "파일 / ZIP / iMazing 선택",
         "paste": "카드 목록 또는 Box 텍스트 붙여넣기",

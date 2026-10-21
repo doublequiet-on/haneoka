@@ -1963,6 +1963,16 @@
       "resourcePairProgress": "ステージの組み合わせ {done}/{total}",
       "resourceUnknownItems": "ショップ報酬は未確定",
       "boxImport": {
+        "serverTransfer": "{source} → {target}",
+        "servers": {
+          "jp": "日本版",
+          "intl": "グローバル版",
+          "intl-test": "グローバル版テスト",
+          "jp-cbt": "日本版CBT",
+          "intl-cbt": "グローバル版CBT"
+        },
+        "unavailableTarget": "対象サーバーに未収録",
+        "incompatibleServer": "このサーバーのカードIDは対象サーバーと対応していません。",
         "title": "カードデータを読み込む",
         "chooseFiles": "ファイル / ZIP / iMazing を選択",
         "paste": "カード一覧またはBoxテキストを貼り付け",

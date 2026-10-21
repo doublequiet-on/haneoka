@@ -1963,6 +1963,16 @@
       "resourcePairProgress": "阶段组合 {done}/{total}",
       "resourceUnknownItems": "商店收益未确定",
       "boxImport": {
+        "serverTransfer": "{source} → {target}",
+        "servers": {
+          "jp": "日服",
+          "intl": "国际服",
+          "intl-test": "国际测试服",
+          "jp-cbt": "日服封测",
+          "intl-cbt": "国际服封测"
+        },
+        "unavailableTarget": "目标服未收录",
+        "incompatibleServer": "此来源服的卡牌编号无法与目标服对应。",
         "title": "导入卡库数据",
         "chooseFiles": "选择文件 / ZIP / iMazing",
         "paste": "粘贴名单或Box文本",

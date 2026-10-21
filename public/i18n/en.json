@@ -1963,6 +1963,16 @@
       "resourcePairProgress": "{done}/{total} stage pairs",
       "resourceUnknownItems": "Shop rewards unresolved",
       "boxImport": {
+        "serverTransfer": "{source} → {target}",
+        "servers": {
+          "jp": "Japan",
+          "intl": "International",
+          "intl-test": "International test",
+          "jp-cbt": "Japan CBT",
+          "intl-cbt": "International CBT"
+        },
+        "unavailableTarget": "Not in the target server's catalogue",
+        "incompatibleServer": "Card IDs from this server cannot be matched to the target server.",
         "title": "Import card data",
         "chooseFiles": "Choose files / ZIP / iMazing",
         "paste": "Paste a card list or Box text",
