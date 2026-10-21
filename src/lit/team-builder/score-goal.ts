@@ -1,4 +1,5 @@
-import type { BuildSettings } from "./types";
+import type { EngineHit } from "../../lib/team-builder/engine/api";
+import { DEFAULT_SETTINGS, type BuildSettings } from "./types";
 import type { TeamBuilder } from "../team-builder";
 
 export const SCORE_GOALS = {
@@ -42,14 +43,27 @@ export const SCORE_GOALS = {
 /** The score goal's ranking: a target when one is set, otherwise the criterion. */
 export const scoreGoal = (s: BuildSettings) => (s.goal === "score" && s.scoreTarget !== "none" ? s.scoreTarget : s.criterion);
 
-export const resultSettings = (host: TeamBuilder): BuildSettings => {
-  if (host.tab === "pt" && host.settings.rewardMode === "recommendation") {
-    const goal = host.pt.job?.request.goal;
-    return { ...host.settings, eventId: goal?.kind === "event" && goal.eventId >= 0 ? goal.eventId : host.settings.eventId,
-      goal: "event", route: "live", measure: goal?.kind === "event" ? goal.measure : host.pt.measure, weighted: false,
-      songs: goal?.kind === "event" ? goal.songs : host.settings.songs };
+export const usesPtResults = (host: TeamBuilder) => host.tab === "pt" && host.settings.rewardMode !== "plan" &&
+  (host.farmResultMode ?? host.settings.rewardMode) === "recommendation";
+export const resultSettings = (host: TeamBuilder, hit?: EngineHit): BuildSettings => {
+  if (usesPtResults(host)) {
+    const job = host.pt.job, request = job?.request, goal = request?.goal;
+    const task = hit ? job?.tasks.find(task => task.result?.hits.includes(hit)) : undefined;
+    return { ...DEFAULT_SETTINGS, eventId: goal?.kind === "event" && goal.eventId >= 0 ? goal.eventId : null,
+      goal: "event", route: task?.route ?? "live", challengePoints: job?.cycle?.consumption ?? DEFAULT_SETTINGS.challengePoints, measure: task?.measure ?? (goal?.kind === "event" ? goal.measure : "points"), weighted: false, ptCycle: !!job?.cycle,
+      scope: job?.presentation?.scope ?? "box",
+      unknownPolicy: request?.unknownPolicy ?? "min",
+      boosts: goal?.kind === "event" ? goal.consumption : 0,
+      ptMode: goal?.kind === "event" && goal.gekiso ? "gekiso" : "solo",
+      ptJust: goal?.kind === "event" && goal.gekiso ? goal.gekiso.just * 100 : DEFAULT_SETTINGS.ptJust,
+      minComboBonus: goal?.kind === "event" ? goal.gekiso?.minComboBonus ?? 1 : 1,
+      songs: goal?.kind === "event" ? goal.songs : [] };
   }
-  return host.resultSettings ?? host.searchSettings;
+  const settings = host.resultSettings ?? host.searchSettings;
+  if (settings.goal === "plan" && hit) return { ...settings,
+    route: hit === host.results?.plan?.challenge ? "challenge" : "live",
+    boosts: settings.planBoostsPerLive, measure: "points" };
+  return settings;
 };
 
 export function scoreText(host: TeamBuilder, message: readonly [string, string]): string {

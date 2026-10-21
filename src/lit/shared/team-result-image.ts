@@ -34,7 +34,12 @@ export interface TeamResultImage {
 
 /** Render captured results only. Images stay pinned to their original release. */
 export async function renderTeamResultImage(model: TeamResultImage): Promise<Blob> {
-  const images = new Map<string, HTMLImageElement | null>();
+  const images = new Map<string, HTMLImageElement | ImageBitmap | null>();
+  const dimensions = (image: HTMLImageElement | ImageBitmap) =>
+    "naturalWidth" in image ? { width: image.naturalWidth, height: image.naturalHeight } : image;
+  const loadedImages = new Map(
+    [...document.images].filter(image => image.complete && image.naturalWidth > 0).map(image => [image.currentSrc, image]),
+  );
   const sources = new Set(model.members.concat(model.snapshots.filter((card): card is ResultImageCard => card !== null))
     .flatMap(card => {
       const growth = card.growth;
@@ -48,6 +53,8 @@ export async function renderTeamResultImage(model: TeamResultImage): Promise<Blo
       const url = new URL(source, location.href);
       if (url.origin !== location.origin || !["http:", "https:"].includes(url.protocol)) return;
       if (url.pathname.startsWith(`/assets/${model.server}/`)) url.searchParams.set("release", model.releaseId);
+      const loaded = loadedImages.get(url.href);
+      if (loaded) { images.set(source, await createImageBitmap(loaded)); return; }
       const image = new Image(); image.crossOrigin = "anonymous";
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => { image.src = ""; reject(new Error("image-timeout")); }, 8000);
@@ -61,7 +68,7 @@ export async function renderTeamResultImage(model: TeamResultImage): Promise<Blo
   await document.fonts.ready;
   const canvas = document.createElement("canvas"), rows = Math.max(1, Math.ceil(model.metrics.length / 3));
   const hasSnapshots = model.snapshots.some(card => card !== null);
-  canvas.width = 1280; canvas.height = 1480 + (rows - 1) * 122 - (hasSnapshots ? 0 : 140);
+  canvas.width = 1280; canvas.height = 1480 + (rows - 1) * 122 - (hasSnapshots ? 0 : 140) + Math.max(0, model.footer.length * 50 - 100);
   const context = canvas.getContext("2d");
   if (!context) throw new Error("canvas-unavailable");
   const c = context, t = model.theme, margin = 48, gap = 16, width = 224;
@@ -90,8 +97,9 @@ export async function renderTeamResultImage(model: TeamResultImage): Promise<Blo
   const image = (source: string | undefined, x: number, y: number, w: number, h: number) => {
     const loaded = source ? images.get(source) : null;
     if (!loaded) return false;
-    const scale = Math.min(w / loaded.naturalWidth, h / loaded.naturalHeight);
-    c.drawImage(loaded, x + (w - loaded.naturalWidth * scale) / 2, y + (h - loaded.naturalHeight * scale) / 2, loaded.naturalWidth * scale, loaded.naturalHeight * scale);
+    const size = dimensions(loaded);
+    const scale = Math.min(w / size.width, h / size.height);
+    c.drawImage(loaded, x + (w - size.width * scale) / 2, y + (h - size.height * scale) / 2, size.width * scale, size.height * scale);
     return true;
   };
   lines("haneoka", margin, 32, 1184, 20, 1, t.primary, 700);
@@ -116,7 +124,7 @@ export async function renderTeamResultImage(model: TeamResultImage): Promise<Blo
     const markWidth = width * (member ? 50 / 224 : 50 / 326);
     const markHeight = (source: string | undefined) => {
       const loaded = source ? images.get(source) : null;
-      return loaded ? markWidth * loaded.naturalHeight / loaded.naturalWidth : markWidth;
+      return loaded ? markWidth * dimensions(loaded).height / dimensions(loaded).width : markWidth;
     };
     if (!image(card.attribute, x, y, markWidth, markHeight(card.attribute))) lines(card.attributeLabel, x + 8, y + 8, 128, 16, 1, t.primary, 600);
     if (!image(card.rarity, x + width - markWidth, y, markWidth, markHeight(card.rarity))) lines(card.rarityLabel, x + width - 48, y + 8, 40, 18, 1, t.primary, 600);
@@ -141,7 +149,7 @@ export async function renderTeamResultImage(model: TeamResultImage): Promise<Blo
       if (growth.rank !== undefined) {
         const source = (growth.kind === "member" ? growth.icons.memberRanks : growth.icons.supportRanks)[growth.rank ?? 0];
         const w = width * (member ? 64 / 224 : 64 / 326), loaded = source ? images.get(source) : null;
-        const rankHeight = loaded ? w * loaded.naturalHeight / loaded.naturalWidth : w;
+        const rankHeight = loaded ? w * dimensions(loaded).height / dimensions(loaded).width : w;
         image(source, x + width - w, y + h - rankHeight, w, rankHeight);
         if (growth.rank === null) overlay(value(growth.rank), x + width - w * .65, y + h - rankHeight * .65, 22);
       }
@@ -156,8 +164,9 @@ export async function renderTeamResultImage(model: TeamResultImage): Promise<Blo
     for (const avatar of card.avatars.slice(0, 5)) {
       const loaded = images.get(avatar);
       if (loaded) {
-        const edge = Math.min(loaded.naturalWidth, loaded.naturalHeight);
-        c.drawImage(loaded, (loaded.naturalWidth - edge) / 2, (loaded.naturalHeight - edge) / 4, edge, edge, avatarX, y + h + 71, 24, 24);
+        const size = dimensions(loaded);
+        const edge = Math.min(size.width, size.height);
+        c.drawImage(loaded, (size.width - edge) / 2, (size.height - edge) / 4, edge, edge, avatarX, y + h + 71, 24, 24);
         avatarX += 20;
       }
     }
@@ -174,6 +183,7 @@ export async function renderTeamResultImage(model: TeamResultImage): Promise<Blo
   model.snapshots.forEach((card, index) => drawCard(card, index, snapshotsY + 40, false));
   const footerY = snapshotsY + (hasSnapshots ? 350 : 210);
   c.strokeStyle = t.outline; c.beginPath(); c.moveTo(margin, footerY); c.lineTo(1232, footerY); c.stroke();
-  model.footer.slice(0, 4).forEach((line, index) => lines(line, margin, footerY + 18 + index * 25, 1184, 16, 1, t.muted));
+  model.footer.forEach((line, index) => lines(line, margin, footerY + 18 + index * 50, 1184, 16, 2, t.muted));
+  for (const image of images.values()) if (image instanceof ImageBitmap) image.close();
   return canvasToPngBlob(canvas);
 }

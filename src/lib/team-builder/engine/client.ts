@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 配队资料、Engine 请求及进度／快照／单 Worker 最终结果回调。
-// Output: EngineClient、搜索／成长／评价／解释结果。
+// Output: EngineClient、搜索／成长／评价／解释结果及当前 Worker 阶段。
 // Pos: [Map](L2-2.md)；主线程到当前引擎 Worker 的生命周期与分片协调。
 // Effects/Dependencies: 创建和替换 Worker、消息通信及内存 Promise；取消会终止对应计算实例。
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
@@ -29,7 +29,9 @@ class EngineWorker {
     if (this.phase) this.times[this.phase] += now - this.phaseAt;
     this.phaseAt = now;
     this.phase = phase;
+    this.changed();
   }
+  get currentPhase() { return this.phase; }
   timing() {
     return { ...this.times, ...(this.phase ? { [this.phase]: this.times[this.phase] + clock() - this.phaseAt } : {}) };
   }
@@ -37,6 +39,7 @@ class EngineWorker {
   constructor(
     private readonly data: TeamBuilderData,
     private readonly name: string,
+    private readonly changed: () => void,
   ) {}
   private spawn(): Promise<void> {
     if (this.ready) return this.ready;
@@ -58,13 +61,14 @@ class EngineWorker {
       }
     };
     worker.onerror = (event) => {
+      if (this.worker !== worker) return;
       for (const pending of this.pending.values()) pending.reject(new Error(event.message || "engine-crashed"));
       this.pending.clear();
       this.reset();
     };
     this.ready = (this.call({ type: "init", id: 0, data: this.data }) as Promise<void>).catch((error) => {
       // A failed release compile must not pin the Worker to its rejected ready promise.
-      this.reset();
+      if (this.worker === worker) this.reset();
       throw error;
     });
     return this.ready;
@@ -128,10 +132,11 @@ const SHARDS_PER_WORKER = 4;
 export class EngineClient {
   private readonly pool: EngineWorker[];
   private readonly dataIdentity: string;
-  constructor(data: TeamBuilderData) {
+  constructor(data: TeamBuilderData, changed: () => void = () => {}) {
     this.dataIdentity = JSON.stringify([data.identity, data.crossServer?.identities]);
-    this.pool = Array.from({ length: poolSize() }, (_, index) => new EngineWorker(data, `team-engine-${index + 1}`));
+    this.pool = Array.from({ length: poolSize() }, (_, index) => new EngineWorker(data, `team-engine-${index + 1}`, changed));
   }
+  get phases() { return [...new Set(this.pool.map(worker => worker.currentPhase).filter((phase): phase is NonNullable<typeof phase> => phase !== null))]; }
   /** Warm one Worker; the others compile lazily only if a search actually fans out. */
   warm() {
     // The others compile once the first is ready, so the first search can use every Worker.

@@ -5,6 +5,8 @@ export type Tab = "build" | "box" | "account" | "teams" | "pt" | "song-compariso
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
 export interface BuildSettings {
   rewardMode: "recommendation" | "event" | "plan";
+  farming: FarmingSettings;
+  manualScoreMode: "score" | "gekiso";
   fullRanking: boolean;
   ptCycle: boolean;
   ptMode: "solo" | "gekiso";
@@ -57,12 +59,30 @@ export interface BuildSettings {
   /** Gekisou: share of Just-eligible notes hit Just (percent) and the assumed range placement (1 for Mission). */
   just: number;
   gekisoRank: number;
+  gekisoPlacementMode: "rank" | "opponents";
   minComboBonus: number;
+  /** Zero retains nominal expectations; positive counts average seeds 0 through n-1. */
+  gekisoSeeds: number;
   /** Opponents' scores per range as typed (numbers separated by spaces or commas). */
   gekisoOpponents: [string, string, string];
 }
+export interface FarmingSettings extends Pick<BuildSettings,
+  "playMode" | "great" | "good" | "miss" | "missEvery" | "measure" | "weighted" |
+  "weightPoints" | "weightItems" | "weightCp" | "unknownPolicy" | "fullRanking" | "k" | "timeLimit" | "ptCycle"> {
+  play: "solo" | "gekiso" | "challenge" | "skip";
+  requireGrowth: boolean;
+  includeMemory: boolean;
+}
+export const DEFAULT_FARMING: FarmingSettings = {
+  play: "solo", playMode: "ap", great: 3, good: 0, miss: 0, missEvery: 0,
+  measure: "points", weighted: false, weightPoints: 1, weightItems: 0, weightCp: 0,
+  requireGrowth: true, unknownPolicy: "min", includeMemory: false,
+  fullRanking: false, k: 1, timeLimit: null, ptCycle: false,
+};
 export const DEFAULT_SETTINGS: BuildSettings = {
   rewardMode: "recommendation",
+  farming: DEFAULT_FARMING,
+  manualScoreMode: "score",
   fullRanking: false,
   ptCycle: false,
   ptMode: "solo",
@@ -107,7 +127,9 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   timeLimit: null,
   just: 100,
   gekisoRank: 1,
+  gekisoPlacementMode: "rank",
   minComboBonus: 1,
+  gekisoSeeds: 0,
   gekisoOpponents: ["", "", ""],
 };
 export interface BoxFilters {

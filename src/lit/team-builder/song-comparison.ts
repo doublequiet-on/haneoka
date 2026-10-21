@@ -27,6 +27,11 @@ const PREF = "song-comparison";
 export class SongComparison {
   settings = comparisonDefaults();
   rows: ComparisonRow[] = [];
+  private previous: { rows: ComparisonRow[]; settings: ComparisonSettings } | null = null;
+  private evaluatedSettings: ComparisonSettings | null = null;
+  get stale() { return this.previous !== null; }
+  get resultRows() { return this.previous?.rows ?? this.rows; }
+  get resultSettings() { return { ...(this.previous?.settings ?? this.evaluatedSettings ?? this.settings), sort: this.settings.sort }; }
   expanded = new Set<number>();
   issues: ComparisonIssue[] = [];
   submitted = false;
@@ -47,9 +52,13 @@ export class SongComparison {
     this.settings = readComparisonSettings(this.host.view?.prefs[PREF]);
     this.sync();
   }
+  get effectiveSettings(): ComparisonSettings {
+    const songs = this.settings.songs.filter(song => availableOnServer(this.host.data!, "songs", song.songId) && this.host.catalog!.difficultyRows(song.songId).some(row => Number(row.difficulty) === song.difficulty));
+    return { ...this.settings, songs, just: this.host.hasMission("JustCount", songs) ? this.settings.just : 100 };
+  }
   private context() {
     const host = this.host,
-      s = this.settings;
+      s = this.effectiveSettings;
     const team = this.team();
     return canonical([
       host.snapshot?.owner,
@@ -74,20 +83,25 @@ export class SongComparison {
     if (!this.host.master || !this.host.view) return;
     const signature = this.context(),
       selection = canonical(this.settings.songs);
-    const owner = this.host.snapshot?.owner ?? "";
+    const owner = canonical([this.host.snapshot?.owner, this.host.server, this.host.data?.identity, this.host.data?.crossServer]);
     if (this.owner !== owner || this.engine !== this.host.engine) {
       this.stop();
       this.cache.clear();
+      this.previous = null;
+      this.evaluatedSettings = null;
+      this.rows = [];
       this.signature = "";
       this.owner = owner;
       this.engine = this.host.engine;
     }
     if (signature === this.signature && selection === this.selection) return;
     this.stop();
+    if (!this.previous && this.rows.some(row => row.hit) && this.evaluatedSettings)
+      this.previous = { rows: structuredClone(this.rows), settings: structuredClone(this.evaluatedSettings) };
     if (signature !== this.signature) this.cache.clear();
     this.signature = signature;
     this.selection = selection;
-    this.rows = this.settings.songs.map((song) => {
+    this.rows = this.settings.songs.filter(song => availableOnServer(this.host.data!, "songs", song.songId) && this.host.catalog!.difficultyRows(song.songId).some(row => Number(row.difficulty) === song.difficulty)).map((song) => {
       const hit = this.cache.get(chartKey(song));
       return { song, status: hit ? "complete" : "pending", hit };
     });
@@ -99,12 +113,13 @@ export class SongComparison {
     if (this.settings.rank !== null && this.settings.rank > this.settings.players) this.settings.rank = null;
     this.host.write([{ key: `pref.${PREF}`, value: this.settings as unknown as BoxValue }]);
     this.sync();
+    if (!this.stale && this.evaluatedSettings) this.evaluatedSettings = { ...this.evaluatedSettings, target: this.settings.target, players: this.settings.players };
     if (patch.sort || patch.target || patch.players) this.reorder();
     this.host.requestUpdate();
   }
   private validate() {
     const team = this.team();
-    this.issues = [...team.issues, ...comparisonIssues(this.settings)];
+    this.issues = [...team.issues, ...comparisonIssues({ ...this.effectiveSettings, songs: this.rows.map(row => row.song) })];
     for (const [slot, id] of this.host.manual.members.entries())
       if (id !== null && !availableOnServer(this.host.data!, "members", id))
         this.issues.push({ field: `sc-slot-${slot}`, reason: "source", slot });
@@ -126,7 +141,7 @@ export class SongComparison {
       songs: this.settings.songs.map((song) => ({ ...song })),
       single: false,
       query: "",
-      filtersOpen: true,
+      filtersOpen: false,
       bands: [],
       attributes: [],
       gekisouTypes: [],
@@ -134,13 +149,14 @@ export class SongComparison {
       allowedSongIds: [...this.host.master!.songs.keys()].filter((id) =>
         availableOnServer(this.host.data!, "songs", id),
       ),
+      context: "comparison",
       title: this.host.t("sc.choose", "Playable charts"),
       change: (songs) => this.update({ songs }),
     };
     this.host.requestUpdate();
   }
   groups() {
-    const groups = groupedSongs(this.rows, this.host.master!, this.settings);
+    const groups = groupedSongs(this.resultRows, this.host.master!, this.resultSettings);
     return groups.sort((a, b) => this.order.indexOf(a.id) - this.order.indexOf(b.id));
   }
   reorder() {
@@ -151,7 +167,7 @@ export class SongComparison {
     });
     const id = anchor?.dataset.scSong,
       top = anchor?.getBoundingClientRect().top;
-    this.order = groupedSongs(this.rows, this.host.master!, this.settings).map((group) => group.id);
+    this.order = groupedSongs(this.resultRows, this.host.master!, this.resultSettings).map((group) => group.id);
     this.host.requestUpdate();
     if (id && top !== undefined)
       void this.host.updateComplete.then(() => {
@@ -175,6 +191,8 @@ export class SongComparison {
     this.stop();
     this.cache.clear();
     this.rows = [];
+    this.previous = null;
+    this.evaluatedSettings = null;
     this.signature = "";
     this.selection = "";
   }
@@ -191,13 +209,15 @@ export class SongComparison {
     }
     const token = host.acquireTask("comparison");
     if (!token) return;
+    this.previous = null;
+    this.evaluatedSettings = structuredClone(this.effectiveSettings);
     this.token = token;
     this.engine = host.engine;
     const engine = host.engine,
       generation = ++this.generation,
       signature = this.signature;
     const team = structuredClone(this.team()),
-      settings = structuredClone(this.settings);
+      settings = structuredClone(this.effectiveSettings);
     const current = () => generation === this.generation && host.ownsTask(token) && this.context() === signature;
     const queue = this.rows.filter(
       (row) => row.status !== "complete" && (!only || chartKey(row.song) === chartKey(only)),

@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 // L3 — GEB
 // Input: EngineCall、release 资料、固定来源谱面及 WASM URL。
-// Output: EngineReply、进度、快照、计算结果或错误。
+// Output: EngineReply、进度、快照、计算结果或错误；原生未评分响应的 unknownCards 归一为空数组。
 // Pos: [Map](L2-2.md)；当前 Rust/WASM 配队引擎的浏览器 Worker 适配。
-// Effects/Dependencies: 获取 WASM／谱面、实例化 WebAssembly，持有句柄和缓存并发送消息。
+// Effects/Dependencies: 限时获取 WASM／谱面、实例化 WebAssembly，持有句柄和缓存并发送消息。
 /** Team engine Worker: the ournotes-team-builder engine (WebAssembly) holds the release and the charts it was sent, and
  * serves searches and evaluations. */
 import engineUrl from "./generated/team-engine.wasm?url";
@@ -48,7 +48,7 @@ async function instantiate() {
       haneoka_progress: (pointer: number) => onProgress?.(JSON.parse(readString(pointer)) as Doc),
     },
   };
-  const { instance } = await WebAssembly.instantiateStreaming(fetch(engineUrl), imports);
+  const { instance } = await WebAssembly.instantiateStreaming(fetch(engineUrl, { signal: AbortSignal.timeout(60_000) }), imports);
   engine = instance.exports as unknown as Exports;
 }
 /** One engine call; a trapped instance is discarded, so the next call starts a fresh one. */
@@ -94,10 +94,10 @@ async function chartBytes(song: SongRef): Promise<Uint8Array> {
   if (typeof file !== "string" || !file) throw new Error("chart-file-missing");
   post({ type: "phase", id: activeId, phase: "network" });
   // A search over many songs fetches many charts: one dropped request must not fail all of them.
-  let response = await fetch(pinnedSongAssetUrl(pinned, file), { credentials: "omit" }).catch(() => null);
+  let response = await fetch(pinnedSongAssetUrl(pinned, file), { credentials: "omit", signal: AbortSignal.timeout(60_000) }).catch(() => null);
   for (let attempt = 1; attempt < 3 && (!response || response.status >= 500); attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-    response = await fetch(pinnedSongAssetUrl(pinned, file), { credentials: "omit" }).catch(() => null);
+    response = await fetch(pinnedSongAssetUrl(pinned, file), { credentials: "omit", signal: AbortSignal.timeout(60_000) }).catch(() => null);
   }
   if (!response) throw new Error("chart-network");
   if (!response.ok) throw new Error(`chart-http:${response.status}`);
@@ -153,6 +153,8 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
       };
       try {
         const result = invoke({ op: "run", handle, request, charts: rows }, true) as unknown as EngineResponse;
+        // Native runs that exhaust the budget before evaluating a chart return null here.
+        if (result.unknownCards === null) result.unknownCards = [];
         post({ type: "progress", id: call.id, done: songs.length, total: songs.length });
         post({ type: "result", id: call.id, result });
       } finally {
