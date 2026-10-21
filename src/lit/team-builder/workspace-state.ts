@@ -60,5 +60,5 @@ export function farmingSettings(settings: BuildSettings): BuildSettings {
     route: s.play === "solo" || s.play === "gekiso" ? "live" : s.play,
     ptMode: s.play === "gekiso" ? "gekiso" : "solo",
     unknownPolicy: s.requireGrowth ? "min" : s.unknownPolicy,
-    ptCycle: mode === "recommendation" && s.ptCycle };
+    ptCycle: s.ptCycle };
 }

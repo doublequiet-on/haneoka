@@ -2342,7 +2342,7 @@
       "requiredCount": "{count} required",
       "needCards": "Add cards in My cards, or search all cards at full growth.",
       "needEventSongs": "Choose an event and songs.",
-      "needSongs": "Choose at least one song.",
+      "needSongs": "Choose playable charts",
       "goal": "Goal",
       "criterion": "Score goal",
       "criterionMean": "Average score",
@@ -2722,9 +2722,18 @@
         "requireGrowth": "Complete before calculating",
         "cpConversion": "Include challenge rewards from earned CP",
         "converted": "Direct rewards + CP conversion",
-        "direct": "Direct rewards per play"
+        "direct": "Direct rewards per play",
+        "conversionConflict": "CP conversion requires {condition}",
+        "singleReward": "A single reward target",
+        "primaryRanking": "Primary reward ranking"
       },
-      "resultElapsed": "{ms} ms"
+      "resultElapsed": "{ms} ms",
+      "loadingCharts": "Loading charts",
+      "preparingEngine": "Preparing",
+      "needEvent": "Choose an event",
+      "needChallengeSongs": "Choose challenge charts",
+      "needTargetScore": "Enter a positive target score",
+      "needRewardWeight": "Enter at least one positive reward weight"
     },
     "calendar": {
       "title": "Calendar",

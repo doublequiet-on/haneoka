@@ -2342,7 +2342,7 @@
       "requiredCount": "{count} 張必選",
       "needCards": "請先在「我的卡牌」中新增卡牌，或搜尋全部滿培養卡牌。",
       "needEventSongs": "請選擇活動和歌曲。",
-      "needSongs": "請至少選擇一首歌曲。",
+      "needSongs": "請選擇可用譜面",
       "goal": "目標",
       "criterion": "分數目標",
       "criterionMean": "平均分",
@@ -2722,9 +2722,18 @@
         "requireGrowth": "補全後計算",
         "cpConversion": "計入 CP 的挑戰收益",
         "converted": "直接獎勵＋CP 轉換",
-        "direct": "單次直接獎勵"
+        "direct": "單次直接獎勵",
+        "conversionConflict": "CP 換算需{condition}",
+        "singleReward": "單一獎勵目標",
+        "primaryRanking": "僅按主獎勵排序"
       },
-      "resultElapsed": "{ms} 毫秒"
+      "resultElapsed": "{ms} 毫秒",
+      "loadingCharts": "載入譜面",
+      "preparingEngine": "準備中",
+      "needEvent": "請選擇活動",
+      "needChallengeSongs": "請選擇挑戰譜面",
+      "needTargetScore": "請輸入大於 0 的目標分數",
+      "needRewardWeight": "至少填寫一項大於 0 的獎勵權重"
     },
     "calendar": {
       "title": "日曆",

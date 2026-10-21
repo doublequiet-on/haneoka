@@ -166,8 +166,7 @@ function conditions(host: TeamBuilder) {
         <dd>${t("luck")}</dd>
         <dt>GREAT</dt>
         <dd>${s.mode === "ap" ? 0 : (s.great ?? "—")}%</dd>
-        <dt>JUST</dt>
-        <dd>${s.just ?? "—"}%</dd>
+        ${host.hasMission("JustCount", c.effectiveSettings.songs) ? html`<dt>JUST</dt><dd>${s.just ?? "—"}%</dd>` : nothing}
         <dt>MISS</dt>
         <dd>${s.mode === "ap" ? 0 : (s.missEvery ?? "—")}</dd>
       </dl>
@@ -335,6 +334,39 @@ export function renderSongComparison(host: TeamBuilder) {
       <td class="tabular">${metrics ? format(Math.ceil(metrics.remaining)) : "—"}</td>
     `;
   };
+  const mobileMetrics = (row: ComparisonRow) => {
+    const score = row.status === "complete" ? row.hit?.score?.mean : undefined;
+    const metrics = score === undefined ? null : songMetrics(host.master!, row.song, result, score);
+    return html`<dl class="spec-list sc-primary">
+      <dt>${t("score")}</dt><dd>${score === undefined ? "—" : format(score)}</dd>
+      <dt>${t("remaining")}</dt><dd>${metrics ? format(Math.ceil(metrics.remaining)) : "—"}</dd>
+      <dt>${t("contribution")}</dt><dd>${metrics ? `${format(metrics.contribution, 1)}%` : "—"}</dd>
+    </dl>`;
+  };
+  const mobileResults = () => html`<div class="sc-mobile stack">${c.groups().map(group => {
+    const row = group.representative ?? group.charts[0]!, open = c.expanded.has(group.id);
+    return html`<article class="surface stack">
+      ${resultSong(host, row.song)}${mobileMetrics(row)}
+      <button class="button button--text" aria-expanded=${String(open)} aria-controls=${`sc-mobile-${group.id}`}
+        @click=${() => { if (open) c.expanded.delete(group.id); else c.expanded.add(group.id); host.requestUpdate(); }}>
+        ${t("coverage", { done: group.charts.filter(chart => chart.status === "complete").length, total: group.charts.length })} · ${t("details")}
+      </button>
+      <div id=${`sc-mobile-${group.id}`} class="stack" ?hidden=${!open}>${group.charts.map(chart => {
+        const metrics = chart.hit?.score ? songMetrics(host.master!, chart.song, result, chart.hit.score.mean) : null;
+        return html`<section class="stack">
+          <strong>${catalog.difficultyLabel(group.id, chart.song.difficulty)}</strong>
+          <span>${chart.reason ? t(chart.reason as keyof typeof COMPARISON_TEXT) : chart.status === "running" ? host.computationStatus() : chart.status === "complete" && !metrics ? t("threshold") : t(chart.status)}</span>
+          ${mobileMetrics(chart)}
+          <dl class="spec-list"><dt>${t("total")}</dt><dd>${metrics ? format(metrics.total) : "—"}</dd>
+            <dt>${t("average")}</dt><dd>${metrics ? format(Math.ceil(metrics.average)) : "—"}</dd></dl>
+          <div class="cluster">
+            ${chart.status === "failed" || chart.status === "cancelled" ? html`<button class="button button--text" ?disabled=${host.running} @click=${() => void c.start(chart.song)}>${t("retry")}</button>` : nothing}
+            <button class="button button--text" @click=${() => c.update({ songs: s.songs.filter(song => song.songId !== chart.song.songId || song.difficulty !== chart.song.difficulty) })}>${t("remove")}</button>
+          </div>
+        </section>`;
+      })}</div>
+    </article>`;
+  })}</div>`;
   const headers = html`
     <th>${t("score")}</th>
     <th>${t("contribution")}</th>
@@ -441,14 +473,15 @@ export function renderSongComparison(host: TeamBuilder) {
             ${c.running ? t("stop") : host.running ? t("busy") : t("start")}
           </button>
         </section>
-        <button class="button button--text" type="button" @click=${() => host.querySelector("#sc-results")?.scrollIntoView({ block: "start" })}>${host.t("viewResults", "View results")}</button>
+        ${rows.length ? html`<button class="button button--text" type="button" @click=${() => host.querySelector("#sc-results")?.scrollIntoView({ block: "start" })}>${host.t("viewResults", "View results")}</button>` : nothing}
         ${eventBonus(host)}
       </div>
       <section id="sc-results" class="surface stack">
         ${sectionHeading({ icon: "music_note", label: t("title") })}
+        ${rows.length ? html`
         <div class="cluster">
           <span class="chip chip--static">${c.stale ? host.t("stale", "Conditions changed") : t("conditions")}</span>
-          <span class="chip chip--static">${result.mode ? t(result.mode) : t("select")} · JUST ${result.just ?? "—"}%</span>
+          <span class="chip chip--static">${result.mode ? t(result.mode) : t("select")}${host.hasMission("JustCount", result.songs) ? ` · JUST ${result.just ?? "—"}%` : ""}</span>
           <span class="chip chip--static">${t("placement", { rank: result.rank ?? "—" })}</span>
           <span class="chip chip--static">${result.players} · ${result.target}</span>
         </div>
@@ -459,7 +492,7 @@ export function renderSongComparison(host: TeamBuilder) {
           <span class="chip chip--static">${t("noAssist")}</span>
         </div>
         <div class="row row--wrap">
-          <span role="status" class="tabular">${t("coverage", { done, total: rows.length })}</span>
+          <span role="status" class="tabular">${c.running ? `${host.computationStatus()} · ` : ""}${t("coverage", { done, total: rows.length })}</span>
         </div>
         <md-linear-progress
           .value=${rows.length ? done / rows.length : 0}
@@ -476,10 +509,11 @@ export function renderSongComparison(host: TeamBuilder) {
           ],
           (value) => c.update({ sort: value as typeof s.sort }),
         )}
+        ` : nothing}
         ${
           rows.length
-            ? html`
-                <div class="table-scroll" role="region" tabindex="0" aria-label=${t("title")}>
+            ? html`${mobileResults()}
+                <div class="table-scroll sc-desktop" role="region" tabindex="0" aria-label=${t("title")}>
                   <table class="data-table sc-results">
                     <thead>
                       <tr>
@@ -543,7 +577,7 @@ export function renderSongComparison(host: TeamBuilder) {
                             ${metricsCells(chart)}
                             <td>
                               <span>
-                                ${chart.reason ? t(chart.reason as keyof typeof COMPARISON_TEXT) : chart.status === "complete" && !metrics ? t("threshold") : t(chart.status)}
+                                ${chart.reason ? t(chart.reason as keyof typeof COMPARISON_TEXT) : chart.status === "complete" && !metrics ? t("threshold") : chart.status === "running" ? host.computationStatus() : t(chart.status)}
                               </span>
                               <dl class="spec-list">
                                 <dt>${t("total")}</dt>

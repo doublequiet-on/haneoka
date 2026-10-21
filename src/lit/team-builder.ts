@@ -2,7 +2,7 @@
 // Input: 页面资料、跨服选择、Box 状态与用户设置。
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
-// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；滚动避让吸顶／吸底控件以显示焦点。
+// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
@@ -119,6 +119,9 @@ export class TeamBuilder extends LitElement {
     this.activeManualContext = "";
     this.activeContext = "";
     ++this.runGeneration;
+    this.submitted = false;
+    this.taskResults.clear();
+    this.scrollPositions.clear();
     this.results = null;
     this.resultInputs = null;
     this.resultSettings = null;
@@ -138,11 +141,33 @@ export class TeamBuilder extends LitElement {
   selection = new Set<string>();
   editing: { kind: "members" | "snaps"; cardId: number } | null = null;
   songPicker: SongPickerState | null = null;
-  results: EngineResponse | null = null;
-  resultSettings: BuildSettings | null = null;
-  resultInputs: EngineRequest | null = null;
-  resultTab = "overall";
-  resultsFor = "";
+  private taskResults = new Map<string, { results: EngineResponse | null; settings: BuildSettings | null; inputs: EngineRequest | null; context: string; tab: string }>();
+  private get resultScope() {
+    const tab = ["build", "pt", "song-comparison"].includes(this.tab) ? this.tab : this.lastTaskTab;
+    return tab === "pt" ? this.settings.rewardMode === "plan" ? "plan" : "farm" : "build";
+  }
+  private get taskResult() {
+    const key = this.resultScope;
+    if (!this.taskResults.has(key)) this.taskResults.set(key, { results: null, settings: null, inputs: null, context: "", tab: "overall" });
+    return this.taskResults.get(key)!;
+  }
+  get results() { return this.taskResult.results; }
+  set results(value: EngineResponse | null) { this.taskResult.results = value; }
+  get resultSettings() { return this.taskResult.settings; }
+  set resultSettings(value: BuildSettings | null) { this.taskResult.settings = value; }
+  get resultInputs() { return this.taskResult.inputs; }
+  set resultInputs(value: EngineRequest | null) { this.taskResult.inputs = value; }
+  get resultsFor() { return this.taskResult.context; }
+  set resultsFor(value: string) { this.taskResult.context = value; }
+  get resultTab() { return this.taskResult.tab; }
+  set resultTab(value: string) { this.taskResult.tab = value; }
+  get hasTaskResults() {
+    return this.tab === "pt" && this.settings.rewardMode !== "plan" && (this.farmResultMode ?? this.settings.rewardMode) === "recommendation" ? !!this.pt.job : !!this.results;
+  }
+  computationStatus() {
+    const phases = this.engine?.phases ?? [];
+    return (phases.length ? phases : ["initializationMs"]).map(phase => phase === "networkMs" ? this.t("loadingCharts", "Loading charts") : phase === "initializationMs" ? this.t("preparingEngine", "Preparing") : this.t("sc.running", "Calculating")).join(" · ");
+  }
   running = false;
   progress: { done: number; total: number; started: number } | null = null;
   error = "";
@@ -266,6 +291,11 @@ export class TeamBuilder extends LitElement {
           this.requestUpdate();
         }, 6000);
     }
+    const invalidFields = new Set(this.submitted ? this.inputIssues().map(issue => issue.field) : []);
+    for (const field of this.querySelectorAll<HTMLElement>("[data-tb-field]")) {
+      field.toggleAttribute("data-invalid", invalidFields.has(field.id));
+      field.ariaInvalid = invalidFields.has(field.id) ? "true" : null;
+    }
     this.pt.markFields();
     this.songComparison.markFields();
     this.images.observe(this);
@@ -309,7 +339,7 @@ export class TeamBuilder extends LitElement {
       await this.updateComplete;
       if (!this.isConnected || this.loadedServer !== server) return;
       this.engine?.dispose();
-      this.engine = new EngineClient(data);
+      this.engine = new EngineClient(data, () => this.requestUpdate());
       // Compile the release in every Worker while the reader sets up the search.
       const warm = () => this.engine?.warm();
       if ("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 2000 });
@@ -379,9 +409,12 @@ export class TeamBuilder extends LitElement {
     }
   }
   updateSettings(patch: Partial<BuildSettings>) {
+    const scopeChanged = this.tab === "pt" && patch.rewardMode !== undefined && (patch.rewardMode === "plan") !== (this.settings.rewardMode === "plan");
+    if (scopeChanged) this.saveScroll();
     this.settings = { ...this.settings, ...patch };
     this.write([{ key: SETTINGS_KEY, value: this.settings as unknown as BoxValue }]);
     this.requestUpdate();
+    if (scopeChanged) { this.submitted = false; void this.restoreScroll(); }
   }
   updateFarming(patch: Partial<FarmingSettings>) {
     const farming = { ...this.settings.farming, ...patch };
@@ -401,11 +434,32 @@ export class TeamBuilder extends LitElement {
     this.slotPicker = null;
     this.setTab("song-comparison");
   }
+  private scrollPositions = new Map<string, { main: number; config: number }>();
+  private scrollScope() { return `${this.tab}:${this.tab === "pt" ? this.resultScope : this.tab === "build" ? this.buildMode : ""}`; }
+  private saveScroll() {
+    this.scrollPositions.set(this.scrollScope(), { main: this.closest("#main-content")?.scrollTop ?? 0, config: this.querySelector(".tb-config")?.scrollTop ?? 0 });
+  }
+  private async restoreScroll() {
+    const key = this.scrollScope();
+    await this.updateComplete;
+    await Promise.all([...this.querySelectorAll("md-outlined-select, md-outlined-text-field, md-slider")].map(element => (element as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete));
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (key !== this.scrollScope()) return;
+    const saved = this.scrollPositions.get(key);
+    const main = this.closest("#main-content"), config = this.querySelector(".tb-config");
+    if (main) main.scrollTop = saved?.main ?? 0;
+    if (config) config.scrollTop = saved?.config ?? 0;
+    this.querySelector<HTMLElement>(".tb-tabpanel")?.focus({ preventScroll: true });
+  }
   setTab(tab: Tab) {
+    if (this.tab === tab) return;
+    this.saveScroll();
     if (["build", "pt", "song-comparison"].includes(tab)) this.lastTaskTab = tab;
     this.tab = tab;
+    this.submitted = false;
+    this.compare = [];
     this.requestUpdate();
-    void this.updateComplete.then(() => this.querySelector<HTMLElement>(".tb-tabpanel")?.focus({ preventScroll: true }));
+    void this.restoreScroll();
   }
 
   /** Cards taking part in a search, after the candidate filters. */
@@ -513,7 +567,25 @@ export class TeamBuilder extends LitElement {
     const s = this.searchSettings, issues: { field: string; message: string }[] = [];
     const add = (field: string, key: string, fallback: string) => issues.push({ field, message: this.t(key, fallback) });
     if (!this.engineCards().members.length) add("tb-cards", "needCardsShort", "Choose cards");
-    if (!recommendation && !this.goal()) add("tb-songs", "needConditions", "Choose the required event, charts or target");
+    if (!recommendation) {
+      if ((s.goal === "event" || s.goal === "plan" || (s.goal === "score" || s.goal === "power") && s.challengeRules) && s.eventId === null)
+        add("tb-event", "needEvent", "Choose an event");
+      if ((s.goal === "score" || s.goal === "gekiso" || s.goal === "plan" || s.goal === "power" && s.powerSong || s.goal === "event" && s.route !== "skip") && !s.songs.length)
+        add("tb-songs", "needSongs", "Choose playable charts");
+      if (s.goal === "plan" && !s.planChallengeSongs.length) add("tb-challenge-songs", "needChallengeSongs", "Choose challenge charts");
+      if (s.goal === "score" && s.scoreTarget !== "none" && !(s.targetScore && Number.isFinite(s.targetScore) && s.targetScore > 0))
+        add("tb-target-score", "needTargetScore", "Enter a positive target score");
+      if (s.goal === "event" && s.weighted && !(s.weightPoints > 0 || s.weightItems > 0 || s.route === "live" && s.weightCp > 0))
+        add("tb-reward-weights", "needRewardWeight", "Enter at least one positive reward weight");
+    }
+    if (this.tab === "pt" && s.rewardMode !== "plan" && s.ptCycle && s.rewardMode !== "recommendation") {
+      const f = s.farming;
+      const condition = !["solo", "gekiso"].includes(f.play) ? this.t("routeLive", "Normal live") : f.playMode !== "ap" ? this.t("playAp", "All Perfect")
+        : !f.requireGrowth ? this.t("farm.requireGrowth", "Complete before calculating") : f.includeMemory ? `${this.t("farm.memory", "Memories")}: ${this.t("farm.excluded", "Excluded")}`
+        : f.weighted ? this.t("farm.singleReward", "A single reward target") : f.fullRanking ? this.t("farm.primaryRanking", "Primary reward ranking")
+        : f.k !== 1 ? `${this.t("resultCount", "Results")}: 1` : this.t("noLimit", "Until proven");
+      issues.push({ field: "tb-reward-scope", message: this.t("farm.conversionConflict", "CP conversion requires {condition}", { condition }) });
+    }
     const gekiso = recommendation ? s.ptMode === "gekiso" : s.goal === "gekiso";
     if (gekiso && (!Number.isInteger(s.minComboBonus) || s.minComboBonus < 1)) add("tb-combo", "invalidCombo", "Enter a positive integer");
     if (!recommendation && s.goal === "gekiso" && s.gekisoPlacementMode === "opponents") {
@@ -545,8 +617,12 @@ export class TeamBuilder extends LitElement {
   }
   focusInput(field: string) {
     const target = this.querySelector<HTMLElement>(`#${field}`);
+    for (let parent = target?.parentElement; parent && parent !== this; parent = parent.parentElement)
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
     target?.scrollIntoView({ block: "center" });
-    (target?.querySelector<HTMLElement>("input, button, md-outlined-text-field, md-outlined-select") ?? target)?.focus();
+    const control = target?.matches("md-outlined-text-field, md-outlined-select, input, button") ? target
+      : target?.querySelector<HTMLElement>(".tb-songs__add, input, md-outlined-text-field, md-outlined-select, button");
+    (control ?? target)?.focus({ preventScroll: true });
   }
   private revealFocusedControl(event: FocusEvent) {
     const target = event.target as HTMLElement;
@@ -628,7 +704,7 @@ export class TeamBuilder extends LitElement {
     }
   }
   request(goal = this.goal()): EngineRequest | null {
-    if (!goal || !this.view) return null;
+    if (!goal || !this.view || this.tab === "pt" && this.searchSettings.rewardMode === "event" && this.searchSettings.ptCycle) return null;
     const cards = this.engineCards();
     const s = this.searchSettings;
     const theoretical = s.scope === "theoretical";
@@ -667,12 +743,12 @@ export class TeamBuilder extends LitElement {
   async run(verify = false) {
     if (this.tab === "pt" && this.settings.rewardMode === "recommendation") { await this.pt.start(false); return; }
     this.submitted = true;
+    const issues = this.inputIssues();
+    if (issues.length) { this.requestUpdate(); await this.updateComplete; this.focusInput(issues[0]!.field); return; }
     if (this.tab === "pt" && this.settings.rewardMode !== "plan") {
       this.pt.sync();
       if (this.pt.issues.length) { this.pt.showIssues = true; this.requestUpdate(); await this.updateComplete; await this.pt.focusIssue(this.pt.issues[0]!); return; }
     }
-    const issues = this.inputIssues();
-    if (issues.length) { this.requestUpdate(); await this.updateComplete; this.focusInput(issues[0]!.field); return; }
     const started = clock();
     const request = this.request();
     if (!request || !this.engine || this.running) return;
@@ -858,7 +934,7 @@ export class TeamBuilder extends LitElement {
     const buildPanel = () => html`<div class="stack">
       ${segmented({ label: this.t("buildMode", "Team building"), value: this.buildMode,
         options: [{ value: "automatic", label: this.t("automaticTeam", "Find a team") }, { value: "manual", label: this.t("manualTeam", "Build a team by hand") }],
-        onSelect: mode => { this.buildMode = mode; this.requestUpdate(); } })}
+        onSelect: mode => { this.saveScroll(); this.buildMode = mode; this.submitted = false; this.requestUpdate(); void this.restoreScroll(); } })}
       ${this.buildMode === "manual" ? renderManualTeamTab(this) : renderBuildTab(this)}
     </div>`;
     const panel =

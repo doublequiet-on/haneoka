@@ -109,8 +109,9 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const missionFilters = html`<div class="cluster">
     ${["Combo", "Luck", "JustCount", "Mix"].map((value, i) => filterChip({ label: ["COMBO", "LUCK", "JUST", host.common("catalog.songs.gekisou.mixed", "Mixed")][i]!, selected: state.gekisouTypes.includes(value),
       onToggle: () => update({ gekisouTypes: state.gekisouTypes.includes(value) ? state.gekisouTypes.filter(type => type !== value) : [...state.gekisouTypes, value] }) }))}
-    </div>${segmented({ label: host.common("catalog.songs.gekisou.matchMode", "Match mode"), value: state.gekisouMatch ?? "only",
-      options: [{ value: "only", label: host.common("catalog.songs.gekisou.only", "Only selected types") }, { value: "contains", label: host.common("catalog.songs.gekisou.contains", "Contains a selected type") }], onSelect: gekisouMatch => update({ gekisouMatch }) })}`;
+    </div>`;
+  const missionMatch = segmented({ label: host.common("catalog.songs.gekisou.matchMode", "Match mode"), value: state.gekisouMatch ?? "only",
+      options: [{ value: "only", label: host.common("catalog.songs.gekisou.only", "Only selected types") }, { value: "contains", label: host.common("catalog.songs.gekisou.contains", "Contains a selected type") }], onSelect: gekisouMatch => update({ gekisouMatch }) });
   const levelField = (key: "minLevel" | "maxLevel", value: number | null, label: string) => html`<md-outlined-text-field type="number" min="1" label=${label}
     .value=${value == null ? "" : String(value)} @input=${(event: Event) => { const raw = (event.target as HTMLInputElement).value; update({ [key]: raw === "" ? null : Number(raw) }); }}></md-outlined-text-field>`;
   const all = host.common("common.states.all", "All");
@@ -127,7 +128,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
       ${levelField("maxLevel", maxLevel, host.t("sc.maxLevel", "Maximum level"))}${gekiso ? missionFilters : nothing}
     </div>`,
     filters: html`<div class="stack">
-      ${gekiso ? nothing : missionFilters}
+      ${gekiso ? nothing : missionFilters}${missionMatch}
       ${levelField("minLevel", minLevel, host.t("sc.minLevel", "Minimum level"))}
       <md-outlined-text-field type="number" min="1" label=${host.t("maxDuration", "Maximum chart duration (seconds)")}
         .value=${state.maxSeconds == null ? "" : String(state.maxSeconds)} @input=${(event: Event) => { const raw = (event.target as HTMLInputElement).value; update({ maxSeconds: raw === "" ? null : Number(raw) }); }}></md-outlined-text-field>
@@ -147,8 +148,8 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
       </div>
       ${state.maxSeconds == null ? nothing : html`<span role="status">${host.t("unknownDuration", "Unknown duration {count}", { count: allCharts.filter(song => typeof catalog.chartMetadata(song)?.time !== "number").length })}${allCharts.some(song => catalog.metadataStatus(song.songId) === "loading") ? ` · ${host.t("metadataLoading", "Loading metadata")}` : ""}</span>`}
       <div class="row row--wrap">
-        ${state.single ? nothing : html`<button class="button button--text" @click=${() => update({ songs: uniqueCharts([...state.songs, ...visible]) })}>${host.t("selectMatchingSongs", "Select all shown songs")}</button>`}
         <details class="tb-action-menu"><summary class="button button--text">${host.t("selectionActions", "Selection actions")}</summary><div class="surface stack">
+          ${state.single ? nothing : html`<button class="button button--text" @click=${() => update({ songs: uniqueCharts([...state.songs, ...visible]) })}>${host.t("selectMatchingSongs", "Select all shown songs")}</button>`}
           ${state.single ? nothing : html`<button class="button button--text" @click=${() => replace(visible)}>${host.t("replaceSelection", "Use only filtered charts")}</button>`}
           <button class="button button--text" @click=${() => replace([])}>${host.t("clearSelection", "Clear selection")}</button>
         </div></details>

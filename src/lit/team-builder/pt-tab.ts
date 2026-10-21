@@ -381,7 +381,6 @@ function renderSetup(host: TeamBuilder): TemplateResult {
     { value: "skip", label: host.t("routeSkip", "Skip"), icon: icon("fast_forward", 20), available: normal },
   ] as const;
   const available = plays.filter(play => play.available).map(play => play.value);
-  const recommendation = s.rewardMode === "recommendation";
   const numberField = (key: "weightPoints" | "weightItems" | "weightCp", label: string) => html`
     <md-outlined-text-field type="number" min="0" step="any" label=${label} .value=${live(String(f[key]))}
       @change=${(e: Event) => set({ [key]: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) })}></md-outlined-text-field>`;
@@ -405,7 +404,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
         ${f.play === "solo" ? html`<md-select-option value="challenge-points"><div slot="headline">${host.t("measureCp", "Challenge points")}</div></md-select-option>` : nothing}
         ${f.play !== "gekiso" ? html`<md-select-option value="weighted"><div slot="headline">${host.t("measureWeighted", "Weighted rewards")}</div></md-select-option>` : nothing}
       </md-outlined-select>
-      ${s.weighted ? html`<div class="pt-form-grid">
+      ${s.weighted ? html`<div class="pt-form-grid" id="tb-reward-weights" data-tb-field tabindex="-1">
         ${numberField("weightPoints", host.t("weightPoints", "Weight per event point"))}
         ${numberField("weightItems", host.t("weightItems", "Weight per shop item"))}
         ${s.route === "live" ? numberField("weightCp", host.t("weightCp", "Weight per challenge point")) : nothing}
@@ -414,7 +413,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
         options: host.master!.challengeBoosts.filter(row => row.consumed > 0).map(row => ({value:String(row.consumed),label:`${row.consumed} CP`})),
         onSelect: value => host.updateSettings({challengePoints:Number(value)}) })
         : ptField(host, "consumption", boostControl(host, s.boosts, boosts => host.updateSettings({boosts})))}
-      ${recommendation && (challenge || s.ptCycle) ? html`<label class="tb-check"><md-checkbox touch-target="wrapper" .checked=${s.ptCycle}
+      ${challenge || s.ptCycle ? html`<label class="tb-check" id="tb-reward-scope" data-tb-field tabindex="-1"><md-checkbox touch-target="wrapper" .checked=${s.ptCycle}
         @change=${(e: Event) => set({ptCycle:(e.target as HTMLInputElement).checked})}></md-checkbox>
         <span>${host.t("farm.cpConversion", "Include challenge rewards from earned CP")}</span></label>` : nothing}
       <span class="tb-results__meta">${s.ptCycle ? host.t("farm.converted", "Direct rewards + CP conversion") : host.t("farm.direct", "Direct rewards per play")}</span>
@@ -506,8 +505,9 @@ function renderRun(host: TeamBuilder): TemplateResult {
   const blocked = host.running || host.manualBusy || !pt.dataFingerprint;
   return html`
     <div class="tb-run">
+      ${pt.running ? html`<span role="status">${host.computationStatus()}</span>` : nothing}
       ${host.submitted && host.inputIssues(true).length ? html`<div role="alert">${host.inputIssues(true).map(issue => html`<button class="button button--text" @click=${() => host.focusInput(issue.field)}>${issue.message}</button>`)}</div>` : nothing}
-      ${job || host.results ? html`<button class="button button--text" @click=${() => host.querySelector(".tb-results-column")?.scrollIntoView({ block: "start" })}>${host.t("viewResults", "View results")}</button>` : nothing}
+      ${host.hasTaskResults ? html`<button class="button button--text" @click=${() => host.querySelector(".tb-results-column")?.scrollIntoView({ block: "start" })}>${host.t("viewResults", "View results")}</button>` : nothing}
       ${
         pt.running
           ? html`

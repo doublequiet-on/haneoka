@@ -33,7 +33,7 @@ export function gekisoSamplesControl(host: TeamBuilder): TemplateResult {
 
 export function comboBonusControl(host: TeamBuilder): TemplateResult | typeof nothing {
   if (!host.hasComboSongs()) return nothing;
-  return html`<md-outlined-text-field id="tb-combo" type="number" min="1" step="1" inputmode="numeric"
+  return html`<md-outlined-text-field id="tb-combo" data-tb-field type="number" min="1" step="1" inputmode="numeric"
     label=${host.t("minComboBonus", "Minimum COMBO BONUS")} prefix-text="×"
     .value=${live(host.settings.minComboBonus === 1 ? "" : String(host.settings.minComboBonus))}
     placeholder=${host.t("unlimitedCombo", "No minimum")}
@@ -69,7 +69,7 @@ export function songList(
 ): TemplateResult {
   const catalog = host.catalog!;
   return html`
-    <div class="tb-songs" id=${fieldId} tabindex="-1">
+    <div class="tb-songs" id=${fieldId} data-tb-field tabindex="-1">
       <span class="tb-results__meta">${host.t("chartCount", "{count} charts", { count: songs.filter(song => (!allowedSongIds || allowedSongIds.includes(song.songId)) && catalog.difficultyRows(song.songId).some(row => Number(row.difficulty) === song.difficulty)).length })}</span>
       ${songs.length ? html`<div class="tb-songs__list" role="region" aria-label=${host.t("songs", "Songs")} tabindex="0">${songs.map(
         (song, index) => html`
@@ -127,7 +127,7 @@ export function eventSection(host: TeamBuilder, s = host.searchSettings): Templa
   const challenge = s.goal === "plan" || (s.goal === "event" ? s.route === "challenge" : s.challengeRules);
   return html`
     <md-outlined-select
-      label=${host.t("event", "Event")}
+      id="tb-event" data-tb-field label=${host.t("event", "Event")}
       .value=${String(eventId)}
       @change=${(e: Event) => set({ eventId: Number((e.target as HTMLInputElement).value) })}
     >
@@ -172,6 +172,11 @@ export function eventSection(host: TeamBuilder, s = host.searchSettings): Templa
         : nothing
     }
   `;
+}
+
+export function playSummary(host: TeamBuilder, s: BuildSettings): string {
+  return [host.t("play", "Play"), s.playMode === "ap" ? host.t("playAp", "All Perfect") : `GREAT ${s.great}%${s.goal === "gekiso" ? "" : ` · GOOD ${s.good}% · MISS ${s.miss}%`} · ${host.t("missEvery", "Miss every N notes")}: ${s.missEvery}`,
+    ...(s.goal === "gekiso" && host.hasMission("JustCount", s.songs) ? [`JUST ${s.just}%`] : [])].join(" · ");
 }
 
 export function playSection(host: TeamBuilder, s = host.searchSettings, set = (patch: Partial<BuildSettings>) => host.updateSettings(patch)): TemplateResult {
@@ -373,7 +378,7 @@ export function renderCandidates(host: TeamBuilder): TemplateResult {
       </div>`}
     </div>
   `;
-  return html`<section class="surface stack" id="tb-cards" tabindex="-1">
+  return html`<section class="surface stack" id="tb-cards" data-tb-field tabindex="-1">
     ${sectionHeading({ icon: "style", label: host.t("scope", "Cards") })}
       ${segmented({
         label: host.t("scope", "Cards"),
@@ -491,7 +496,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                           min="1"
                           step="1"
                           inputmode="numeric"
-                          label=${host.t("targetScore", "Target score")}
+                          id="tb-target-score" data-tb-field label=${host.t("targetScore", "Target score")}
                           .value=${live(s.targetScore ? String(s.targetScore) : "")}
                           @change=${(e: Event) => {
                             const value = Math.floor(Number((e.target as HTMLInputElement).value) || 0);
@@ -563,7 +568,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                 `
               : nothing
           }
-          ${s.goal === "score" || s.goal === "gekiso" ? html`<details class="fold"><summary>${host.t("play", "Play")} · ${s.playMode === "ap" ? host.t("playAp", "All Perfect") : host.t("playCustom", "My accuracy")}</summary>${playSection(host)}</details>` : nothing}
+          ${s.goal === "score" || s.goal === "gekiso" ? html`<details class="fold"><summary>${playSummary(host, s)}</summary>${playSection(host)}</details>` : nothing}
         </section>` : nothing}
         ${
           s.goal === "plan"
@@ -571,7 +576,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                 <section class="surface stack">
                   ${sectionHeading({ icon: "cycle", label: host.t("planSetup", "Resource plan") })}
                   ${eventSection(host)}
-                  <details class="fold"><summary>${host.t("play", "Play")} · ${s.playMode === "ap" ? host.t("playAp", "All Perfect") : host.t("playCustom", "My accuracy")}</summary>${playSection(host)}</details>
+                  <details class="fold"><summary>${playSummary(host, s)}</summary>${playSection(host)}</details>
                   <span class="tb-results__meta">${host.t("farm.memory", "Character / song memory bonuses")}: ${host.t("farm.included", "Included")}</span>
                   <div class="tb-number-grid">
                     <md-outlined-text-field
@@ -636,13 +641,14 @@ export function renderBuildRun(host: TeamBuilder, showTimeLimit = true): Templat
           )}
         </md-outlined-select>` : nothing}
           ${host.submitted && host.inputIssues().length ? html`<div class="surface stack" role="alert">${host.inputIssues().map(issue => html`<button class="button button--text" @click=${() => host.focusInput(issue.field)}>${issue.message}</button>`)}</div>` : nothing}
-          ${host.results || host.tab === "pt" && host.pt.job ? html`<button class="button button--text" @click=${() => host.querySelector(".tb-results-column")?.scrollIntoView({block:"start"})}>${host.t("viewResults", "View results")}</button>` : nothing}
+          ${host.hasTaskResults ? html`<button class="button button--text" @click=${() => host.querySelector(".tb-results-column")?.scrollIntoView({block:"start"})}>${host.t("viewResults", "View results")}</button>` : nothing}
           ${
             host.taskKind === "build"
               ? html`
                   <button class="button button--tonal button--full" type="button" @click=${() => host.cancel()}>
                     ${icon("stop", 18)}${host.common("common.actions.cancel", "Cancel")}
                   </button>
+                  <span role="status">${host.computationStatus()}</span>
                   <md-linear-progress
                     .value=${progress && progress.total ? progress.done / progress.total : 0}
                     ?indeterminate=${!progress || progress.total <= 1}

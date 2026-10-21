@@ -2342,7 +2342,7 @@
       "requiredCount": "必須 {count}",
       "needCards": "所持カードを追加するか、全カード（最大育成）で検索してください。",
       "needEventSongs": "イベントと楽曲を選んでください。",
-      "needSongs": "楽曲を1曲以上選んでください。",
+      "needSongs": "プレイ可能な譜面を選択",
       "goal": "目的",
       "criterion": "スコアの目標",
       "criterionMean": "平均スコア",
@@ -2722,9 +2722,18 @@
         "requireGrowth": "入力完了後に計算",
         "cpConversion": "獲得CPのチャレンジ報酬を含む",
         "converted": "直接報酬＋CP換算",
-        "direct": "1回の直接報酬"
+        "direct": "1回の直接報酬",
+        "conversionConflict": "CP換算には{condition}が必要",
+        "singleReward": "単一の報酬目標",
+        "primaryRanking": "主報酬のみの順位付け"
       },
-      "resultElapsed": "{ms}ミリ秒"
+      "resultElapsed": "{ms}ミリ秒",
+      "loadingCharts": "譜面読み込み中",
+      "preparingEngine": "準備中",
+      "needEvent": "イベントを選択",
+      "needChallengeSongs": "チャレンジ譜面を選択",
+      "needTargetScore": "0 より大きい目標スコアを入力",
+      "needRewardWeight": "報酬の重みを1つ以上正の値に設定"
     },
     "calendar": {
       "title": "カレンダー",

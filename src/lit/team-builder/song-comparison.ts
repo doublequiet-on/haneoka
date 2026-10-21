@@ -141,7 +141,7 @@ export class SongComparison {
       songs: this.settings.songs.map((song) => ({ ...song })),
       single: false,
       query: "",
-      filtersOpen: true,
+      filtersOpen: false,
       bands: [],
       attributes: [],
       gekisouTypes: [],
