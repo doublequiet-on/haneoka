@@ -459,9 +459,11 @@
     overflow: hidden;
     border-radius: var(--md-sys-shape-corner-small);
   }
-  .tb-songs__add {
-    justify-self: start;
-    margin-block-start: var(--md-sys-spacing-1);
+  .team-builder .tb-input-summary > .tb-results__meta {
+    flex: 1;
+  }
+  .team-builder .tb-input-summary > .button {
+    flex-shrink: 0;
   }
   .tb-accordion {
     --surface-padding: 0px;

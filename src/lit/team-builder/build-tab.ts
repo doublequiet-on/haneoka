@@ -88,9 +88,33 @@ export function songList(
   const catalog = host.catalog!;
   return html`
     <div class="tb-songs" id=${fieldId} data-tb-field tabindex="-1">
-      <span class="tb-results__meta">
-        ${host.t("chartCount", "{count} charts", { count: songs.filter((song) => (!allowedSongIds || allowedSongIds.includes(song.songId)) && catalog.difficultyRows(song.songId).some((row) => Number(row.difficulty) === song.difficulty)).length })}
-      </span>
+      <div class="row row--between tb-input-summary">
+        <span class="tb-results__meta">
+          ${host.t("chartCount", "{count} charts", { count: songs.filter((song) => (!allowedSongIds || allowedSongIds.includes(song.songId)) && catalog.difficultyRows(song.songId).some((row) => Number(row.difficulty) === song.difficulty)).length })}
+        </span>
+        <button
+          class="button button--tonal tb-songs__add"
+          type="button"
+          @click=${() => {
+            host.songPicker = {
+              songs: songs.map((song) => ({ ...song })),
+              context: `${host.tab}:${host.searchSettings.goal}:${single ? "single" : allowedSongIds ? "restricted" : "songs"}`,
+              single,
+              query: "",
+              filtersOpen: false,
+              bands: [],
+              attributes: [],
+              gekisouTypes: [],
+              difficulty: 3,
+              allowedSongIds,
+              change,
+            };
+            host.requestUpdate();
+          }}
+        >
+          ${icon("add", 18)}${songs.length ? host.t("editSongs", "Change songs") : host.t("addSongs", "Choose songs")}
+        </button>
+      </div>
       ${
         songs.length
           ? html`
@@ -117,28 +141,6 @@ export function songList(
             `
           : nothing
       }
-      <button
-        class="button button--tonal tb-songs__add"
-        type="button"
-        @click=${() => {
-          host.songPicker = {
-            songs: songs.map((song) => ({ ...song })),
-            context: `${host.tab}:${host.searchSettings.goal}:${single ? "single" : allowedSongIds ? "restricted" : "songs"}`,
-            single,
-            query: "",
-            filtersOpen: false,
-            bands: [],
-            attributes: [],
-            gekisouTypes: [],
-            difficulty: 3,
-            allowedSongIds,
-            change,
-          };
-          host.requestUpdate();
-        }}
-      >
-        ${icon("add", 18)}${songs.length ? host.t("editSongs", "Change songs") : host.t("addSongs", "Choose songs")}
-      </button>
     </div>
   `;
 }
@@ -544,9 +546,20 @@ export function renderCandidates(host: TeamBuilder): TemplateResult {
             `
           : nothing
       }
-      <span class="tb-results__meta">
-        ${host.t("candidateSummary", "{members} member cards · {snaps} Snapshots", { members: cards.members.length, snaps: cards.snaps.length })}${required ? ` · ${host.t("requiredCount", "{count} fixed", { count: required })}` : ""}
-      </span>
+      <div class="row row--between tb-input-summary">
+        <span class="tb-results__meta">
+          ${host.t("candidateSummary", "{members} member cards · {snaps} Snapshots", { members: cards.members.length, snaps: cards.snaps.length })}${required ? ` · ${host.t("requiredCount", "{count} fixed", { count: required })}` : ""}
+        </span>
+        ${
+          !view.members.size
+            ? html`
+                <button class="button button--tonal" @click=${() => host.setTab("box")}>
+                  ${host.t("enterCards", "Enter cards")}
+                </button>
+              `
+            : nothing
+        }
+      </div>
       ${
         required
           ? html`
@@ -561,15 +574,6 @@ export function renderCandidates(host: TeamBuilder): TemplateResult {
                   `,
                 )}
               </div>
-            `
-          : nothing
-      }
-      ${
-        !view.members.size
-          ? html`
-              <button class="button button--text" @click=${() => host.setTab("box")}>
-                ${host.t("enterCards", "Enter cards")}
-              </button>
             `
           : nothing
       }
