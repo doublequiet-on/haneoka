@@ -2,7 +2,7 @@ import type { Locale } from "../i18n/locales";
 import { group, t } from "../i18n/messages";
 
 export type PageKind =
-  "download" | "home" | "index" | "catalog" | "tgw-card" | "studio" | "missions" | "event-tracker" | "song-puzzle" | "stamp-maker" | "legal" | "notice";
+  "download" | "home" | "index" | "catalog" | "tgw-card" | "studio" | "level-exp" | "missions" | "event-tracker" | "song-puzzle" | "stamp-maker" | "legal" | "notice";
 export interface RouteDefinition {
   route: string;
   kind: PageKind;
@@ -106,6 +106,8 @@ export const ROUTES: RouteDefinition[] = [
   { route: "/catalog/circle", kind: "catalog", key: "circle", titleKey: "navigation.circle", resource: "circle" },
   { route: "/catalog/challenge", kind: "catalog", key: "challenge", titleKey: "navigation.challenge", resource: "challenge" },
   { route: "/catalog/studio", kind: "studio", key: "studio", titleKey: "catalog.studio.title", resource: "studio" },
+  { route: "/catalog/player-ranks", kind: "level-exp", key: "player-ranks", titleKey: "catalog.progression.playerRank" },
+  { route: "/catalog/friendship-ranks", kind: "level-exp", key: "friendship-ranks", titleKey: "catalog.progression.friendshipRank" },
   {
     route: "/catalog/missions",
     kind: "missions",

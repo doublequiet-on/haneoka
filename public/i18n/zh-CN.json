@@ -986,6 +986,13 @@
       "noBenefits": "本等级无特典",
       "noRewards": "本等级无奖励"
     },
+    "progression": {
+      "playerRank": "账号等级",
+      "friendshipRank": "角色羁绊等级",
+      "level": "等级",
+      "requiredExp": "升级所需经验",
+      "cumulativeExp": "累计经验"
+    },
     "studio": {
       "title": "录音室练习",
       "level": "练习Lv",

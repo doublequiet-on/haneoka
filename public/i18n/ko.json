@@ -986,6 +986,13 @@
       "noBenefits": "이 랭크의 혜택이 없습니다",
       "noRewards": "이 랭크의 보상이 없습니다"
     },
+    "progression": {
+      "playerRank": "플레이어 랭크",
+      "friendshipRank": "캐릭터 인연 레벨",
+      "level": "레벨",
+      "requiredExp": "레벨업 필요 EXP",
+      "cumulativeExp": "누적 EXP"
+    },
     "studio": {
       "title": "스튜디오 연습",
       "level": "연습Lv",

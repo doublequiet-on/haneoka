@@ -986,6 +986,13 @@
       "noBenefits": "このランクの特典はありません",
       "noRewards": "このランクの報酬はありません"
     },
+    "progression": {
+      "playerRank": "プレイヤーランク",
+      "friendshipRank": "キャラクター絆レベル",
+      "level": "レベル",
+      "requiredExp": "レベルアップ必要EXP",
+      "cumulativeExp": "累計EXP"
+    },
     "studio": {
       "title": "スタジオ練習",
       "level": "練習Lv",

@@ -986,6 +986,13 @@
       "noBenefits": "No benefits at this rank",
       "noRewards": "No rewards at this rank"
     },
+    "progression": {
+      "playerRank": "Player Rank",
+      "friendshipRank": "Character Bond Level",
+      "level": "Level",
+      "requiredExp": "EXP to Level Up",
+      "cumulativeExp": "Cumulative EXP"
+    },
     "studio": {
       "title": "Studio Practice",
       "level": "Practice Lv.",

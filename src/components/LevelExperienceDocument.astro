@@ -1,0 +1,47 @@
+---
+import Base from "../layouts/Base.astro";
+import AppShell from "./AppShell.astro";
+import { fetchStaticCatalog } from "../lib/static-catalog-source";
+import { resourceCollectionHref } from "../lib/resource-route";
+import { titleOf, type RouteDefinition } from "../config/routes";
+import { renderWorkspace } from "../server/render-workspace";
+import { collectionTable } from "../lit/ui/collection-view";
+import { t } from "../i18n/messages";
+import type { Locale } from "../i18n/locales";
+import type { ReleaseServer } from "../lib/release-server";
+
+interface Rank {
+  rank: number;
+  exp: number;
+}
+interface Props {
+  locale: Locale;
+  server: ReleaseServer;
+  entry: RouteDefinition;
+}
+const { locale, server, entry } = Astro.props;
+const title = titleOf(entry, locale);
+const progression = await fetchStaticCatalog("progression", server) as {
+  playerRanks: Rank[];
+  friendshipRanks: Rank[];
+};
+const player = entry.key === "player-ranks";
+const ranks = player ? progression.playerRanks : progression.friendshipRanks;
+const number = new Intl.NumberFormat(locale);
+const rows = ranks.map((row, index) => [
+  number.format(row.rank),
+  number.format(row.exp - (ranks[index - 1]?.exp ?? 0)),
+  number.format(row.exp),
+]);
+const table = renderWorkspace({ render: () => collectionTable(
+  t(locale, `catalog.progression.${player ? "playerRank" : "friendshipRank"}`),
+  [t(locale, "catalog.progression.level"), t(locale, "catalog.progression.requiredExp"), t(locale, "catalog.progression.cumulativeExp")],
+  rows,
+  { numeric: true },
+) }, locale, entry.route);
+---
+<Base locale={locale} route={entry.route} title={title} titleKey={entry.titleKey} canonicalRoute={resourceCollectionHref(entry.route, server, locale)}>
+  <AppShell locale={locale} route={entry.route} title={title} titleKey={entry.titleKey} server={server}>
+    <div class="page" set:html={table}></div>
+  </AppShell>
+</Base>

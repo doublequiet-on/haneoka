@@ -986,6 +986,13 @@
       "noBenefits": "本等級無特典",
       "noRewards": "本等級無獎勵"
     },
+    "progression": {
+      "playerRank": "帳號等級",
+      "friendshipRank": "角色羈絆等級",
+      "level": "等級",
+      "requiredExp": "升級所需經驗",
+      "cumulativeExp": "累計經驗"
+    },
     "studio": {
       "title": "錄音室練習",
       "level": "練習Lv",
