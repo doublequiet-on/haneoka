@@ -64,7 +64,7 @@ import type { RenderNoteKind } from "@haneoka/cassiopeia-plugin-our-notes";
 import { loadingState } from "./ui/state";
 import { modal } from "./ui/modal";
 
-import { assertAuthoredSpanOverlap, assertEditedChartSpans, authoredSpanOverlaps, authoredSpanViewport, authoredWidthBounds, constrainLaneValue, viewportXToAuthoredLane, authoredLaneToViewportX } from "../../packages/chart-editor/src/creation/span";
+import { assertEditedChartSpans, authoredSpanInBounds, authoredSpanViewport, authoredWidthBounds, constrainLaneValue, viewportXToAuthoredLane, authoredLaneToViewportX } from "../../packages/chart-editor/src/creation/span";
 import { createAuthoredNote, resizeChartSelection } from "../../packages/chart-editor/src/creation/authoring";
 import {
   brushChartSelection,
@@ -1462,9 +1462,9 @@ export class ChartCreationWorkspace extends LitElement {
         const item = this.selectionNodes(g.base).find(item => item.note.id === (g.resizeId ?? g.primary));
         if (!item) return;
         const anchor = g.kind === "resize-left" ? "right" : "left";
-        const bounds = authoredWidthBounds(item.lane, item.size, g.base.laneBasis, anchor);
+        const bounds = authoredWidthBounds(item.lane, item.size, g.base.laneBasis, anchor, item.placement);
         if (!bounds) throw new RangeError("authored_span_outside_stage");
-        const width = authoredSpanOverlaps(item.lane, item.size, g.base.laneBasis)
+        const width = authoredSpanInBounds(item.lane, item.size, g.base.laneBasis, item.placement)
           ? constrainLaneValue(size, bounds, { step: 0.25 }) : size;
         g.candidate = resizeChartSelection(g.base, new Set([g.resizeId ?? g.primary]), width, {
           anchor, placement: "overlap", resolveAutoLane: true,
@@ -1540,8 +1540,9 @@ export class ChartCreationWorkspace extends LitElement {
     if (readAuthorCollections(chart).layers.some(layer => layer.id === this.collectionScope.layerId && !layer.visible)) {
       this.error = this.t("creation.invalid_edit"); return;
     }
-    try { assertAuthoredSpanOverlap(lane, this.defaultWidth, chart.laneBasis); }
-    catch { this.error = this.t("creation.invalid_edit"); return; }
+    if (!authoredSpanInBounds(lane, this.defaultWidth, chart.laneBasis)) {
+      this.error = this.t("creation.invalid_edit"); return;
+    }
     const base = (at: number, position: number, size = this.defaultWidth): SingleNote =>
       createAuthoredNote(chart, {
         tick: at,
@@ -1550,7 +1551,7 @@ export class ChartCreationWorkspace extends LitElement {
         type: this.tool === "flick" ? "flick" : this.tool === "trace" ? "trace" : "tap",
         direction: this.tool === "flick" ? this.direction : "none",
         critical: this.critical,
-        placement: "overlap",
+        placement: "stage",
       });
     if (this.tool === "hold" || this.tool === "guide") {
       if (!this.pending) {
@@ -1752,7 +1753,7 @@ export class ChartCreationWorkspace extends LitElement {
       const cursorLane = action?.kind === "resize-right" && edited ? lane + edited.size : lane;
       const at = y(tick);
       if (!action && !this.pan && ["tap", "flick", "trace", "hold", "guide"].includes(this.tool)) {
-        const valid = authoredSpanOverlaps(lane, this.defaultWidth, chart.laneBasis);
+        const valid = authoredSpanInBounds(lane, this.defaultWidth, chart.laneBasis);
         ctx.save();
         if (valid && skin) {
           ctx.globalAlpha = 0.65;
@@ -1827,6 +1828,7 @@ export class ChartCreationWorkspace extends LitElement {
     } catch (error) {
       this.error = this.t(error instanceof AuthorNativeSpeedError ? "creation.profile_conflict" : "creation.invalid_edit");
       this.paint();
+      this.requestUpdate();
       return false;
     }
   }
@@ -1967,6 +1969,7 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.busy || this.gesture || this.pan) return;
     if (!Number.isFinite(value) || value < 0) {
       this.error = this.t("creation.invalid_edit");
+      this.requestUpdate();
       return;
     }
     this.defaultWidth = value;
@@ -1980,7 +1983,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.widthCancelled = false;
     const item = this.selectionNodes().find(node => node.note.id === this.selected);
     if (!item) { this.setDefaultWidth(Math.max(0, this.defaultWidth + delta)); return; }
-    const bounds = authoredWidthBounds(item.lane, item.size, this.chart.laneBasis);
+    const bounds = authoredWidthBounds(item.lane, item.size, this.chart.laneBasis, "left", item.placement);
     if (!bounds) { this.error = this.t("creation.invalid_edit"); return; }
     try { this.commitWidth(constrainLaneValue(Math.max(0, item.size + delta), bounds, { step: 0.25 })); }
     catch { this.error = this.t("creation.invalid_edit"); }
@@ -2018,7 +2021,16 @@ export class ChartCreationWorkspace extends LitElement {
   }
   private widthControl(value: number, selected = false) {
     const label = selected ? this.t("width") : this.t("creation.default_width");
-    const maximum = Math.max(this.chart.laneBasis, value, selected ? 0 : this.widthRangeMax);
+    const item = selected ? this.selectionNodes().find(entry => entry.note.id === this.selected) : undefined;
+    const bounds = item ? authoredWidthBounds(item.lane, item.size, this.chart.laneBasis, "left", item.placement) : undefined;
+    const limit = selected ? bounds?.max ?? this.chart.laneBasis : Infinity;
+    const maximum = Math.max(value, Number.isFinite(limit) ? limit : this.chart.laneBasis, selected ? 0 : this.widthRangeMax);
+    const apply = (raw: string) => {
+      this.widthCancelled = false;
+      const size = raw.trim() ? Number(raw) : NaN;
+      if (selected) this.commitWidth(size);
+      else this.setDefaultWidth(size);
+    };
     return html`
       <div class="chart-studio__width" data-width-kind=${selected ? "selection" : "default"}>
         <label>
@@ -2061,15 +2073,14 @@ export class ChartCreationWorkspace extends LitElement {
           aria-label=${label}
           type="number"
           min="0"
+          max=${Number.isFinite(limit) ? limit : nothing}
           step="any"
           .value=${live(String(value))}
           ?disabled=${this.busy || !!this.gesture || !!this.pan || !this.audio}
-          @change=${(event: Event) => {
-          const raw = (event.target as HTMLInputElement).value;
-          const size = raw.trim() ? Number(raw) : NaN;
-          this.widthCancelled = false;
-          if (selected) this.commitWidth(size);
-          else this.setDefaultWidth(size);
+          @change=${(event: Event) => apply((event.target as HTMLInputElement).value)}
+          @focusout=${(event: FocusEvent) => {
+          const input = event.composedPath().find(node => node instanceof HTMLInputElement);
+          if (input) apply(input.value);
         }}
         ></md-outlined-text-field>
       </div>

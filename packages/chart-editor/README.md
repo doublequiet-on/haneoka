@@ -26,6 +26,12 @@ if (validateProject(project).valid) {
 The host provides the user interface, files, storage, and audio decoding.
 Conversion warnings must be shown to the user.
 
+Authoring keeps single notes and line endpoints entirely within the stage.
+Interior line points may extend outside it while retaining positive overlap;
+zero-width markers stay within the closed stage boundaries. Group movement
+preserves relative spacing. Imported geometry is retained until its span or
+endpoint role changes.
+
 ```sh
 pnpm --filter @haneoka/chart-editor typecheck
 pnpm --filter @haneoka/chart-editor build

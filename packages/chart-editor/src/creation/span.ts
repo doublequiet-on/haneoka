@@ -31,9 +31,22 @@ export function authoredSpanOverlaps(lane: number, size: number, basis: number):
 export function assertAuthoredSpanOverlap(lane: number, size: number, basis: number) {
   if (!authoredSpanOverlaps(lane, size, basis)) throw new RangeError("authored_span_outside_stage");
 }
-export function authoredLaneBounds(size: number, basis: number): LaneBounds {
+export function authoredLaneBounds(
+  size: number,
+  basis: number,
+  placement: "stage" | "overlap" = "overlap",
+): LaneBounds {
   geometry(0, size, basis);
+  if (placement === "stage") return { min: 0, max: basis - size, minInclusive: true, maxInclusive: true };
   return { min: -size, max: basis, minInclusive: size === 0, maxInclusive: size === 0 };
+}
+export function authoredSpanInBounds(
+  lane: number,
+  size: number,
+  basis: number,
+  placement: "stage" | "overlap" = "stage",
+): boolean {
+  return laneValueInBounds(lane, authoredLaneBounds(size, basis, placement));
 }
 export function laneValueInBounds(value: number, bounds: LaneBounds) {
   return (
@@ -75,15 +88,21 @@ export function constrainLaneValue(value: number, bounds: LaneBounds, grid?: Lan
 export function constrainAuthoredLane(lane: number, size: number, basis: number, grid?: LaneGrid) {
   return constrainLaneValue(lane, authoredLaneBounds(size, basis), grid);
 }
-/** Width bounds for the fixed left/right/center anchor; there is no empirical corpus width ceiling. */
+/** Keep the chosen edge or center fixed while enforcing the node's stage rule. */
 export function authoredWidthBounds(
   lane: number,
   size: number,
   basis: number,
   anchor: "left" | "center" | "right" = "left",
+  placement: "stage" | "overlap" = "overlap",
 ): LaneBounds | undefined {
   geometry(lane, size, basis);
   const fixed = anchor === "right" ? lane + size : anchor === "center" ? lane + size / 2 : lane;
+  if (placement === "stage") {
+    if (fixed < 0 || fixed > basis) return;
+    const maximum = anchor === "left" ? basis - fixed : anchor === "right" ? fixed : 2 * Math.min(fixed, basis - fixed);
+    return { min: 0, max: maximum, minInclusive: true, maxInclusive: true };
+  }
   if ((anchor === "left" && fixed > basis) || (anchor === "right" && fixed < 0)) return;
   if ((anchor === "left" && fixed === basis) || (anchor === "right" && fixed === 0))
     return { min: 0, max: 0, minInclusive: true, maxInclusive: true };
@@ -95,37 +114,50 @@ export function authoredWidthBounds(
         : Math.max(0, -2 * fixed, 2 * (fixed - basis));
   return { min: minimum, max: Infinity, minInclusive: fixed >= 0 && fixed <= basis, maxInclusive: false };
 }
-function nodes(project: Project): { note: SingleNote | LinePoint; lane: number; size: number; kind?: string }[] {
+/** Only interior connector points may extend beyond the stage. */
+export function authoredSpanNodes(project: Project): {
+  note: SingleNote | LinePoint;
+  lane: number;
+  size: number;
+  kind?: string;
+  placement: "stage" | "overlap";
+}[] {
   return [
-    ...project.singles.map((note) => ({ note, lane: note.lane, size: note.size })),
+    ...project.singles.map((note) => ({ note, lane: note.lane, size: note.size, placement: "stage" as const })),
     ...project.lines.flatMap((line) =>
-      line.points.map((note, index) => ({ note, ...resolveLinePointShape(line.points, index), kind: line.kind })),
+      line.points.map((note, index) => ({
+        note,
+        ...resolveLinePointShape(line.points, index),
+        kind: line.kind,
+        placement: index > 0 && index < line.points.length - 1 ? ("overlap" as const) : ("stage" as const),
+      })),
     ),
   ];
 }
-/** Preserve original GuideEnd/Hidden geometry on import; enforce overlap on newly authored or changed spans. */
+/** Preserve imported geometry; check changed spans and controls that become endpoints. */
 export function assertEditedChartSpans(before: Project, after: Project) {
-  const previous = new Map(nodes(before).map((entry) => [entry.note.id, entry]));
-  for (const entry of nodes(after)) {
+  const previous = new Map(authoredSpanNodes(before).map((entry) => [entry.note.id, entry]));
+  for (const entry of authoredSpanNodes(after)) {
     const old = previous.get(entry.note.id);
-    if (
+    const changed =
       !old ||
       old.lane !== entry.lane ||
       old.size !== entry.size ||
       old.note.type !== entry.note.type ||
       old.note.visible !== entry.note.visible ||
       old.kind !== entry.kind ||
-      before.laneBasis !== after.laneBasis
-    )
-      assertAuthoredSpanOverlap(entry.lane, entry.size, after.laneBasis);
+      old.placement !== entry.placement ||
+      before.laneBasis !== after.laneBasis;
+    if (changed && !authoredSpanInBounds(entry.lane, entry.size, after.laneBasis, entry.placement))
+      throw new RangeError("authored_span_outside_stage");
   }
 }
 /** Intersect common translation bounds so group geometry keeps its relative offsets. */
 export function selectionLaneDeltaBounds(project: Project, ids: ReadonlySet<string>): LaneBounds | undefined {
   let result: LaneBounds | undefined;
-  for (const entry of nodes(project)) {
+  for (const entry of authoredSpanNodes(project)) {
     if (!ids.has(entry.note.id) || typeof entry.note.lane !== "number") continue;
-    const bound = authoredLaneBounds(entry.size, project.laneBasis);
+    const bound = authoredLaneBounds(entry.size, project.laneBasis, entry.placement);
     bound.min -= entry.lane;
     bound.max -= entry.lane;
     if (!result) {
@@ -149,7 +181,7 @@ export function authoredSpanViewport(project: Project, padding = 0) {
   geometry(0, 0, project.laneBasis);
   let min = 0,
     max = project.laneBasis;
-  for (const entry of nodes(project)) {
+  for (const entry of authoredSpanNodes(project)) {
     geometry(entry.lane, entry.size, project.laneBasis);
     min = Math.min(min, entry.lane);
     max = Math.max(max, entry.lane + entry.size);

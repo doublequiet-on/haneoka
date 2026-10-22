@@ -1,5 +1,4 @@
 import {
-  resolveLinePointShape,
   structuredCloneValue,
   type Project,
   type SingleNote,
@@ -9,19 +8,15 @@ import {
 import { copyChartSelection, deleteChartSelection, pasteChartSelection, type ChartSelection } from "./editing";
 import {
   assertEditedChartSpans,
-  authoredSpanOverlaps,
+  authoredSpanInBounds,
+  authoredSpanNodes,
   constrainLaneValue,
   selectionLaneDeltaBounds,
   type LaneGrid,
 } from "./span";
 
-export function chartSelectionNodes(project: Project): { note: SingleNote | LinePoint; lane: number; size: number }[] {
-  return [
-    ...project.singles.map((note) => ({ note, lane: note.lane, size: note.size })),
-    ...project.lines.flatMap((line) =>
-      line.points.map((note, index) => ({ note, ...resolveLinePointShape(line.points, index) })),
-    ),
-  ];
+export function chartSelectionNodes(project: Project) {
+  return authoredSpanNodes(project);
 }
 export function chartSelectionInBox(
   project: Project,
@@ -77,10 +72,10 @@ export function moveChartSelection(
     : 0;
   if (options.placement === "overlap" && laneDelta && concrete.length) {
     const bounds = selectionLaneDeltaBounds(project, ids)!;
-    // Imported off-stage controls may move into overlap, but must never jump against the requested drag direction.
-    if (concrete.some(({ lane, size }) => !authoredSpanOverlaps(lane, size, project.laneBasis))) {
-      concrete.forEach(({ lane, size }) => {
-        if (!authoredSpanOverlaps(lane + laneDelta, size, project.laneBasis))
+    // Imported out-of-bounds spans may move inside without reversing the requested drag direction.
+    if (concrete.some(({ lane, size, placement }) => !authoredSpanInBounds(lane, size, project.laneBasis, placement))) {
+      concrete.forEach(({ lane, size, placement }) => {
+        if (!authoredSpanInBounds(lane + laneDelta, size, project.laneBasis, placement))
           throw new RangeError("authored_span_outside_stage");
       });
       deltaLane = laneDelta;
