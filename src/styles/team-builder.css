@@ -2025,3 +2025,338 @@
     }
   }
 }
+@layer pages {
+  .team-builder .tb-results {
+    gap: var(--md-sys-spacing-3);
+  }
+  .team-builder .tb-results__summary {
+    display: flex;
+    align-items: center;
+    gap: var(--md-sys-spacing-2);
+  }
+  .team-builder .tb-results__selector {
+    flex: 0 1 14rem;
+    width: auto;
+    min-width: min(100%, 8rem);
+  }
+  .team-builder .tb-results__conditions {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .team-builder .tb-results__conditions > * {
+    display: inline;
+    padding: 0;
+    background: transparent;
+  }
+  .team-builder .tb-results__conditions > * + *::before {
+    content: " · ";
+  }
+  .team-builder .tb-calculation-detail {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+  }
+  .team-builder .tb-calculation-detail > summary {
+    cursor: pointer;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+  }
+  .team-builder .tb-calculation-detail > summary::before {
+    content: "+";
+    margin-inline-end: var(--md-sys-spacing-2);
+  }
+  .team-builder .tb-calculation-detail[open] > summary::before {
+    content: "−";
+  }
+  .team-builder .tb-hit {
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+  .team-builder .tb-hit.is-best {
+    border-color: var(--md-sys-color-outline-variant);
+    background: var(--md-sys-color-surface);
+  }
+  .team-builder .tb-hit__rank,
+  .team-builder .tb-hit.is-best .tb-hit__rank {
+    width: auto;
+    height: auto;
+    flex: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    font: inherit;
+  }
+  .team-builder .tb-hit__header {
+    display: block;
+  }
+  .team-builder .tb-hit__label {
+    display: flex;
+    align-items: baseline;
+  }
+  .team-builder .tb-hit__rank {
+    display: inline;
+  }
+  .team-builder .tb-hit__value {
+    font-size: 2rem;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: normal;
+  }
+  .team-builder .tb-hit__chips {
+    column-gap: var(--md-sys-spacing-4);
+    row-gap: var(--md-sys-spacing-2);
+  }
+  .team-builder .tb-hit__chips .tb-chip {
+    min-height: 0;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    flex-wrap: wrap;
+  }
+  .team-builder .tb-hit__chips .material-icon {
+    display: none;
+  }
+  .team-builder :is(.tb-plan, #sc-results) {
+    border-radius: var(--md-sys-shape-corner-medium);
+    background: transparent;
+  }
+  .team-builder :is(.tb-plan, #sc-results) :is(.tb-chip, .chip--static) {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    min-height: 0;
+    padding: 0;
+  }
+  .team-builder #sc-results > .cluster {
+    gap: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
+  }
+  .team-builder #sc-results > .detail-section-title {
+    font-size: 1.125rem;
+    line-height: 1.625rem;
+  }
+  .team-builder #sc-results > .detail-section-title .detail-section-title__icon {
+    display: none;
+  }
+  .team-builder .tb-number {
+    white-space: nowrap;
+    display: inline-block;
+  }
+  .team-builder .tb-hit__chips strong {
+    white-space: normal;
+  }
+  .team-builder .tb-hit__actions {
+    padding: 0;
+    justify-content: start;
+    gap: var(--md-sys-spacing-1);
+  }
+  .team-builder .tb-hit__actions .button {
+    white-space: normal;
+  }
+  .team-builder .tb-result-song a {
+    display: block;
+    overflow: visible;
+  }
+  .team-builder .tb-hit .tb-formation {
+    padding: 0;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .team-builder .tb-hit .tb-slot {
+    padding: 0;
+    background: transparent;
+    grid-template-rows: auto auto 1fr;
+  }
+  .team-builder .tb-hit .tb-slot.is-leader {
+    outline: none;
+  }
+  .team-builder .tb-hit .tb-slot__member {
+    position: relative;
+  }
+  .team-builder .tb-hit .tb-slot.is-leader .tb-slot__member {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: -2px;
+  }
+  .team-builder .tb-slot__leader {
+    position: absolute;
+    inset-inline: 0;
+    top: 44%;
+    z-index: 2;
+    justify-self: center;
+    width: max-content;
+    max-width: 100%;
+    padding: 0 var(--md-sys-spacing-1);
+    color: var(--md-sys-color-on-primary-container);
+    background: var(--md-sys-color-primary-container);
+    font-size: var(--md-sys-typescale-label-small-size);
+    line-height: var(--md-sys-typescale-label-small-line-height);
+  }
+  .team-builder .tb-hit .tb-slot__snap {
+    aspect-ratio: 326 / 184;
+    align-self: start;
+    min-height: 48px;
+  }
+  .team-builder .tb-hit .tb-slot__flag {
+    align-self: end;
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .team-builder .tb-comparison {
+    width: min(1120px, calc(100vw - 48px));
+    max-height: calc(100dvh - 48px);
+    overflow: hidden;
+  }
+  .team-builder .tb-comparison:modal {
+    display: flex;
+    flex-direction: column;
+    gap: var(--md-sys-spacing-3);
+  }
+  .team-builder .tb-comparison > header {
+    flex-shrink: 0;
+    min-height: 48px;
+  }
+  .team-builder .tb-comparison-body {
+    overflow: auto;
+    min-height: 0;
+    container-type: inline-size;
+    padding-block-start: 0.75rem;
+  }
+  .team-builder .tb-comparison-picker {
+    display: none;
+  }
+  .team-builder .tb-comparison-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .team-builder .tb-comparison-table th,
+  .team-builder .tb-comparison-table td {
+    vertical-align: top;
+    padding: var(--md-sys-spacing-3);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    overflow-wrap: anywhere;
+  }
+  .team-builder .tb-comparison-table th {
+    text-align: start;
+    font-weight: 500;
+  }
+  .team-builder .tb-comparison-table th:first-child {
+    width: 9rem;
+  }
+  .team-builder .tb-comparison-table td {
+    text-align: end;
+  }
+  .team-builder .tb-comparison-table :is(td, th) > :is(span, small, strong) {
+    display: block;
+  }
+  .team-builder .tb-comparison-table small {
+    margin-top: var(--md-sys-spacing-1);
+    font-size: 0.8125rem;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .team-builder .tb-comparison-table .tb-hit__value {
+    font-size: 1.75rem;
+  }
+  .team-builder .tb-comparison-title {
+    font-weight: 600;
+  }
+  .team-builder .tb-comparison-table button {
+    padding-inline: 0;
+    white-space: normal;
+  }
+  .team-builder .tb-comparison-table button[aria-pressed="true"] {
+    color: var(--md-sys-color-primary);
+    font-weight: 700;
+  }
+  .team-builder .tb-difference {
+    font-weight: 600;
+    color: var(--md-sys-color-primary);
+  }
+  .team-builder .tb-equal {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  @media (max-width: 700px) {
+    .team-builder .tb-comparison {
+      width: calc(100vw - 24px);
+      max-height: calc(100dvh - 24px);
+      padding: var(--md-sys-spacing-4);
+    }
+    .team-builder .tb-comparison-picker {
+      display: block;
+      margin-block-end: var(--md-sys-spacing-3);
+    }
+    .team-builder .tb-comparison-picker md-outlined-select {
+      width: 100%;
+    }
+    .team-builder .tb-comparison-table,
+    .team-builder .tb-comparison-table :is(thead, tbody) {
+      display: block;
+    }
+    .team-builder .tb-comparison-table tr {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .team-builder .tb-comparison-table th:first-child {
+      width: auto;
+      grid-column: 1 / -1;
+      padding-bottom: 0;
+      border: 0;
+    }
+    .team-builder .tb-comparison-table :is(th, td) {
+      padding: var(--md-sys-spacing-2) var(--md-sys-spacing-1);
+    }
+    .team-builder .tb-comparison-table .is-baseline {
+      order: 1;
+    }
+    .team-builder .tb-comparison-table .is-candidate {
+      order: 2;
+    }
+    .team-builder .tb-comparison-table .is-hidden-mobile {
+      display: none;
+    }
+    .team-builder .tb-comparison-table .tb-hit__value {
+      font-size: 1.375rem;
+    }
+    .team-builder .tb-comparison-table--wide tr {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .team-builder .tb-comparison-table--wide td::before {
+      content: attr(data-comparison-side);
+      display: block;
+      font-size: 0.8125rem;
+      color: var(--md-sys-color-on-surface-variant);
+    }
+    @container (max-width: 18rem) {
+      .team-builder .tb-comparison-table tr {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .team-builder .tb-comparison-table td::before {
+        content: attr(data-comparison-side);
+        display: block;
+        font-size: 0.8125rem;
+        color: var(--md-sys-color-on-surface-variant);
+      }
+    }
+  }
+  @media (max-width: 599px) {
+    .team-builder .tb-results__summary {
+      gap: var(--md-sys-spacing-2);
+    }
+    .team-builder .tb-results__selector {
+      flex: 1 1 8rem;
+    }
+    .team-builder .tb-hit__value {
+      font-size: 1.75rem;
+    }
+    .team-builder .tb-result-song__image {
+      width: 48px;
+      height: 48px;
+      flex-basis: 48px;
+    }
+    .team-builder .tb-hit .tb-formation {
+      gap: 6px;
+    }
+  }
+}

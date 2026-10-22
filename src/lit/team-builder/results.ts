@@ -183,7 +183,7 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
   const out: TemplateResult[] = [];
   let rankLabel: string | undefined;
   const labels = new Map<TemplateResult, string>();
-  const chip = (label: string, value: string, leading?: TemplateResult) => {
+  const chip = (label: string, value: string | TemplateResult, leading?: TemplateResult) => {
     const result = html`
       <span class="tb-chip">
         ${leading ?? nothing}
@@ -198,7 +198,16 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
   if (hit.score) {
     if ((s.goal !== "score" && s.goal !== "gekiso") || scoreGoal(s) !== "mean")
       out.push(chip(host.t("expectedScore", "Average score"), format(host, hit.score.mean)));
-    out.push(chip(host.t("scoreRange", "Range"), `${format(host, hit.score.min)} – ${format(host, hit.score.max)}`));
+    out.push(
+      chip(
+        host.t("scoreRange", "Range"),
+        html`
+          <span class="tb-number">${format(host, hit.score.min)}</span>
+          –
+          <span class="tb-number">${format(host, hit.score.max)}</span>
+        `,
+      ),
+    );
     const ranks = Object.entries(hit.score.ranks).sort((a, b) => Number(b[0]) - Number(a[0]));
     const top = ranks[0];
     if (top) {
@@ -311,7 +320,13 @@ export function formation(host: TeamBuilder, hit: EngineHit): TemplateResult {
                 host.requestUpdate();
               }}
             >
-              ${memberOptions ? tileMedia(memberOptions) : nothing}
+              ${memberOptions ? tileMedia(memberOptions) : nothing}${
+                index === 0
+                  ? html`
+                      <span class="tb-slot__leader">${host.t("leader", "Leader")}</span>
+                    `
+                  : nothing
+              }
             </button>
             <button
               class="tb-slot__snap"
@@ -329,7 +344,7 @@ export function formation(host: TeamBuilder, hit: EngineHit): TemplateResult {
                 snapOptions
                   ? tileMedia(snapOptions)
                   : html`
-                      <span class="tb-slot__empty">${icon("hide_image", 20)}</span>
+                      <span class="tb-slot__empty"><small>${host.t("noSnap", "No snap")}</small></span>
                     `
               }
             </button>
@@ -946,9 +961,9 @@ export function renderHit(
     >
       ${hit.song ? resultSong(host, hit.song, resultSettings(host, hit).goal === "gekiso" || (resultSettings(host, hit).goal === "event" && resultSettings(host, hit).ptMode === "gekiso")) : nothing}
       <header class="tb-hit__header">
-        <span class="tb-hit__rank">${options.rank ?? index + 1}</span>
         <div class="tb-hit__main">
           <span class="tb-hit__label">
+            <span class="tb-hit__rank">#${options.rank ?? index + 1}</span>
             ${main.label}${
               options.subtitle
                 ? html`
@@ -957,13 +972,6 @@ export function renderHit(
                 : nothing
             }
           </span>
-          ${
-            options.subtitle
-              ? html`
-                  <span class="tb-hit__label">${options.subtitle}</span>
-                `
-              : nothing
-          }
           <strong class="tb-hit__value tabular">${main.value}</strong>
         </div>
       </header>
@@ -1047,6 +1055,15 @@ export function renderHit(
           expanded
             ? html`
                 <div class="tb-hit__detail stack">
+                  ${
+                    host.results && !usesPtResults(host)
+                      ? html`
+                          <span class="tb-results__meta">
+                            ${host.results.results.some((result) => result.stats.exact > 0) ? host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, host.results.elapsedMs), exact: host.results.results.reduce((total, result) => total + result.stats.exact, 0) }) : host.t("resultElapsed", "{ms} ms", { ms: format(host, host.results.elapsedMs) })}
+                          </span>
+                        `
+                      : nothing
+                  }
                   <div class="cluster">${chips(host, hit)}</div>
                   <div class="cluster">
                     ${conditionLines(host, hit).map(
@@ -1123,18 +1140,33 @@ export function renderResults(host: TeamBuilder): TemplateResult {
     ["event", "plan"].includes(host.resultSettings?.goal ?? "score") !== (host.tab === "pt") ||
     (host.tab === "pt" && (host.resultSettings?.goal === "plan") !== (host.settings.rewardMode === "plan"))
   ) {
+    const issue = host.inputIssues()[0];
+    const emptyBox = issue?.field === "tb-cards" && host.searchSettings.scope === "box" && !host.view?.members.size;
+    const missingCards = issue?.field === "tb-cards";
+    const missingSong = issue?.field === "tb-songs" || issue?.field === "tb-challenge-songs";
     return html`
       <section class="surface tb-results tb-results--empty">
         <div class="state">
           <span class="state__icon">${icon("groups", 40)}</span>
           <p class="state__title">
-            ${host.inputIssues()[0]?.message ?? host.t("readyToCalculate", "Ready to calculate")}
+            ${emptyBox ? host.t("emptyBoxTitle", "No cards imported yet") : missingCards ? host.t("emptyRangeTitle", "No cards in this range") : (issue?.message ?? host.t("readyToCalculate", "Ready to calculate"))}
           </p>
           ${
             host.inputIssues()[0]
               ? html`
-                  <button class="button button--tonal" @click=${() => host.focusInput(host.inputIssues()[0]!.field)}>
-                    ${host.t("adjustConditions", "Adjust conditions")}
+                  <button
+                    class="button button--tonal"
+                    @click=${async () => {
+                      if (emptyBox) {
+                        host.imports.openBox();
+                        return;
+                      }
+                      await host.focusInput(issue!.field);
+                      if (missingSong)
+                        host.querySelector<HTMLButtonElement>(`#${issue!.field} .tb-songs__add`)?.click();
+                    }}
+                  >
+                    ${emptyBox ? host.t("importMyCards", "Import my cards") : missingCards ? host.t("adjustCardRange", "Adjust card range") : missingSong ? host.t("addSongs", "Choose songs") : host.t("adjustConditions", "Adjust conditions")}
                   </button>
                 `
               : nothing
@@ -1174,15 +1206,33 @@ export function renderResults(host: TeamBuilder): TemplateResult {
           }
         </span>
         ${
-          host.stale
+          multi
             ? html`
-                <span class="tb-chip" role="status">${host.t("stale", "Conditions changed")}</span>
+                <md-outlined-select
+                  class="tb-results__selector"
+                  label=${host.t("songs", "Songs")}
+                  .value=${tab}
+                  @change=${(event: Event) => {
+                    host.resultTab = (event.target as HTMLInputElement).value;
+                    host.requestUpdate();
+                  }}
+                >
+                  <md-select-option value="overall">
+                    <div slot="headline">${host.t("overall", "Overall")}</div>
+                  </md-select-option>
+                  ${results.results.map(
+                    (result) => html`
+                      <md-select-option value=${`${result.song!.songId}:${result.song!.difficulty}`}>
+                        <div slot="headline">
+                          ${catalog.songTitle(result.song!.songId)}
+                          ${catalog.difficultyLabel(result.song!.songId, result.song!.difficulty)}
+                        </div>
+                      </md-select-option>
+                    `,
+                  )}
+                </md-outlined-select>
               `
-            : html`
-                <span class="tb-results__meta tabular">
-                  ${stats > 0 ? host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, results.elapsedMs), exact: stats }) : host.t("resultElapsed", "{ms} ms", { ms: format(host, results.elapsedMs) })}
-                </span>
-              `
+            : nothing
         }
       </div>
       ${
@@ -1232,35 +1282,14 @@ export function renderResults(host: TeamBuilder): TemplateResult {
             `
           : nothing
       }
-      ${
-        multi
-          ? html`
-              <md-outlined-select
-                label=${host.t("songs", "Songs")}
-                .value=${tab}
-                @change=${(event: Event) => {
-                  host.resultTab = (event.target as HTMLInputElement).value;
-                  host.requestUpdate();
-                }}
-              >
-                <md-select-option value="overall">
-                  <div slot="headline">${host.t("overall", "Overall")}</div>
-                </md-select-option>
-                ${results.results.map(
-                  (result) => html`
-                    <md-select-option value=${`${result.song!.songId}:${result.song!.difficulty}`}>
-                      <div slot="headline">
-                        ${catalog.songTitle(result.song!.songId)}
-                        ${catalog.difficultyLabel(result.song!.songId, result.song!.difficulty)}
-                      </div>
-                    </md-select-option>
-                  `,
-                )}
-              </md-outlined-select>
-            `
-          : nothing
-      }
-      <div class="cluster tb-results__conditions">
+      <div class="tb-results__conditions">
+        ${
+          host.stale
+            ? html`
+                <strong role="status">${host.t("stale", "Conditions changed")}</strong>
+              `
+            : nothing
+        }
         <span class="tb-chip">
           ${resultSettings(host).scope === "theoretical" ? host.t("scopeAll", "All cards, full growth") : host.t("scopeBox", "My cards")}
         </span>
@@ -1278,6 +1307,29 @@ export function renderResults(host: TeamBuilder): TemplateResult {
             : nothing
         }
       </div>
+      ${
+        host.stale
+          ? html`
+              <details class="tb-calculation-detail">
+                <summary>${host.t("originalConditions", "Original result conditions")}</summary>
+                <div class="stack">
+                  <span>
+                    ${stats > 0 ? host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, results.elapsedMs), exact: stats }) : host.t("resultElapsed", "{ms} ms", { ms: format(host, results.elapsedMs) })}
+                  </span>
+                  ${
+                    shown[0]
+                      ? conditionLines(host, shown[0]).map(
+                          (line) => html`
+                            <span>${line}</span>
+                          `,
+                        )
+                      : nothing
+                  }
+                </div>
+              </details>
+            `
+          : nothing
+      }
       ${
         shown.length
           ? repeat(shown, hitKey, (hit, index) =>

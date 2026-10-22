@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Accepted result sessions with explicit task, scoring and growth sources.
-// Output: At most three retained candidates, compatible deltas and formation differences.
+// Output: Three retained candidates with shared metric rows and a mobile baseline/candidate view.
 // Pos: [Map](../L2-2.md); page-local comparison, never persisted in Box or PtJob.
 // Effects/Dependencies: Native dialog; no engine requests or changes to ranking.
 import { html, nothing } from "lit";
@@ -113,6 +113,7 @@ export class ResultComparison {
   session = "";
   items: ComparisonEntry[] = [];
   baseline = "";
+  candidate = "";
   open = false;
   sync(host: TeamBuilder) {
     const pt = usesPtResults(host),
@@ -205,10 +206,14 @@ export class ResultComparison {
           <div class="tb-compare-tray" aria-label=${host.t("comparison", "Comparison")}>
             <div class="cluster">
               ${this.items.map((item) =>
-                inputChip(this.title(host, item), host.common("common.actions.remove", "Remove"), () => {
-                  this.remove(item.id);
-                  host.requestUpdate();
-                }),
+                inputChip(
+                  `#${this.items.indexOf(item) + 1} · ${this.title(host, item)}`,
+                  host.common("common.actions.remove", "Remove"),
+                  () => {
+                    this.remove(item.id);
+                    host.requestUpdate();
+                  },
+                ),
               )}
             </div>
             <button
@@ -229,12 +234,35 @@ export class ResultComparison {
     this.sync(host);
     if (!this.open || this.items.length < 2) return nothing;
     const base = this.items.find((item) => item.id === this.baseline)!;
+    if (!this.items.some((item) => item.id === this.candidate && item.id !== base.id))
+      this.candidate = this.items.find((item) => item.id !== base.id)!.id;
     const format = (v: number, digits = 0) =>
-      new Intl.NumberFormat(host.locale, { maximumFractionDigits: digits }).format(v);
+      new Intl.NumberFormat(host.locale, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(v);
     const close = () => {
       this.open = false;
       host.requestUpdate();
     };
+    const signed = (v: number, digits = 0) => `${v > 0 ? "+" : ""}${format(v, digits)}`;
+    const wideValues = this.items.some((item) => format(item.metric.value, item.metric.digits).length > 12);
+    const side = (item: ComparisonEntry) =>
+      item.id === base.id ? "is-baseline" : item.id === this.candidate ? "is-candidate" : "is-hidden-mobile";
+    const identity = (item: ComparisonEntry) =>
+      `#${this.items.indexOf(item) + 1} · ${this.title(host, item)} · ${host.catalog!.cardName("members", cardIdOf(item.hit.members[0]!))}`;
+    const row = (label: string, value: (item: ComparisonEntry) => unknown, main = false) => html`
+      <tr class=${main ? "tb-comparison-primary" : ""}>
+        <th scope="row">${label}</th>
+        ${this.items.map(
+          (item) => html`
+            <td
+              class=${side(item)}
+              data-comparison-side=${host.t(item.id === base.id ? "comparisonBaseline" : "comparisonCandidate", item.id === base.id ? "Baseline" : "Candidate")}
+            >
+              ${value(item)}
+            </td>
+          `,
+        )}
+      </tr>
+    `;
     return html`
       <dialog
         class="dialog tb-comparison"
@@ -253,39 +281,126 @@ export class ResultComparison {
               `
             : nothing
         }
-        <div class="tb-comparison-grid">
-          ${this.items.map((item) => {
-            const delta = metricDelta(base, item),
-              diff = formationDifference(base, item);
-            return html`
-              <section class="surface stack">
-                <strong>${this.title(host, item)}</strong>
-                <span>
-                  ${item.settings.route === "challenge" ? host.t("routeChallenge", "Challenge live") : item.settings.route === "skip" ? host.t("routeSkip", "Skip") : host.t("routeLive", "Normal live")}
-                </span>
-                <button
-                  class="button button--tonal"
-                  aria-pressed=${item.id === base.id}
-                  @click=${() => {
-                    this.baseline = item.id;
-                    host.requestUpdate();
-                  }}
-                >
-                  ${host.t(item.id === base.id ? "comparisonBaseline" : "setBaseline", item.id === base.id ? "Baseline" : "Set as baseline")}
-                </button>
-                ${
-                  item.input.goal.kind === "gekiso"
-                    ? html`
-                        <span>
-                          ${host.t("gekisoPlacements", "Scoring placements")}:
-                          ${item.input.goal.opponents ? (item.placements?.join(" / ") ?? "—") : item.input.goal.rank}
-                        </span>
-                        <span>
-                          GREAT ${format(item.input.goal.accuracy.great * 100, 2)}% · JUST
-                          ${format(item.input.goal.accuracy.just * 100, 2)}%
-                        </span>
-                      `
-                    : item.input.goal.kind === "event" && item.input.goal.gekiso && item.settings.route !== "challenge"
+        <div class="tb-comparison-body">
+          <div class="tb-comparison-picker">
+            <md-outlined-select
+              label=${host.t("comparisonCandidate", "Candidate")}
+              .value=${this.candidate}
+              @change=${(event: Event) => {
+                this.candidate = (event.target as HTMLInputElement).value;
+                host.requestUpdate();
+              }}
+            >
+              ${this.items
+                .filter((item) => item.id !== base.id)
+                .map(
+                  (item) => html`
+                    <md-select-option value=${item.id}><div slot="headline">${identity(item)}</div></md-select-option>
+                  `,
+                )}
+            </md-outlined-select>
+          </div>
+          <table class=${`tb-comparison-table${wideValues ? " tb-comparison-table--wide" : ""}`}>
+            <thead>
+              <tr>
+                <th scope="col">${host.t("comparison", "Comparison")}</th>
+                ${this.items.map(
+                  (item) => html`
+                    <th scope="col" class=${side(item)}>
+                      <span class="tb-comparison-title">
+                        #${this.items.indexOf(item) + 1} · ${this.title(host, item)}
+                      </span>
+                      <button
+                        class="button button--text"
+                        aria-pressed=${item.id === base.id}
+                        @click=${() => {
+                          this.baseline = item.id;
+                          host.requestUpdate();
+                        }}
+                      >
+                        ${host.t(item.id === base.id ? "comparisonBaseline" : "setBaseline", item.id === base.id ? "Baseline" : "Set as baseline")}
+                      </button>
+                    </th>
+                  `,
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              ${row(
+                host.t("criterion", "Score goal"),
+                (item) => html`
+                  <span>${item.metric.label}</span>
+                  <small>
+                    ${host.t(item.proven ? "proven" : "recommendation", item.proven ? "Proven optimal" : "Recommendation")}
+                  </small>
+                `,
+              )}
+              ${row(
+                host.t("comparisonValue", "Value"),
+                (item) => html`
+                  <strong class="tb-hit__value">
+                    ${format(item.metric.value, item.metric.digits)}${item.metric.unit ? ` ${item.metric.unit}` : ""}
+                  </strong>
+                `,
+                true,
+              )}
+              ${row(host.t("difference", "Difference"), (item) => {
+                const delta = metricDelta(base, item);
+                return delta
+                  ? html`
+                      <span class=${delta.absolute ? "tb-difference" : "tb-equal"}>
+                        ${signed(delta.absolute, item.metric.digits)}
+                        ${item.metric.unit === "%" ? host.t("percentagePoints", "percentage points") : item.metric.unit}
+                      </span>
+                    `
+                  : "—";
+              })}
+              ${row(host.t("relativeDifference", "Relative change"), (item) => {
+                const delta = metricDelta(base, item);
+                return delta?.relative != null
+                  ? html`
+                      <span class=${delta.relative ? "tb-difference" : "tb-equal"}>${signed(delta.relative, 2)}%</span>
+                    `
+                  : "—";
+              })}
+              ${row(host.t("power", "Power"), (item) => format(item.hit.power))}
+              ${this.items.some((item) => item.hit.comboBonus != null) ? row(host.t("comboBonus", "Base COMBO BONUS"), (item) => (item.hit.comboBonus == null ? "—" : `×${format(item.hit.comboBonus, 2)}`)) : nothing}
+              ${(["members", "snaps", "bindings", "growth"] as const).map((key) =>
+                row(host.t(`diff${key}`, key), (item) => {
+                  const value = formationDifference(base, item)[key];
+                  return html`
+                    <span class=${value ? "tb-difference" : "tb-equal"}>${value}</span>
+                  `;
+                }),
+              )}
+              ${row(
+                host.t("leader", "Leader"),
+                (item) => html`
+                  <span class=${formationDifference(base, item).leader ? "tb-difference" : "tb-equal"}>
+                    ${formationDifference(base, item).leader ? host.t("changed", "Changed") : "—"}
+                  </span>
+                  <small>${host.catalog!.cardName("members", cardIdOf(item.hit.members[0]!))}</small>
+                `,
+              )}
+              ${row(
+                host.t("originalConditions", "Original result conditions"),
+                (item) => html`
+                  ${
+                    item.input.goal.kind === "gekiso"
+                      ? html`
+                          <span>
+                            ${host.t("gekisoPlacements", "Scoring placements")}:
+                            ${item.input.goal.opponents ? (item.placements?.join(" / ") ?? "—") : item.input.goal.rank}
+                          </span>
+                          <span>
+                            GREAT ${format(item.input.goal.accuracy.great * 100, 2)}% · JUST
+                            ${format(item.input.goal.accuracy.just * 100, 2)}%
+                          </span>
+                        `
+                      : nothing
+                  }
+                  ${
+                    item.input.goal.kind === "event" && item.input.goal.gekiso && item.settings.route !== "challenge"
                       ? html`
                           <span>
                             ${host.t("gekisoPlacements", "Scoring placements")}: 1 · JUST
@@ -293,79 +408,45 @@ export class ResultComparison {
                           </span>
                         `
                       : nothing
-                }
-                ${
-                  item.settings.goal === "event" || item.settings.goal === "plan"
-                    ? html`
-                        <span>
-                          ${item.settings.route === "challenge" ? `${item.settings.challengePoints} CP` : `${item.settings.boosts} Boost`}
-                        </span>
-                      `
-                    : nothing
-                }
-                <span>${item.metric.label}</span>
-                <span class="tb-results__meta">
-                  ${host.t(item.proven ? "proven" : "recommendation", item.proven ? "Proven optimal" : "Recommendation")}
-                </span>
-                <strong class="tb-hit__value">
-                  ${format(item.metric.value, item.metric.digits)} ${item.metric.unit}
-                </strong>
-                <dl class="spec-list">
-                  <dt>${host.t("difference", "Difference")}</dt>
-                  <dd>
-                    ${delta ? `${delta.absolute > 0 ? "+" : ""}${format(delta.absolute, item.metric.digits)} ${item.metric.unit === "%" ? host.t("percentagePoints", "percentage points") : item.metric.unit}` : "—"}
-                  </dd>
-                  <dt>${host.t("relativeDifference", "Relative change")}</dt>
-                  <dd>
-                    ${delta?.relative != null ? `${delta.relative > 0 ? "+" : ""}${format(delta.relative, 2)}%` : "—"}
-                  </dd>
-                  <dt>${host.t("power", "Power")}</dt>
-                  <dd>${format(item.hit.power)}</dd>
+                  }
                   ${
-                    item.hit.comboBonus != null
+                    item.settings.goal === "event" || item.settings.goal === "plan"
                       ? html`
-                          <dt>${host.t("comboBonus", "Base COMBO BONUS")}</dt>
-                          <dd>
-                            ×${item.hit.comboBonus}${delta && base.hit.comboBonus != null ? ` (Δ ${format(item.hit.comboBonus - base.hit.comboBonus, 2)})` : ""}
-                          </dd>
+                          <span>
+                            ${item.settings.route === "challenge" ? host.t("routeChallenge", "Challenge live") : item.settings.route === "skip" ? host.t("routeSkip", "Skip") : host.t("routeLive", "Normal live")}
+                            ·
+                            ${item.settings.route === "challenge" ? `${item.settings.challengePoints} CP` : `${item.settings.boosts} Boost`}
+                          </span>
                         `
                       : nothing
                   }
-                  ${(["members", "snaps", "bindings", "growth"] as const).map(
-                    (key) => html`
-                      <dt>${host.t(`diff${key}`, key)}</dt>
-                      <dd>${diff[key]}</dd>
-                    `,
-                  )}
-                  <dt>${host.t("leader", "Leader")}</dt>
-                  <dd>
-                    ${host.catalog!.cardName("members", cardIdOf(item.hit.members[0]!))}${diff.leader ? ` · ${host.t("changed", "Changed")}` : ""}
-                  </dd>
-                </dl>
-                <ul class="list">
-                  ${item.hit.members.map(
-                    (key, i) => html`
-                      <li class="list-item">
-                        <span class="list-item__body">
-                          <strong>${host.catalog!.cardName("members", cardIdOf(key))}</strong>
-                          <small>
-                            ${item.hit.snaps[i] ? host.catalog!.cardName("snaps", cardIdOf(item.hit.snaps[i]!)) : host.t("noSnap", "No Snapshot")}
-                          </small>
-                        </span>
-                      </li>
-                    `,
-                  )}
-                </ul>
-                ${
-                  !item.listed
-                    ? html`
-                        <span>${host.t("outsideRanking", "Outside current ranking")}</span>
-                      `
-                    : nothing
-                }
-              </section>
-            `;
-          })}
+                  <span>
+                    ${item.settings.scope === "theoretical" ? host.t("scopeAll", "All cards, full growth") : host.t("scopeBox", "My cards")}
+                    ·
+                    ${item.input.unknownPolicy === "max" ? host.t("unknownMax", "Count as max") : host.t("unknownMin", "Count as minimum")}
+                  </span>
+                  ${
+                    !item.listed
+                      ? html`
+                          <span>${host.t("outsideRanking", "Outside current ranking")}</span>
+                        `
+                      : nothing
+                  }
+                `,
+              )}
+              ${[0, 1, 2, 3, 4].map((index) =>
+                row(
+                  `${host.t("members", "Members")} ${index + 1}`,
+                  (item) => html`
+                    <strong>${host.catalog!.cardName("members", cardIdOf(item.hit.members[index]!))}</strong>
+                    <small>
+                      ${item.hit.snaps[index] ? host.catalog!.cardName("snaps", cardIdOf(item.hit.snaps[index]!)) : host.t("noSnap", "No Snapshot")}
+                    </small>
+                  `,
+                ),
+              )}
+            </tbody>
+          </table>
         </div>
       </dialog>
     `;
