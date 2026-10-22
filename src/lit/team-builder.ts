@@ -3,6 +3,8 @@
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
 // Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；辅助页接管并恢复标题栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
+import { ResultComparison } from "./team-builder/result-comparison";
+import { usesPtResults } from "./team-builder/score-goal";
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { LitElement, html, nothing, render, type TemplateResult } from "lit";
 import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
@@ -137,6 +139,7 @@ export class TeamBuilder extends LitElement {
     ++this.runGeneration;
     this.submitted = false;
     this.taskResults.clear();
+    this.comparisons.clear();
     this.conditionsOpen = false;
     this.scrollPositions.clear();
     this.results = null;
@@ -180,7 +183,15 @@ export class TeamBuilder extends LitElement {
       target?.focus({ preventScroll: true });
     });
   }
-  renderCompareTray() { return nothing; }
+  private comparisons = new Map<string, ResultComparison>();
+  get comparison() {
+    const key = `${this.resultScope}:${usesPtResults(this) ? "pt" : "build"}`;
+    if (!this.comparisons.has(key)) this.comparisons.set(key, new ResultComparison());
+    return this.comparisons.get(key)!;
+  }
+  renderCompareTray() {
+    return this.comparison.tray(this);
+  }
   get resultSession() {
     return this.taskResult.session;
   }
@@ -1557,7 +1568,7 @@ export class TeamBuilder extends LitElement {
         >
           ${panel}
         </section>
-        ${renderCardEditor(this)} ${this.songPicker ? renderSongPicker(this) : nothing}
+        ${this.comparison.dialog(this)} ${renderCardEditor(this)} ${this.songPicker ? renderSongPicker(this) : nothing}
         ${this.imports.render()} ${this.renderSnackbar()}
       </div>
     `;

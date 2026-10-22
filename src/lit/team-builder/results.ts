@@ -934,6 +934,9 @@ export function renderHit(
 ): TemplateResult {
   const key = hitKey(hit);
   const expanded = host.expanded.has(key);
+  host.comparison.sync(host);
+  const reference = host.comparison.find(host, hit);
+  const compared = !!reference && host.comparison.items.some((item) => item.id === reference.id);
   const main = primary(host, hit);
   const catalog = host.catalog!;
   return html`
@@ -999,6 +1002,19 @@ export function renderHit(
                   ${host.t("sc.useTeam", "Compare songs with this team")}
                 </button>
               `
+        }
+        ${
+          reference
+            ? html`
+                <button
+                  class="button button--text"
+                  aria-pressed=${compared}
+                  @click=${() => host.comparison.toggle(host, hit)}
+                >
+                  ${host.t(compared ? "comparisonAdded" : "addComparison", compared ? "Added to comparison" : "Add to comparison")}
+                </button>
+              `
+            : nothing
         }
         ${actionMenu({
           id: `tb-result-actions-${index}`,
