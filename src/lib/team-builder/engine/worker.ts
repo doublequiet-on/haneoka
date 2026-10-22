@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 // L3 — GEB
 // Input: EngineCall、release 资料、固定来源谱面及 WASM URL。
-// Output: EngineReply、进度、快照、计算结果或错误；原生未评分响应的 unknownCards 归一为空数组。
+// Output: EngineReply、进度、快照、计算结果或错误；私有补分请求保留最终待评分候选，公开进度只含完整评分。
 // Pos: [Map](L2-2.md)；当前 Rust/WASM 配队引擎的浏览器 Worker 适配。
 // Effects/Dependencies: 限时获取 WASM／谱面、实例化 WebAssembly，持有句柄和缓存并发送消息。
 /** Team engine Worker: the ournotes-team-builder engine (WebAssembly) holds the release and the charts it was sent, and
@@ -144,7 +144,7 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
       // Each improvement arrives as one song's best teams so far.
       onProgress = (value) => {
         const song = (value.song ?? null) as SongRef | null;
-        const hits = (value.hits ?? []) as EngineHit[];
+        const hits = ((value.hits ?? []) as EngineHit[]).filter(hit => !call.deferScores || hit.score?.orders.length === 120);
         const response = emptyResponse(request);
         const row = response.results.find((result) => result.song?.songId === song?.songId && result.song?.difficulty === song?.difficulty);
         if (row) row.hits = hits;
@@ -152,7 +152,7 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
         post({ type: "snapshot", id: call.id, snapshot: { requestId: request.requestId!, contextKey: request.contextKey!, response, coverage: { completed: 0, total: response.results.length } } });
       };
       try {
-        const result = invoke({ op: "run", handle, request, charts: rows }, true) as unknown as EngineResponse;
+        const result = invoke({ op: "run", handle, request: call.deferScores ? { ...request, deferScores: true } : request, charts: rows }, true) as unknown as EngineResponse;
         // Native runs that exhaust the budget before evaluating a chart return null here.
         if (result.unknownCards === null) result.unknownCards = [];
         post({ type: "progress", id: call.id, done: songs.length, total: songs.length });

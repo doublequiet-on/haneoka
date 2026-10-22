@@ -1,11 +1,11 @@
 // L3 — GEB
-// Input: 配队资料、Engine 请求及进度／快照／单 Worker 最终结果回调。
+// Input: 配队资料、Engine 请求及进度／快照／单 Worker 最终结果回调；私有分片可返回待补分候选。
 // Output: EngineClient、搜索／成长／评价／解释结果及当前 Worker 阶段。
 // Pos: [Map](L2-2.md)；主线程到当前引擎 Worker 的生命周期与分片协调。
-// Effects/Dependencies: 创建和替换 Worker、消息通信及内存 Promise；取消与更高下界重试会替换对应实例。
+// Effects/Dependencies: 创建和替换 Worker、消息通信及内存 Promise；合并主分边界后补齐原生评分，取消与重试替换对应实例。
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
 import type { TeamBuilderData } from "../data";
-import type { EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline } from "./api";
+import type { EngineHit, EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline } from "./api";
 import type { EngineCall, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
 import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs } from "./execution";
 import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
@@ -82,7 +82,7 @@ class EngineWorker {
   }
   async send<T>(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<T> {
     await this.spawn();
-    if (message.type === "run") this.setPhase("computationMs");
+    if (message.type === "run" || message.type === "evaluate") this.setPhase("computationMs");
     return (await this.call(message, progress, snapshot)) as T;
   }
   /** Calls in flight; 0 when idle. */
@@ -107,6 +107,41 @@ class EngineWorker {
     this.worker = null;
     this.ready = null;
   }
+}
+
+type DeferredHit = EngineHit & { pendingScores?: true };
+const pendingScores = (hit: EngineHit) => (hit as DeferredHit).pendingScores === true;
+const memberSet = (hit: EngineHit) => [...hit.members].sort().join(",");
+const exactTeam = (hit: EngineHit) => JSON.stringify([hit.song?.songId, hit.song?.difficulty, hit.members, hit.snaps, hit.power, hit.key]);
+/** Keep every variant tied at the distinct-member primary boundary until its mean is known. */
+function completionCandidates(hits: readonly EngineHit[], k: number): EngineHit[] {
+  const primary = new Map<string, number>();
+  for (const hit of hits) primary.set(memberSet(hit), Math.max(primary.get(memberSet(hit)) ?? -Infinity, hit.key));
+  const keys = [...primary.values()].sort((a, b) => b - a);
+  const floor = keys[k - 1] ?? -Infinity;
+  const candidates = new Map<string, EngineHit>();
+  for (const hit of hits) {
+    if (hit.key < floor || hit.key !== primary.get(memberSet(hit))) continue;
+    const key = exactTeam(hit);
+    const old = candidates.get(key);
+    if (!old || pendingScores(old) && !pendingScores(hit)) candidates.set(key, hit);
+  }
+  return [...candidates.values()];
+}
+function primarySeeds(hits: readonly EngineHit[], k: number): EngineHit[] {
+  const seen = new Set<string>();
+  return [...hits].sort((a, b) => b.key - a.key || (!pendingScores(a) && !pendingScores(b) ? compareHits(a, b) : 0)).filter(hit => {
+    const key = memberSet(hit);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, k);
+}
+function scoredResponse(response: EngineResponse): EngineResponse {
+  return { ...response, results: response.results.map(result => ({ ...result,
+    hits: result.hits.filter(hit => !pendingScores(hit)),
+    proven: result.proven && !result.hits.some(pendingScores),
+  })), overall: response.overall.filter(hit => !pendingScores(hit)) };
 }
 
 /** How many Workers share a search: the device's cores, minus one for the page, at most eight. */
@@ -140,7 +175,10 @@ export class EngineClient {
   /** Warm one Worker; the others compile lazily only if a search actually fans out. */
   warm() {
     // The others compile once the first is ready, so the first search can use every Worker.
-    void this.pool[0]?.warm().then(() => { for (const worker of this.pool.slice(1)) void worker.warm(); });
+    const generation = this.generation;
+    void this.pool[0]?.warm().then(() => {
+      if (generation === this.generation) for (const worker of this.pool.slice(1)) void worker.warm();
+    });
   }
   /** The idlest Worker, preferring one that has already compiled the release. */
   private idlest() {
@@ -240,8 +278,10 @@ export class EngineClient {
       const songs = requestSongs(request);
       if (request.goal.kind === "gekiso" && !request.goal.opponents) {
         const goal = request.goal;
+        const deferScores = goal.criterion === "max" && goal.seeds === 0 && request.k > 1;
         const count = request.constraints.leader ? 1 : this.pool.length;
         const parts = [...latest.results];
+        const completeScores = new Map<string, EngineHit>();
         const unknownCards = new Set(latest.unknownCards);
         const same = (song: SongRef) => (hit: { song: SongRef | null }) => hit.song?.songId === song.songId && hit.song?.difficulty === song.difficulty;
         const states = goal.songs.map((song, index) => {
@@ -251,7 +291,7 @@ export class EngineClient {
             response.results[0]!.hits = parts[index]!.hits;
             return response;
           });
-          return { request: part, responses, seeded: request.seeded === true, seedStarted: false, next: 0, running: 0, done: completeResponse({ ...latest, results: [parts[index]!] }) };
+          return { request: part, responses, deferred: false, seeded: request.seeded === true, seedStarted: false, next: 0, running: 0, done: completeResponse({ ...latest, results: [parts[index]!] }) };
         });
         const merged = (): EngineResponse => ({ ...latest, results: [...parts], overall: [], unknownCards: [...unknownCards], elapsedMs: clock() - started });
         const waiters = new Set<() => void>();
@@ -259,6 +299,7 @@ export class EngineClient {
         wakeWork = wake;
         let failed = false;
         let done = states.filter(state => state.done).length * count;
+        const progressTotal = states.length * (count + Number(deferScores));
         const take = (preferred: number) => {
           const ready = (index: number) => { const state = states[index]; return state && !state.done && state.seeded && state.next < count; };
           let index = ready(preferred) ? preferred : states.findIndex((_, index) => ready(index));
@@ -273,6 +314,27 @@ export class EngineClient {
           states[index]!.running++;
           return { index, shard: null };
         };
+        const completeHit = async (engine: EngineWorker, job: { index: number; hit: EngineHit }) => {
+          const hit = job.hit;
+          const key = exactTeam(hit);
+          const evaluations = await engine.send<TeamEvaluation[]>({ type: "evaluate", id: 0, request: {
+            members: request.members, snaps: request.snaps, player: request.player, unknownPolicy: request.unknownPolicy,
+            team: { members: hit.members, snaps: hit.snaps, leader: hit.members[0]! }, songs: [hit.song!],
+            play: { great: 0, good: 0, bad: 0, miss: 0 }, gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds },
+            challengeEventId: null, event: null,
+          } });
+          if (stopped) return;
+          const evaluation = evaluations[0]!;
+          if (evaluation.score.max !== hit.key || evaluation.power !== hit.power) throw new Error("engine-score-completion-mismatch");
+          const value: DeferredHit = { ...hit, score: evaluation.score };
+          delete value.pendingScores;
+          completeScores.set(key, value);
+          const state = states[job.index]!;
+          for (const response of state.responses) for (const part of response.results)
+            part.hits = part.hits.map(candidate => completeScores.get(exactTeam(candidate)) ?? candidate);
+          parts[job.index] = mergeShardResponses(state.responses.map(scoredResponse), request.k, clock() - started).results[0]!;
+          publish(merged());
+        };
         const run = async (engine: EngineWorker) => {
           let preferred = -1;
           while (!stopped && !failed && remaining(deadline) > 0) {
@@ -285,21 +347,27 @@ export class EngineClient {
             preferred = job.index;
             const state = states[job.index]!;
             const current = parts[job.index]!;
+            const privateHits = deferScores ? primarySeeds(state.responses.flatMap(response => response.results[0]!.hits), request.k) : current.hits;
             const key = `${current.song!.songId}:${current.song!.difficulty}`;
-            const floors = current.hits.length >= request.k ? { [key]: current.hits[request.k - 1]!.key } : {};
-            const part: EngineRequest = { ...state.request, seeds: current.hits, floors,
+            const floors = privateHits.length >= request.k ? { [key]: privateHits[request.k - 1]!.key } : {};
+            const part: EngineRequest = { ...state.request, seeds: privateHits, floors,
               ...(job.shard === null ? { seedOnly: true } : { seeded: true, seedOnly: false, shard: { index: job.shard, count } }) };
             const update = (response: EngineResponse) => {
+              state.deferred ||= response.results.some(part => part.hits.some(pendingScores));
+              if (state.deferred) for (const part of response.results) for (const hit of part.hits)
+                if (!pendingScores(hit) && hit.score) completeScores.set(exactTeam(hit), hit);
+              if (state.deferred) for (const part of response.results)
+                part.hits = part.hits.map(hit => completeScores.get(exactTeam(hit)) ?? hit);
               for (const key of response.unknownCards) unknownCards.add(key);
-              if (job.shard === null) parts[job.index] = response.results[0] ?? parts[job.index]!;
+              if (job.shard === null) parts[job.index] = scoredResponse(response).results[0] ?? parts[job.index]!;
               else {
                 state.responses[job.shard] = response;
-                parts[job.index] = mergeShardResponses(state.responses, request.k, clock() - started).results[0]!;
+                parts[job.index] = mergeShardResponses(state.responses.map(scoredResponse), request.k, clock() - started).results[0]!;
               }
               publish(merged());
             };
             try {
-              const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: part }, undefined, value => {
+              const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: part, deferScores }, undefined, value => {
                 if (!stopped && value.contextKey === request.contextKey && value.requestId === request.requestId) update(value.response);
               });
               if (stopped) return;
@@ -307,13 +375,15 @@ export class EngineClient {
               if (job.shard === null) {
                 state.seeded = true;
                 state.done = completeResponse(response);
-                if (state.done) done += count;
-                for (const shard of state.responses) shard.results[0]!.hits = parts[job.index]!.hits;
+                if (state.done) {
+                  done += count;
+                  state.responses.fill(response);
+                } else for (const shard of state.responses) shard.results[0]!.hits = response.results[0]?.hits ?? [];
               } else {
                 done++;
                 state.done = state.next === count && state.running === 1;
               }
-              progress?.(done / (states.length * count), 1);
+              progress?.(done / progressTotal, 1);
             } catch (error) {
               failed = true;
               throw error;
@@ -324,6 +394,28 @@ export class EngineClient {
           }
         };
         await Promise.all(this.pool.map(run));
+        if (!stopped && deferScores) {
+          for (const state of states) for (const response of state.responses) for (const part of response.results)
+            part.hits = part.hits.map(hit => completeScores.get(exactTeam(hit)) ?? hit);
+          const jobs = states.flatMap((state, index) => completionCandidates(state.responses.flatMap(response => response.results[0]!.hits), request.k)
+            .filter(pendingScores).map(hit => ({ index, hit })));
+          let next = 0;
+          const finish = async (engine: EngineWorker) => {
+            while (!stopped && remaining(deadline) > 0 && next < jobs.length) {
+              const job = jobs[next++]!;
+              await completeHit(engine, job);
+            }
+          };
+          await Promise.all(this.pool.map(finish));
+          if (!stopped) for (const [index, state] of states.entries()) {
+            const unfinished = completionCandidates(state.responses.flatMap(response => response.results[0]!.hits), request.k).some(pendingScores);
+            const rows = state.responses.map(response => ({ ...response, results: response.results.map(part => ({ ...part,
+              hits: part.hits.filter(hit => !pendingScores(hit)), proven: part.proven && !unfinished,
+            })) }));
+            parts[index] = mergeShardResponses(rows, request.k, clock() - started).results[0]!;
+            if (!unfinished) progress?.(++done / progressTotal, 1);
+          }
+        }
         const response = merged();
         if (!aspirationHeld(response, request.k) && !request.noFloor && remaining(deadline))
           return this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: parts.flatMap(part => part.hits), seeded: true, noFloor: true } }, progress, accept);
