@@ -778,6 +778,56 @@ export const inspectUploadBytes = (
 const IMAGE_PROBE_BYTES = 1 * 1024 * 1024;
 const TAIL_PROBE_BYTES = 64;
 
+class PngChunkInspector {
+  private readonly header = new Uint8Array(8);
+  private headerLength = 0;
+  private remaining = 8;
+  private chunks = 0;
+  private finalChunk = false;
+  private ended = false;
+  private failure: string | undefined;
+
+  update(bytes: Uint8Array): void {
+    let offset = 0;
+    while (offset < bytes.length && !this.failure) {
+      if (this.ended) {
+        this.failure = "invalid_png_container";
+        return;
+      }
+      if (this.remaining) {
+        const skipped = Math.min(this.remaining, bytes.length - offset);
+        offset += skipped;
+        this.remaining -= skipped;
+        if (!this.remaining && this.finalChunk) this.ended = true;
+        continue;
+      }
+      const copied = Math.min(this.header.length - this.headerLength, bytes.length - offset);
+      this.header.set(bytes.subarray(offset, offset + copied), this.headerLength);
+      offset += copied;
+      this.headerLength += copied;
+      if (this.headerLength < this.header.length) continue;
+      const length = new DataView(this.header.buffer).getUint32(0, false);
+      const type = ascii(this.header, 4, 4);
+      if ((!this.chunks && (type !== "IHDR" || length !== 13)) || (type === "IEND" && length !== 0)) {
+        this.failure = "invalid_png_container";
+        return;
+      }
+      if (type === "acTL") {
+        this.failure = "animated_images_not_allowed";
+        return;
+      }
+      this.chunks++;
+      this.headerLength = 0;
+      this.remaining = length + 4;
+      this.finalChunk = type === "IEND";
+    }
+  }
+
+  finish(): string | undefined {
+    return this.failure || (this.ended ? undefined : "invalid_png_container");
+  }
+}
+
 const inspectCompletedMedia = (
   mediaType: UploadMediaType,
   prefix: Uint8Array,
@@ -832,9 +882,6 @@ const inspectCompletedMedia = (
     const height = view.getUint32(20, false);
     if (!dimensionsAllowed(width, height, DEFAULT_IMAGE_LIMITS)) {
       return { height: null, reason: "invalid_image_dimensions", width: null };
-    }
-    if (prefix.includes(0x61) && prefix.includes(0x63) && prefix.includes(0x54) && prefix.includes(0x4c)) {
-      return { height: null, reason: "animated_images_not_allowed", width: null };
     }
     if (tail.length < 12 || !startsWith(tail.subarray(tail.length - 12), [0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44])) {
       return { height: null, reason: "invalid_png_container", width: null };
@@ -939,6 +986,7 @@ const inspectCompletedObject = async (env: Env, attachment: AttachmentRow): Prom
     throw new Error("completed_object_integrity_mismatch");
   }
   const digest = new StreamingSha256();
+  const png = attachment.mediaType === "image/png" ? new PngChunkInspector() : undefined;
   const prefix = new Uint8Array(Math.min(IMAGE_PROBE_BYTES, attachment.declaredSize));
   let prefixLength = 0;
   let tail = new Uint8Array(0);
@@ -949,6 +997,7 @@ const inspectCompletedObject = async (env: Env, attachment: AttachmentRow): Prom
       const part = await reader.read();
       if (part.done) break;
       digest.update(part.value);
+      png?.update(part.value);
       size += part.value.byteLength;
       if (prefixLength < prefix.length) {
         const copied = Math.min(prefix.length - prefixLength, part.value.byteLength);
@@ -969,6 +1018,8 @@ const inspectCompletedObject = async (env: Env, attachment: AttachmentRow): Prom
     reader.releaseLock();
   }
   if (size !== attachment.declaredSize) throw new Error("completed_object_size_mismatch");
+  const pngFailure = png?.finish();
+  if (pngFailure) throw new Error(pngFailure);
   const media = inspectCompletedMedia(attachment.mediaType, prefix.subarray(0, prefixLength), tail, size);
   if (media.reason) throw new Error(media.reason);
   return { digestHex: hexBytes(digest.digest()), height: media.height, width: media.width };
