@@ -26,10 +26,12 @@ const target = path.join(root, ".cache/ournotes-team-builder");
 execFileSync(
   "cargo",
   [
-    "build",
+    "rustc",
     "--locked",
     "--release",
     "--lib",
+    "--crate-type",
+    "cdylib",
     "--target",
     "wasm32-unknown-unknown",
     "--manifest-path",
