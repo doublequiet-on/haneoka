@@ -230,8 +230,13 @@
     white-space: nowrap;
   }
   @media (max-width: 599px) {
-    .tb-sync .tb-sync__label { display: none; }
-    .tb-sync > .button { width: 48px; padding-inline: 0; }
+    .tb-sync .tb-sync__label {
+      display: none;
+    }
+    .tb-sync > .button {
+      width: 48px;
+      padding-inline: 0;
+    }
   }
   .tb-sync--synced {
     color: var(--md-sys-color-primary);
@@ -1356,57 +1361,403 @@
 }
 
 @layer pages {
-  .team-builder .sc { min-width: 0; }
-  .team-builder .sc > *, .team-builder .sc .table-scroll { min-width: 0; max-width: 100%; }
-  .team-builder .sc md-outlined-select, .team-builder .sc md-outlined-text-field { width: 100%; }
-  .team-builder .sc .button { min-height: 48px; }
-  .team-builder [data-sc-field][data-invalid] { outline: 2px solid var(--md-sys-color-error); outline-offset: 2px; }
-  .team-builder .sc-results > tbody > tr > th { min-width: 12rem; max-width: 20rem; overflow-wrap: anywhere; }
-  .team-builder .sc-results td.tabular { white-space: nowrap; }
-  .team-builder .sc-account { max-height: 22rem; overflow: auto; }
-  .team-builder .tb-picker-footer { min-width: 0; }
-  .team-builder .tb-picker-footer > .segmented { min-width: 0; max-width: 100%; overflow-x: auto; }
-  .team-builder .tb-picker-footer > .segmented > button { min-height: 48px; }
+  .team-builder .sc {
+    min-width: 0;
+  }
+  .team-builder .sc > *,
+  .team-builder .sc .table-scroll {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .team-builder .sc md-outlined-select,
+  .team-builder .sc md-outlined-text-field {
+    width: 100%;
+  }
+  .team-builder .sc .button {
+    min-height: 48px;
+  }
+  .team-builder [data-sc-field][data-invalid] {
+    outline: 2px solid var(--md-sys-color-error);
+    outline-offset: 2px;
+  }
+  .team-builder .sc-results > tbody > tr > th {
+    min-width: 12rem;
+    max-width: 20rem;
+    overflow-wrap: anywhere;
+  }
+  .team-builder .sc-results td.tabular {
+    white-space: nowrap;
+  }
+  .team-builder .sc-account {
+    max-height: 22rem;
+    overflow: auto;
+  }
+  .team-builder .tb-picker-footer {
+    min-width: 0;
+  }
+  .team-builder .tb-picker-footer > .segmented {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .team-builder .tb-picker-footer > .segmented > button {
+    min-height: 48px;
+  }
 
-  .team-builder .tb-result-song { min-width: 0; overflow-wrap: anywhere; }
-  .team-builder .tb-result-song__title { font: var(--md-sys-typescale-title-medium); }
-  .team-builder .tb-results__selector { width: 100%; min-width: 0; }
-  .team-builder .tb-results__selector [slot="headline"] { white-space: normal; overflow-wrap: anywhere; }
-  .team-builder .tb-hit__chips .tb-chip { flex-wrap: wrap; }
-  .tb .tb-action-menu { position: relative; }
-  .tb .tb-action-menu > div { position: absolute; z-index: 30; inset-inline-end: 0; min-width: 12rem; max-width: min(24rem, 90vw); padding: var(--md-sys-spacing-2); box-shadow: var(--md-sys-elevation-level2); }
-  .tb .tb-picker-quick { padding: var(--md-sys-spacing-4); }
-  .tb .tb-hit__actions { flex-wrap: wrap; padding: var(--md-sys-spacing-2); }
-  .tb .tb-picker-footer .row { flex-wrap: wrap; }
-  .tb .tb-tabs { min-width: 0; }
-  .tb .tb-eval-mobile { display: none; list-style: none; padding: 0; margin: 0; gap: var(--md-sys-spacing-4); }
+  .team-builder .tb-result-song {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .team-builder .tb-result-song__title {
+    font: var(--md-sys-typescale-title-medium);
+  }
+  .team-builder .tb-results__selector {
+    width: 100%;
+    min-width: 0;
+  }
+  .team-builder .tb-results__selector [slot="headline"] {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .team-builder .tb-hit__chips .tb-chip {
+    flex-wrap: wrap;
+  }
+  .tb .tb-action-menu {
+    position: relative;
+  }
+  .tb .tb-action-menu > div {
+    position: absolute;
+    z-index: 30;
+    inset-inline-end: 0;
+    min-width: 12rem;
+    max-width: min(24rem, 90vw);
+    padding: var(--md-sys-spacing-2);
+    box-shadow: var(--md-sys-elevation-level2);
+  }
+  .tb .tb-picker-quick {
+    padding: var(--md-sys-spacing-4);
+  }
+  .tb .tb-hit__actions {
+    flex-wrap: wrap;
+    padding: var(--md-sys-spacing-2);
+  }
+  .tb .tb-picker-footer .row {
+    flex-wrap: wrap;
+  }
+  .tb .tb-tabs {
+    min-width: 0;
+  }
+  .tb .tb-eval-mobile {
+    display: none;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    gap: var(--md-sys-spacing-4);
+  }
   @media (max-width: 600px) {
-    .tb .tb-eval-desktop { display: none; }
-    .tb .tb-eval-mobile { display: grid; }
+    .tb .tb-eval-desktop {
+      display: none;
+    }
+    .tb .tb-eval-mobile {
+      display: grid;
+    }
   }
-  @media (max-width: 600px) { .tb .tb-tabs .tab { min-width: 0; flex: 1; padding-inline: var(--md-sys-spacing-2); } }
-  .tb .tb-picker-footer .tb-action-menu > div { inset-block-end: 100%; inset-inline-start: 0; inset-inline-end: auto; }
+  @media (max-width: 600px) {
+    .tb .tb-tabs .tab {
+      min-width: 0;
+      flex: 1;
+      padding-inline: var(--md-sys-spacing-2);
+    }
+  }
+  .tb .tb-picker-footer .tb-action-menu > div {
+    inset-block-end: 100%;
+    inset-inline-start: 0;
+    inset-inline-end: auto;
+  }
 }
 
 @layer pages {
-  .team-builder [data-tb-field][data-invalid] { outline: 2px solid var(--md-sys-color-error); outline-offset: 2px; }
-  .team-builder .sc-mobile { display: none; gap: var(--md-sys-spacing-4); }
+  .team-builder [data-tb-field][data-invalid] {
+    outline: 2px solid var(--md-sys-color-error);
+    outline-offset: 2px;
+  }
+  .team-builder .sc-mobile {
+    display: none;
+    gap: var(--md-sys-spacing-4);
+  }
   @media (max-width: 599px) {
-    .team-builder .sc-desktop { display: none; }
-    .team-builder .sc-mobile { display: grid; }
-    .team-builder .sc-mobile .surface { padding: var(--md-sys-spacing-3); }
-    .team-builder .sc-primary dd { font-weight: 700; font-variant-numeric: tabular-nums; }
-    .team-builder .tb-picker-footer { gap: 0; }
-    .team-builder .tb-picker-footer > .row { flex-wrap: nowrap; gap: var(--md-sys-spacing-1); }
-    .team-builder .tb-picker-footer > .cluster { gap: var(--md-sys-spacing-1); flex-wrap: nowrap; font: var(--md-sys-typescale-label-medium); }
-    .team-builder .tb-picker-footer .button { padding-inline: var(--md-sys-spacing-2); }
+    .team-builder .sc-desktop {
+      display: none;
+    }
+    .team-builder .sc-mobile {
+      display: grid;
+    }
+    .team-builder .sc-mobile .surface {
+      padding: var(--md-sys-spacing-3);
+    }
+    .team-builder .sc-primary dd {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .team-builder .tb-picker-footer {
+      gap: 0;
+    }
+    .team-builder .tb-picker-footer > .row {
+      flex-wrap: nowrap;
+      gap: var(--md-sys-spacing-1);
+    }
+    .team-builder .tb-picker-footer > .cluster {
+      gap: var(--md-sys-spacing-1);
+      flex-wrap: nowrap;
+      font: var(--md-sys-typescale-label-medium);
+    }
+    .team-builder .tb-picker-footer .button {
+      padding-inline: var(--md-sys-spacing-2);
+    }
   }
 }
 
 @layer pages {
   @media (max-width: 599px) {
-    .team-builder .tb-picker-quick > .cluster { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .team-builder .tb-picker-quick > [role="group"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .team-builder .tb-picker-quick .chip { min-width: 0; padding-inline: var(--md-sys-spacing-1); font-size: var(--md-sys-typescale-label-small-size); }
+    .team-builder .tb-picker-quick > .cluster {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .team-builder .tb-picker-quick > [role="group"] {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .team-builder .tb-picker-quick .chip {
+      min-width: 0;
+      padding-inline: var(--md-sys-spacing-1);
+      font-size: var(--md-sys-typescale-label-small-size);
+    }
+  }
+}
+@layer pages {
+  .team-builder .tb-tool {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .team-builder .tb-tool--desktop {
+    grid-template-columns: minmax(320px, 350px) minmax(0, 1fr);
+  }
+  .team-builder .tb-tool > .tb-config {
+    position: sticky;
+    top: var(--tb-header-height, 72px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--md-sys-spacing-3);
+    max-height: var(--tb-workspace-block, calc(100dvh - 240px));
+    overflow: visible;
+  }
+  .team-builder .tb-config-body {
+    min-height: 0;
+    grid-auto-rows: max-content;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  .team-builder .tb-config-body > .surface {
+    --surface-padding: var(--md-sys-spacing-3);
+  }
+  .team-builder .tb-operation {
+    flex-shrink: 0;
+    display: grid;
+    gap: var(--md-sys-spacing-2);
+    background: var(--md-sys-color-surface);
+  }
+  .team-builder .tb-operation > .tb-results__meta {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .team-builder .tb-run {
+    position: static;
+    padding: 0;
+  }
+  .team-builder .tb-mobile-operation {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    padding: var(--md-sys-spacing-3) 0 max(var(--md-sys-spacing-2), env(safe-area-inset-bottom));
+    background: var(--md-sys-color-surface);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .team-builder .tb-condition-summary {
+    display: grid;
+    gap: var(--md-sys-spacing-2);
+  }
+  .team-builder .tb-conditions {
+    width: min(600px, calc(100vw - 16px));
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: var(--md-sys-spacing-3);
+  }
+  .team-builder .tb-conditions:modal {
+    display: flex;
+    flex-direction: column;
+    gap: var(--md-sys-spacing-2);
+  }
+  .team-builder .tb-conditions > header {
+    flex-shrink: 0;
+  }
+  .team-builder .tb-conditions .tb-config-body {
+    flex: 1;
+  }
+  .team-builder .tb-conditions .tb-compare-tray {
+    display: none;
+  }
+  .team-builder .tb-conditions .tb-operation {
+    max-height: 45dvh;
+    overflow: auto;
+  }
+  .team-builder .tb-tool--compact .tb-run {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    align-items: center;
+  }
+  .team-builder .tb-tool--compact .tb-run > :not(md-outlined-select):not(.tb-run__button) {
+    grid-column: 1 / -1;
+  }
+  .team-builder .tb-run > .button:only-child {
+    grid-column: 1 / -1;
+  }
+  .team-builder .tb-hit__actions :is(.button, .icon-button),
+  .team-builder :is(.button, .tab),
+  .team-builder .segmented > button,
+  .team-builder .chip,
+  .team-builder .tb-slot__tools .button {
+    min-height: 48px;
+  }
+  .team-builder .tb-hit__actions .icon-button {
+    width: 48px;
+    height: 48px;
+  }
+  .team-builder :is(.tb-tool, .tb-conditions) .icon-button {
+    min-width: 48px;
+    min-height: 48px;
+  }
+  .team-builder .tb-result-song__image {
+    width: 64px;
+    height: 64px;
+    flex: 0 0 64px;
+    overflow: hidden;
+    border-radius: var(--md-sys-shape-corner-small);
+  }
+  .team-builder .tb-result-song__image .tile__media > img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .team-builder .tb-result-song {
+    display: flex;
+    padding: 0;
+    gap: var(--md-sys-spacing-3);
+    align-items: start;
+  }
+  .team-builder .tb-result-song > .stack {
+    min-width: 0;
+    gap: var(--md-sys-spacing-1);
+    font-size: var(--md-sys-typescale-body-medium-size);
+  }
+  .team-builder .tb-result-song a {
+    font-size: var(--md-sys-typescale-title-medium-size);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .team-builder .tb-hit__value {
+    font-size: var(--md-sys-typescale-headline-medium-size);
+    font-variant-numeric: tabular-nums;
+  }
+  .team-builder .tb-compare-tray {
+    display: grid;
+    gap: var(--md-sys-spacing-1);
+  }
+  .team-builder .tb-compare-tray > .cluster {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .team-builder .tb-compare-tray .chip {
+    max-width: 200px;
+    flex-shrink: 0;
+  }
+  .team-builder .tb-comparison {
+    padding: var(--md-sys-spacing-4);
+    width: min(1100px, calc(100vw - 16px));
+    max-height: calc(100dvh - 24px);
+    overflow: auto;
+  }
+  .team-builder .tb-comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(230px, 1fr));
+    gap: var(--md-sys-spacing-3);
+    overflow-x: auto;
+    margin-top: var(--md-sys-spacing-3);
+  }
+  .team-builder .tb-comparison-grid > section {
+    min-width: 0;
+  }
+  .team-builder .tb-comparison .list-item__body {
+    display: grid;
+    overflow-wrap: anywhere;
+  }
+  .team-builder .tb-slot__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--md-sys-spacing-1);
+  }
+  .team-builder .tb-slot__empty small {
+    font-size: var(--md-sys-typescale-label-small-size);
+  }
+  .team-builder .tb-conditions .tb-formation,
+  .team-builder .tb-tool .tb-formation--edit {
+    max-width: 560px;
+  }
+  .team-builder .tb-tool--compact .tb-run > .button--text {
+    display: none;
+  }
+  .team-builder .tb-tool--compact .tb-run__button {
+    grid-column: 2;
+    grid-row: 1;
+    width: 100%;
+  }
+  .team-builder .tb-results-column {
+    scroll-margin-top: var(--tb-header-height, 72px);
+  }
+  .team-builder .action-menu {
+    min-width: 0;
+  }
+  .team-builder md-menu {
+    --md-menu-container-color: var(--md-sys-color-surface-container);
+    max-width: calc(100vw - 24px);
+  }
+  .team-builder md-menu-item {
+    min-height: 48px;
+  }
+  .team-builder .tb-picker-quick {
+    gap: var(--md-sys-spacing-1);
+  }
+  .team-builder .tb-picker-footer {
+    gap: var(--md-sys-spacing-1);
+  }
+  @media (max-width: 599px) {
+    .team-builder .tb-comparison-grid {
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+    }
+    .team-builder .tb-hit {
+      padding: var(--md-sys-spacing-3);
+    }
+    .team-builder .tb-picker-footer > .row {
+      display: grid;
+      grid-template-columns: auto auto;
+    }
+    .team-builder .tb-picker-footer > .row > .button:last-child {
+      grid-column: 1 / -1;
+    }
+    .team-builder .tb-picker-footer .button {
+      white-space: normal;
+    }
   }
 }

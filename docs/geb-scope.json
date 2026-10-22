@@ -212,6 +212,7 @@
     "src/lit/team-builder/workspace-state.ts",
     "src/lit/team-builder/song-picker.ts",
     "src/lit/team-builder/result-metric.ts",
+    "src/lit/team-builder/tool-layout.ts",
     "src/lit/ui/action-menu.ts"
   ],
   "entry_documents": [
