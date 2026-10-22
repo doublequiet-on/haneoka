@@ -1,5 +1,5 @@
 export const BESTDORI_CHARACTER_ICON_MAX_ID = 50;
-export const BESTDORI_CATALOG_VERSION = "v28-chart-credits-wave-corridors";
+export const BESTDORI_CATALOG_VERSION = "v29-chart-original-widths";
 
 export const hasBestdoriCharacterIcon = (characterId: unknown): boolean => {
   const id = Number(characterId);

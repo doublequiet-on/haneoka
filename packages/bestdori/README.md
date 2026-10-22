@@ -26,12 +26,10 @@ const score = bestdoriChartToSs(await transport.getChart(songId, difficulty));
 ```
 
 The converter maps Bestdori's lanes `0..6` onto a 24-unit SS stage with
-centres at `3, 6, 9, 12, 15, 18, 21`. Isolated notes are 6 units wide.
-Neighbouring notes and active slides share space by reducing widths around
-their fixed centres. The complete simultaneous group is evaluated together,
-including chords of two through seven notes. Fractional slide lanes scale
-linearly by 3; explicitly wide directional flicks retain their authored span.
-`BESTDORI_SS_LANE_BASIS` exports the stage width for importers.
+6-unit notes starting at `0, 3, 6, 9, 12, 15, 18`. Fractional slide lanes
+scale linearly by 3; directional flicks cover the mapped span
+from their leftmost to rightmost source lane. `BESTDORI_SS_LANE_BASIS`
+exports the stage width for importers.
 
 Runs with at least six rapid, lane-wide reversals between hidden connections
 gain a continuous corridor between their visible endpoints. The ribbon keeps

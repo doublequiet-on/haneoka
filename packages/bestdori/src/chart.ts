@@ -117,94 +117,6 @@ const finiteNumber = (value: unknown): number => (typeof value === "number" && N
 const toTick = (beat: number): number => Math.round(beat * PPQ);
 const laneToPos = (lane: number): number => lane * LANE_POS_SCALE;
 
-/** Size simultaneous neighbours together; their source lane centres stay fixed. */
-function fitAdjacentNoteWidths(notes: BestdoriSsNote[]): void {
-  const events = new Map<number, Array<{ node: BestdoriSsNote; owner: number }>>();
-  const lines: Array<{
-    owner: number;
-    target: BestdoriSsNote[];
-    points: Array<{ tick: number; center: number; size: number }>;
-    cursor: number;
-  }> = [];
-  for (const [owner, note] of notes.entries()) {
-    const nodes = note.node ?? [note];
-    if (!note.node && (note.size ?? NOTE_SIZE) > NOTE_SIZE) continue;
-    for (const node of nodes) {
-      const tick = node.t ?? 0,
-        group = events.get(tick) ?? [];
-      group.push({ node, owner });
-      events.set(tick, group);
-    }
-    if (note.node)
-      lines.push({
-        owner,
-        target: note.node,
-        cursor: 0,
-        points: note.node.map((node) => ({
-          tick: node.t ?? 0,
-          center: finiteNumber(node.pos) + (node.size ?? NOTE_SIZE) / 2,
-          size: node.size ?? NOTE_SIZE,
-        })),
-      });
-  }
-  const starts = [...lines].sort((a, b) => a.points[0]!.tick - b.points[0]!.tick);
-  const active = new Set<(typeof lines)[number]>();
-  let nextLine = 0;
-  for (const [tick, group] of [...events].sort(([a], [b]) => a - b)) {
-    while (nextLine < starts.length && starts[nextLine]!.points[0]!.tick <= tick) active.add(starts[nextLine++]!);
-    const occupants = new Map<
-      number,
-      { center: number; size: number; node?: BestdoriSsNote; line?: (typeof lines)[number] }
-    >();
-    for (const line of active) {
-      if (line.points.at(-1)!.tick < tick) {
-        active.delete(line);
-        continue;
-      }
-      while (line.cursor + 1 < line.points.length && line.points[line.cursor + 1]!.tick <= tick) line.cursor++;
-      const head = line.points[line.cursor]!,
-        tail = line.points[line.cursor + 1] ?? head;
-      const ratio = tail.tick === head.tick ? 0 : (tick - head.tick) / (tail.tick - head.tick);
-      occupants.set(line.owner, {
-        center: head.center + (tail.center - head.center) * ratio,
-        size: head.size + (tail.size - head.size) * ratio,
-        line,
-      });
-    }
-    for (const { node, owner } of group) {
-      const existing = occupants.get(owner);
-      occupants.set(
-        owner,
-        existing
-          ? { ...existing, node }
-          : {
-              node,
-              center: finiteNumber(node.pos) + (node.size ?? NOTE_SIZE) / 2,
-              size: node.size ?? NOTE_SIZE,
-            },
-      );
-    }
-    const ordered = [...occupants.values()].sort((a, b) => a.center - b.center);
-    const widths = ordered.map((point) => {
-      let width = point.size;
-      for (const other of ordered) {
-        const distance = Math.abs(other.center - point.center);
-        if (distance > 1e-6) width = Math.min(width, distance);
-      }
-      return width;
-    });
-    ordered.forEach((point, index) => {
-      const width = widths[index]!;
-      if (width >= point.size) return;
-      const node = point.node ?? { t: tick, visible: false };
-      node.pos = point.center - width / 2;
-      node.size = width;
-      if (!point.node) point.line!.target.push(node);
-    });
-  }
-  for (const line of lines) line.target.sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
-}
-
 /** Hidden ornament runs have no source checkpoints between their visible ends. */
 function connectHiddenWaveCorridors(connections: BestdoriChartConnection[], nodes: BestdoriSsNote[]): void {
   let begin = 0;
@@ -356,7 +268,6 @@ export function bestdoriChartToSs(input: unknown): BestdoriSsDocument {
     }
   }
 
-  fitAdjacentNoteWidths(notes);
   for (const slide of slides) connectHiddenWaveCorridors(slide.connections, slide.nodes);
   if (!bpm.some((entry) => entry.t === 0)) bpm.unshift({ t: 0, bpm: 120 });
   bpm.sort((left, right) => left.t - right.t);
