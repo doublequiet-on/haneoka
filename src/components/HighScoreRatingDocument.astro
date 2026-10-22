@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import AppShell from "./AppShell.astro";
-import { fetchStaticCatalog, staticCatalogRelease } from "../lib/static-catalog-source";
+import { highScoreRatingPageData } from "../server/high-score-rating-page-data";
 import { highScoreRatingIcon } from "../lit/ui/rating";
 import { resourceCollectionHref } from "../lib/resource-route";
 import { titleOf, type RouteDefinition } from "../config/routes";
@@ -11,9 +11,6 @@ import { t } from "../i18n/messages";
 import type { Locale } from "../i18n/locales";
 import type { ReleaseServer } from "../lib/release-server";
 
-interface Rating {
-  raw: { _bandId: number; _grade: number; _step: number; _rating: number };
-}
 interface Props {
   locale: Locale;
   server: ReleaseServer;
@@ -21,20 +18,7 @@ interface Props {
 }
 const { locale, server, entry } = Astro.props;
 const title = titleOf(entry, locale);
-const release = await staticCatalogRelease(server);
-const [ratingData, atlasData] = await Promise.all([
-  fetchStaticCatalog("live-tools", server, release),
-  fetchStaticCatalog("sources/Assets/AddressableResources/UI/Atlas/FixUiSpriteAtlas.spriteatlasv2", server, release),
-]);
-const ratings = ratingData as {
-  bandHighScoreRatings: Rating[];
-  totalHighScoreRatings: Rating[];
-};
-const atlas = atlasData as { outputs: Array<{ path: string; type: string }> };
-const sprites = new Map(atlas.outputs.filter(output => output.type === "Sprite").map(output => [
-  output.path.split("/").at(-1)!.replace(/--Sprite-?-?\d+\.png$/u, ""),
-  `/runtime/${server}/${output.path.replace(/^runtime\//u, "")}?release=${release.releaseId}`,
-]));
+const { ratings, sprites } = await highScoreRatingPageData(server);
 const totalRatings = new Map(ratings.totalHighScoreRatings.map(({ raw }) => [`${raw._grade}:${raw._step}`, raw._rating]));
 const gradeKeys = ["bronze", "silver", "gold"];
 const steps = ["", "I", "II", "III", "IV", "V"];

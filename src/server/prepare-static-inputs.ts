@@ -40,6 +40,7 @@ import {
 } from "./tool-page-data";
 import { chartRates } from "./chart-rates";
 import { finishStaticBuildInputs } from "./static-input-store";
+import { highScoreRatingPageData } from "./high-score-rating-page-data";
 
 async function prepareAll(tasks: Array<() => Promise<unknown>>): Promise<void> {
   let cursor = 0;
@@ -68,6 +69,7 @@ export async function prepareStaticInputs(): Promise<void> {
       () => teamBuilderPageData(server),
       () => chartRates(server),
       () => songPuzzlePageData(server),
+      () => highScoreRatingPageData(server),
     ]);
     if (configured.includes(server)) {
       await prepareAll([
