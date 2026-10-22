@@ -2,9 +2,9 @@
 // Input: 页面资料、跨服选择、Box 状态与用户设置。
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
-// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
+// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；辅助页接管并恢复标题栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
-import { LitElement, html, nothing, type TemplateResult } from "lit";
+import { LitElement, html, nothing, render, type TemplateResult } from "lit";
 import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
 import { readPageData } from "../lib/page-data";
 import type { TeamBuilderPageData } from "../server/tool-page-data";
@@ -233,6 +233,7 @@ export class TeamBuilder extends LitElement {
   }
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.restoreShell();
     clearAppBarActions(SYNC_OWNER);
     clearAppBarActions("team-builder-resources");
     this.releaseSearch?.();
@@ -848,7 +849,6 @@ export class TeamBuilder extends LitElement {
   }
 
   private renderTabs(): TemplateResult {
-    if (!["build", "song-comparison", "pt"].includes(this.tab)) return html`<button class="button button--text" @click=${() => this.setTab(this.lastTaskTab)}>${this.t("backToTask", "Back to task")}</button>`;
     const tabs = [
       { id: "build", icon: "groups", label: this.t("tabBuild", "Build"), count: null },
       { id: "song-comparison", icon: "music_note", label: this.t("sc.tab", "Gekiso songs"), count: null },
@@ -869,13 +869,67 @@ export class TeamBuilder extends LitElement {
       </nav>
     `;
   }
+  private shellBack?: HTMLButtonElement;
+  private shellMenu?: { menu: HTMLElement; leading: HTMLElement; group: HTMLElement };
+  private shellHeading?: { element: HTMLElement; nodes: Node[]; title: string };
+  private get resourceTitle() {
+    return this.tab === "box" ? this.t("tabBox", "My cards")
+      : this.tab === "account" ? this.t("tabAccount", "Account bonuses")
+      : this.tab === "teams" ? this.t("tabTeams", "Teams") : "";
+  }
+  private restoreShell() {
+    this.shellBack?.remove();
+    this.shellBack = undefined;
+    if (this.shellMenu) {
+      this.shellMenu.leading.append(this.shellMenu.menu);
+      this.shellMenu.group.remove();
+      this.shellMenu = undefined;
+    }
+    if (this.shellHeading) {
+      this.shellHeading.element.replaceChildren(...this.shellHeading.nodes);
+      document.title = this.shellHeading.title;
+      this.shellHeading = undefined;
+    }
+  }
+  private syncShell() {
+    if (typeof document === "undefined") return;
+    const title = this.resourceTitle;
+    if (!title) { this.restoreShell(); return; }
+    const leading = document.querySelector<HTMLElement>("[data-top-app-bar-leading]");
+    if (leading && !this.shellBack) {
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "icon-button";
+      back.dataset.entityBack = "";
+      render(icon("arrow_back"), back);
+      back.addEventListener("click", () => this.setTab(this.lastTaskTab));
+      leading.prepend(back);
+      this.shellBack = back;
+      const menu = leading.querySelector<HTMLElement>("[data-nav-toggle]");
+      const actions = document.querySelector<HTMLElement>("[data-top-app-bar-actions]");
+      if (menu && actions) {
+        const group = document.createElement("div");
+        group.className = "top-app-bar__group";
+        group.append(menu);
+        actions.prepend(group);
+        this.shellMenu = { menu, leading, group };
+      }
+    }
+    this.shellBack?.setAttribute("aria-label", this.t("backToTask", "Back to task"));
+    const heading = document.querySelector<HTMLElement>("[data-top-app-bar] h1");
+    if (heading && !this.shellHeading) this.shellHeading = { element: heading, nodes: [...heading.childNodes], title: document.title };
+    if (heading && heading.textContent !== title) heading.textContent = title;
+    document.title = `${title} · haneoka`;
+  }
+  private resourceLinks(className = "") {
+    return ([ ["box", "tabBox", "My cards"], ["account", "tabAccount", "Account bonuses"], ["teams", "tabTeams", "Teams"] ] as const).map(([tab, key, label]) => html`
+      <button class=${`button ${this.tab === tab ? "button--tonal" : "button--text"} ${className}`} type="button" aria-pressed=${this.tab === tab} @click=${() => this.setTab(tab)}>${this.t(key, label)}</button>
+    `);
+  }
   /** Sync status lives in the app bar; the box search uses the app-bar search field. */
   private syncAppBar() {
-    const resources = ([ ["box", "tabBox", "My cards"], ["account", "tabAccount", "Account bonuses"], ["teams", "tabTeams", "Teams"] ] as const).map(([tab, key, label]) => html`<button class="button button--text" aria-pressed=${this.tab === tab} @click=${(event: Event) => { (event.currentTarget as HTMLElement).closest("details")?.removeAttribute("open"); this.setTab(tab); }}>${this.t(key, label)}</button>`);
-    setAppBarActions("team-builder-resources", html`<div class="tb tb-resources">
-      <div class="cluster tb-resources__desktop">${resources}</div>
-      <details class="tb-resources__mobile"><summary class="button button--text">${this.t("resources", "Resources")}</summary><div class="surface stack">${resources}</div></details>
-    </div>`, this);
+    this.syncShell();
+    setAppBarActions("team-builder-resources", html`${this.resourceLinks("tb-resource-action")}`, this);
 
     const snapshot = this.snapshot;
     const status = snapshot?.status ?? "local";
@@ -894,11 +948,11 @@ export class TeamBuilder extends LitElement {
       SYNC_OWNER,
       html`<span class=${`tb-sync tb-sync--${status}`} data-app-bar-keep>
         ${signedOut
-          ? html`<a class="button button--tonal" href=${`/${this.locale}/account/?next=${encodeURIComponent(`/${this.locale}/team-builder/`)}`} title=${label}>
-              ${icon("cloud_sync", 20)}${this.t("syncSignIn", "Sign in to sync")}
+          ? html`<a class="button button--tonal" href=${`/${this.locale}/account/?next=${encodeURIComponent(`/${this.locale}/team-builder/`)}`} title=${label} aria-label=${this.t("syncSignIn", "Sign in to sync")}>
+              ${icon("cloud_sync", 20)}<span class="tb-sync__label">${this.t("syncSignIn", "Sign in to sync")}</span>
             </a>`
-          : html`<button class="button button--text" type="button" title=${label} @click=${() => void this.store?.refresh()}>
-              ${icon(name, 20)}${status === "offline" ? this.t("syncOfflineShort", "Offline") : label}
+          : html`<button class="button button--text" type="button" title=${label} aria-label=${label} @click=${() => void this.store?.refresh()}>
+              ${icon(name, 20)}<span class="tb-sync__label">${status === "offline" ? this.t("syncOfflineShort", "Offline") : label}</span>
             </button>`}
       </span>`,
       this,
@@ -941,10 +995,11 @@ export class TeamBuilder extends LitElement {
       this.tab === "pt" ? renderPtTab(this) : this.tab === "build" ? buildPanel() : this.tab === "box" ? renderBoxTab(this) : this.tab === "account" ? renderAccountTab(this) : this.tab === "song-comparison" ? renderSongComparisonTab(this) : renderTeamsTab(this);
     return html`
       <div class="team-builder tb">
-        <header class="tb-header">
+        <nav class="cluster tb-resource-links" aria-label=${this.t("resources", "Resources")}>${this.resourceLinks()}</nav>
+        ${!this.resourceTitle ? html`<header class="tb-header">
           ${this.renderTabs()}
-        </header>
-        <section id="tb-panel" class="tb-tabpanel" role="tabpanel" tabindex="-1" @focusin=${this.revealFocusedControl}>${panel}</section>
+        </header>` : nothing}
+        <section id="tb-panel" class="tb-tabpanel" role=${this.resourceTitle ? "region" : "tabpanel"} aria-label=${this.resourceTitle || this.t("title", "Team builder")} tabindex="-1" @focusin=${this.revealFocusedControl}>${panel}</section>
         ${renderCardEditor(this)}
         ${this.songPicker ? renderSongPicker(this) : nothing}
         ${this.imports.render()}

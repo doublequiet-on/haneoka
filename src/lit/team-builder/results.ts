@@ -1,15 +1,13 @@
 import { improvementPercent } from "../../lib/team-builder/engine/execution";
 /** Search results: ranked team cards, per-song rankings, plan summary, comparison. */
 import { html, nothing, type TemplateResult } from "lit";
+import { cache } from "lit/directives/cache.js";
 import type { EngineHit, SongRef, Timeline } from "../../lib/team-builder/engine/api";
 import { cardIdOf } from "../../lib/team-builder/sync/box-view";
 import { downloadBlob } from "../../lib/canvas-capture";
 import { renderTeamResultImage, type ResultImageCard } from "../shared/team-result-image";
 import { cardRarityName } from "../shared/rarity-icon";
 import { iconButton } from "../ui/controls";
-import { songChartSummary } from "../ui/song-summary";
-import { songMissions } from "../../lib/catalog-filters";
-import { missionSummary } from "./workspace-state";
 import { accordion } from "../ui/accordion";
 import { collectionList } from "../ui/collection-view";
 import { skillTimeline } from "../shared/skill-timeline";
@@ -67,21 +65,12 @@ function conditionLines(host: TeamBuilder, hit: EngineHit): string[] {
   ];
 }
 
-export function resultSong(host: TeamBuilder, song: SongRef, gekiso = true): TemplateResult {
+export function resultSong(host: TeamBuilder, song: SongRef): TemplateResult {
   const catalog = host.catalog!;
-  catalog.loadSongMetadata([song.songId]);
-  const metadata = catalog.chartMetadata(song), options = catalog.songOptions(song.songId, song.difficulty);
-  const seconds = metadata?.time;
-  const time = typeof seconds === "number" ? `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}` : "—";
-  const missions = songMissions(catalog.song(song.songId));
-  const task = missionSummary(missions);
-  return html`<div class="tb-result-song">
-    <div class="tb-result-song__image">${tileMedia(options)}</div>
-    <div class="stack"><a href=${entityHref({ server: catalog.songIdentity(song.songId).server, locale: host.locale as Locale, kind: "songs", id: String(song.songId) })}>${catalog.songTitle(song.songId)}</a>
-      <span>${catalog.difficultyLabel(song.songId, song.difficulty)} · ${time}</span>
-      <span>${catalog.attributeName(Number(catalog.song(song.songId).musicType))} · ${catalog.songArtist(song.songId)}</span>
-      ${gekiso && task ? html`<span>${task}</span>` : nothing}
-    </div></div>`;
+  return html`<div class="tb-result-song stack stack--tight">
+    <a class="tb-result-song__title" href=${entityHref({ server: catalog.songIdentity(song.songId).server, locale: host.locale as Locale, kind: "songs", id: String(song.songId) })}>${catalog.songTitle(song.songId)}</a>
+    <span class="supporting-text">${catalog.difficultyLabel(song.songId, song.difficulty)}</span>
+  </div>`;
 }
 
 function resultGrowth(host: TeamBuilder, kind: "members" | "snaps", key: string) {
@@ -162,7 +151,7 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
       out.push(chip(s.measure === "items" ? host.t("pointsPerPlay", "Event points per play") : host.t("itemsPerPlay", "Items per play"), format(host, hit.event.otherMean, 1)));
     if (hit.event.challengePoints && s.measure !== "challenge-points") out.push(chip(host.t("cpPerPlay", "Challenge points per play"), format(host, hit.event.challengePoints, 1)));
   }
-  const placements = s.goal === "gekiso" ? host.results?.results.find((result) => result.song?.songId === hit.song?.songId && result.song?.difficulty === hit.song?.difficulty)?.placements ?? (s.gekisoPlacementMode === "rank" ? [s.gekisoRank, s.gekisoRank, s.gekisoRank] : undefined) : undefined;
+  const placements = s.goal === "gekiso" && s.gekisoPlacementMode === "opponents" ? host.results?.results.find((result) => result.song?.songId === hit.song?.songId && result.song?.difficulty === hit.song?.difficulty)?.placements : undefined;
   if (placements) out.push(chip(host.t("gekisoPlacements", "Placements"), placements.join(" · "), icon("leaderboard", 16)));
   if (hit.skipScore !== null) out.push(chip(host.t("skipScore", "Skip score"), format(host, hit.skipScore), icon("fast_forward", 16)));
   if (hit.potential) out.push(chip(host.t("skillCoverage", "Skill coverage"), `${format(host, hit.potential.area * 100, 0)}%·s`));
@@ -587,19 +576,19 @@ function songMetaHref(host: TeamBuilder, hit: EngineHit): string | null {
   return resourceCollectionHref(`catalog/song-meta?${query}`, (hit.song ? host.catalog!.songIdentity(hit.song.songId).server : host.server) as ReleaseServer, host.locale as Locale) ?? null;
 }
 
-export function renderHit(host: TeamBuilder, hit: EngineHit, index: number, options: { rank?: TemplateResult; subtitle?: string; stale?: boolean; content?: TemplateResult } = {}): TemplateResult {
+export function renderHit(host: TeamBuilder, hit: EngineHit, index: number, options: { rank?: TemplateResult; subtitle?: string; stale?: boolean; content?: TemplateResult; showSong?: boolean } = {}): TemplateResult {
   const key = hitKey(hit);
   const expanded = host.expanded.has(key);
   const compared = host.compare.includes(key);
   const main = primary(host, hit);
-  const catalog = host.catalog!;
   return html`
     <article class=${`card card--outlined tb-hit${index === 0 ? " is-best" : ""}`} aria-label=${`${options.subtitle ?? `#${index + 1}`} · ${main.label} ${main.value}`}>
-      ${hit.song ? resultSong(host, hit.song, resultSettings(host, hit).goal === "gekiso" || resultSettings(host, hit).goal === "event" && resultSettings(host, hit).ptMode === "gekiso") : nothing}
+      ${hit.song && options.showSong !== false ? resultSong(host, hit.song) : nothing}
       <header class="tb-hit__header">
         <span class="tb-hit__rank">${options.rank ?? index + 1}</span>
         <div class="tb-hit__main">
-          <span class="tb-hit__label">${main.label}${options.subtitle ? html` · ${options.subtitle}` : nothing}</span>
+          <span class="tb-hit__label">${main.label}</span>
+          ${options.subtitle ? html`<span class="tb-hit__label">${options.subtitle}</span>` : nothing}
           <strong class="tb-hit__value tabular">${main.value}</strong>
         </div>
 
@@ -625,21 +614,22 @@ export function renderHit(host: TeamBuilder, hit: EngineHit, index: number, opti
           })()}
           </div></details>
         </div>
-      <button class="button button--text tb-hit__more" type="button" aria-expanded=${String(expanded)} @click=${() => {
-        if (expanded) host.expanded.delete(key);
-        else host.expanded.add(key);
-        host.requestUpdate();
-      }}>${icon(expanded ? "expand_less" : "expand_more", 18)}${expanded ? host.t("lessDetail", "Less") : host.t("moreDetail", "Details")}</button>
-      ${expanded
-        ? html`<div class="tb-hit__detail stack">
+      ${accordion({
+        id: `tb-detail-${key.replace(/[^a-z0-9]/giu, "-")}`,
+        label: host.t("moreDetail", "Details"),
+        expanded,
+        onExpandedChange: open => {
+          if (open) host.expanded.add(key);
+          else host.expanded.delete(key);
+          host.requestUpdate();
+        },
+        content: cache(expanded ? html`<div class="stack">
             <div class="cluster">${chips(host, hit)}</div>
-            <div class="cluster">${conditionLines(host, hit).map(line => html`<span class="tb-chip">${line}</span>`)}</div>
-            ${hit.song ? songChartSummary({ title: catalog.songTitle(hit.song.songId), difficulty: catalog.difficultyLabel(hit.song.songId, hit.song.difficulty), metrics: [{ label: host.common("media.chartPlayer.notes", "Notes"), value: host.master?.songs.get(hit.song.songId)?.difficulties.find(row => row.difficulty === hit.song!.difficulty)?.noteCount ?? "—" }, ...["time", "bpm", "nps"].map(key => ({ label: key === "time" ? host.common("common.fields.duration", "Duration") : key.toUpperCase(), value: catalog.chartMetadata(hit.song!)?.[key === "bpm" ? "firstBpm" : key] ?? "—" }))] }) : nothing}
             ${distribution(host, hit, hit.song)}
             ${powerNeeded(host, hit, hit.song)}
             ${skillOrderView(host, hit)}
-          </div>`
-        : nothing}
+          </div>` : nothing),
+      })}
     </article>
   `;
 }
@@ -726,16 +716,17 @@ export function renderResults(host: TeamBuilder): TemplateResult {
   const groups = multi && tab !== "overall" ? results.results.filter((result) => result.song && `${result.song.songId}:${result.song.difficulty}` === tab) : results.results;
   const proven = groups.length > 0 && groups.every((result) => result.proven);
   const gap = proven ? null : improvementPercent(groups);
-  const stats = results.results.reduce((total, result) => total + result.stats.exact, 0);
+  const sharedSong = !results.plan && groups.length === 1 ? groups[0]?.song : null;
   return html`
     <section class="tb-results stack" aria-live="polite">
       <div class="row row--wrap row--between tb-results__summary">
-        <span class=${`tb-proof${proven ? " is-proven" : ""}`}>${icon(proven ? "verified" : "hourglass_bottom", 18)}${scoreProof(host, proven)}${gap === null ? nothing : html` · ${host.t("improvementBound", "Up to {percent}% improvement", { percent: format(host, gap, 1) })}`}</span>
+        <span class=${`tb-proof${proven ? " is-proven" : ""}`}>${icon(proven ? "verified" : "hourglass_bottom", 18)}${scoreProof(host, proven)}</span>
         ${host.stale
-          ? html`<button class="button button--tonal button--small" type="button" title=${host.t("staleResults", "Conditions changed since this search.")} @click=${() => void host.run()}>${icon("refresh", 18)}${host.t("stale", "Conditions changed")} · ${host.t("rerun", "Search again")}</button>`
-          : html`<span class="tb-results__meta tabular">${stats > 0 ? host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, results.elapsedMs), exact: stats }) : host.t("resultElapsed", "{ms} ms", {ms:format(host,results.elapsedMs)})}</span>`}
+          ? html`<button class="button button--tonal button--small" type="button" title=${host.t("staleResults", "Conditions changed since this search.")} @click=${() => void host.run()}>${icon("refresh", 18)}${host.t("rerun", "Search again")}</button>`
+          : html`<span class="tb-results__meta tabular">${host.t("resultElapsed", "{ms} ms", {ms:format(host,results.elapsedMs)})}</span>`}
       </div>
       <div class="cluster">
+        ${gap === null ? nothing : html`<span class="tb-chip">${host.t("improvementBound", "Up to {percent}% improvement", { percent: format(host, gap, 1) })}</span>`}
         <button class="button button--tonal" type="button" ?disabled=${proven || host.stale || host.running}
           @click=${() => void host.run(true)}>${host.t("continueOptimal", "Continue verifying optimality")}</button>
       </div>
@@ -754,19 +745,15 @@ export function renderResults(host: TeamBuilder): TemplateResult {
           </section>`
         : nothing}
       ${multi
-        ? html`<md-outlined-select label=${host.t("songs", "Songs")} .value=${tab} @change=${(event: Event) => { host.resultTab = (event.target as HTMLInputElement).value; host.requestUpdate(); }}>
+        ? html`<md-outlined-select class="tb-results__selector" label=${host.t("songs", "Songs")} .value=${tab} @change=${(event: Event) => { host.resultTab = (event.target as HTMLInputElement).value; host.requestUpdate(); }}>
           <md-select-option value="overall"><div slot="headline">${host.t("overall", "Overall")}</div></md-select-option>
-          ${results.results.map(result => html`<md-select-option value=${`${result.song!.songId}:${result.song!.difficulty}`}><div slot="headline">${catalog.songTitle(result.song!.songId)} ${catalog.difficultyLabel(result.song!.songId, result.song!.difficulty)}</div></md-select-option>`)}
+          ${results.results.map(result => html`<md-select-option value=${`${result.song!.songId}:${result.song!.difficulty}`}><div slot="headline">${catalog.songTitle(result.song!.songId)}</div><div slot="supporting-text">${catalog.difficultyLabel(result.song!.songId, result.song!.difficulty)}</div></md-select-option>`)}
         </md-outlined-select>`
         : nothing}
-      <div class="cluster tb-results__conditions">
-        <span class="tb-chip">${resultSettings(host).scope === "theoretical" ? host.t("scopeAll", "All cards, full growth") : host.t("scopeBox", "My cards")}</span>
-        <span class="tb-chip">${host.t("unknownPolicy", "Growth not entered")}: ${growthPolicyLabel(host, resultSettings(host))}</span>
-        ${multi ? html`<span class="tb-chip">${host.t("chartCount", "{count} charts", { count: results.results.length })} · ${host.t("perChartTeams", "Separate team per chart")}</span>` : nothing}
-      </div>
+      ${sharedSong ? html`<section class="surface">${resultSong(host, sharedSong)}</section>` : nothing}
       ${compareTable(host, shown)}
       ${shown.length
-        ? shown.map((hit, index) => renderHit(host, hit, index, results.plan ? { subtitle: hit === results.plan.challenge ? host.t("routeChallenge", "Challenge live") : host.t("routeLive", "Normal live") } : {}))
+        ? shown.map((hit, index) => renderHit(host, hit, index, { showSong: !sharedSong, subtitle: results.plan ? hit === results.plan.challenge ? host.t("routeChallenge", "Challenge live") : host.t("routeLive", "Normal live") : undefined }))
         : html`<div class="state"><p class="state__title">${proven ? host.t("noTeams", "No team meets these conditions") : host.t("noCandidate", "No recommendation yet")}</p></div>`}
       ${shown.length && resultSettings(host).goal !== "plan" && resultSettings(host).scope !== "theoretical" && !host.stale ? growthSection(host) : nothing}
     </section>

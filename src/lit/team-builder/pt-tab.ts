@@ -27,6 +27,7 @@ import { sectionHeading } from "./catalog";
 import { boostControl } from "./boost-control";
 import { rovingKeydown, segmented } from "../ui/controls";
 import { icon } from "../ui/icon";
+import { accordion } from "../ui/accordion";
 import { issueField, ptField } from "./pt-fields";
 import { farmingConditions, farmingMode, farmingSettings } from "./workspace-state";
 import type { FarmingSettings } from "./types";
@@ -439,7 +440,16 @@ function renderSetup(host: TeamBuilder): TemplateResult {
           label=${host.t("pt.baselineJust", "Baseline JUST (%)")} .value=${live(String(s.ptJust))}
           @change=${(e:Event)=>host.updateSettings({ptJust:Number((e.target as HTMLInputElement).value)})}></md-outlined-text-field>`) : nothing}
       ` : f.play !== "skip" ? playSection(host, s, patch => set(patch)) : nothing}
-      <details class="fold"><summary>${host.t("farm.advanced", "Advanced conditions")}</summary><div class="stack">
+      ${accordion({
+        id: "tb-farm-advanced",
+        label: host.t("farm.advanced", "Advanced conditions"),
+        expanded: host.expanded.has("farm-advanced"),
+        onExpandedChange: expanded => {
+          if (expanded) host.expanded.add("farm-advanced");
+          else host.expanded.delete("farm-advanced");
+          host.requestUpdate();
+        },
+        content: html`<div class="stack">
         ${f.play === "gekiso" ? ptField(host, "gekiso-input", html`<md-outlined-text-field type="number" min="1" step="1"
           label=${host.t("pt.luckSamples", "Luck samples")} .value=${live(String(s.ptLuckSamples))}
           @change=${(e:Event)=>host.updateSettings({ptLuckSamples:Number((e.target as HTMLInputElement).value)})}></md-outlined-text-field>`)
@@ -457,7 +467,8 @@ function renderSetup(host: TeamBuilder): TemplateResult {
               ${[0,3,5,15,60].map(value=>html`<md-select-option value=${String(value)}><div slot="headline">${value ? `${value} s` : host.t("noLimit", "Until proven")}</div></md-select-option>`)}
             </md-outlined-select>
           `}
-      </div></details>
+      </div>`,
+      })}
       <span class="tb-results__meta">${host.t("farm.memory", "Character and song memory bonuses")}: ${f.includeMemory ? host.t("farm.included", "Included") : host.t("farm.excluded", "Excluded")}</span>
     </section>
   `;

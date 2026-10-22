@@ -174,9 +174,21 @@ export function eventSection(host: TeamBuilder, s = host.searchSettings): Templa
   `;
 }
 
-export function playSummary(host: TeamBuilder, s: BuildSettings): string {
-  return [host.t("play", "Play"), s.playMode === "ap" ? host.t("playAp", "All Perfect") : `GREAT ${s.great}%${s.goal === "gekiso" ? "" : ` · GOOD ${s.good}% · MISS ${s.miss}%`} · ${host.t("missEvery", "Miss every N notes")}: ${s.missEvery}`,
-    ...(s.goal === "gekiso" && host.hasMission("JustCount", s.songs) ? [`JUST ${s.just}%`] : [])].join(" · ");
+export function playConditions(host: TeamBuilder, s = host.searchSettings): TemplateResult {
+  const key = `play-${host.tab}-${host.tab === "build" ? host.buildMode : s.goal}`;
+  return accordion({
+    id: `tb-${key}`,
+    label: host.t("play", "Play"),
+    supportingText: s.playMode === "ap" ? host.t("playAp", "All Perfect") : host.t("playCustom", "Custom"),
+    leading: icon("piano", 20),
+    expanded: host.expanded.has(key),
+    onExpandedChange: expanded => {
+      if (expanded) host.expanded.add(key);
+      else host.expanded.delete(key);
+      host.requestUpdate();
+    },
+    content: html`<div class="stack">${playSection(host, s)}</div>`,
+  });
 }
 
 export function playSection(host: TeamBuilder, s = host.searchSettings, set = (patch: Partial<BuildSettings>) => host.updateSettings(patch)): TemplateResult {
@@ -567,7 +579,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                 `
               : nothing
           }
-          ${s.goal === "score" || s.goal === "gekiso" ? html`<details class="fold"><summary>${playSummary(host, s)}</summary>${playSection(host)}</details>` : nothing}
+          ${s.goal === "score" || s.goal === "gekiso" ? playConditions(host, s) : nothing}
         </section>` : nothing}
         ${
           s.goal === "plan"
@@ -575,7 +587,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                 <section class="surface stack">
                   ${sectionHeading({ icon: "cycle", label: host.t("planSetup", "Resource plan") })}
                   ${eventSection(host)}
-                  <details class="fold"><summary>${playSummary(host, s)}</summary>${playSection(host)}</details>
+                  ${playConditions(host, s)}
                   <span class="tb-results__meta">${host.t("farm.memory", "Character / song memory bonuses")}: ${host.t("farm.included", "Included")}</span>
                   <div class="tb-number-grid">
                     <md-outlined-text-field
