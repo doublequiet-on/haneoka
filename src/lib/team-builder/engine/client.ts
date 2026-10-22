@@ -209,12 +209,14 @@ export class EngineClient {
       snapshot?.({ requestId: request.requestId!, contextKey: request.contextKey!, response: latest, stopReason: latest.stopReason,
         coverage: { completed: latest.results.filter(result => result.proven || result.exclusion).length, total: latest.results.length } });
     };
+    let wakeWork: (() => void) | undefined;
     let stop!: (reason: StopReason) => void;
     const interrupted = new Promise<EngineResponse>(resolve => {
       stop = reason => {
         if (stopped) return;
         publish({ ...latest, stopReason: reason }, true);
         stopped = true;
+        wakeWork?.();
         for (const worker of this.pool) worker.cancel();
         resolve(latest);
       };
@@ -253,6 +255,7 @@ export class EngineClient {
         const merged = (): EngineResponse => ({ ...latest, results: [...parts], overall: [], unknownCards: [...unknownCards], elapsedMs: clock() - started });
         const waiters = new Set<() => void>();
         const wake = () => { for (const resolve of waiters) resolve(); waiters.clear(); };
+        wakeWork = wake;
         let failed = false;
         let done = states.filter(state => state.done).length * count;
         const take = (preferred: number) => {
