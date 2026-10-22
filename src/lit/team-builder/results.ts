@@ -819,17 +819,21 @@ async function exportImage(host: TeamBuilder, hit: EngineHit) {
     title: host.t("title", "Team builder"),
     subtitle: hit.song
       ? `${catalog.songTitle(hit.song.songId)} · ${catalog.difficultyLabel(hit.song.songId, hit.song.difficulty)}`
-      : main.label,
+      : "",
+    jacket: hit.song ? catalog.songOptions(hit.song.songId, hit.song.difficulty).image : undefined,
     membersLabel: host.t("members", "Members"),
     snapshotsLabel: host.t("snapshots", "Snaps"),
     leaderLabel: host.t("leader", "Leader"),
     emptyLabel: host.t("noSnap", "No snap"),
+    allEmptyLabel: host.t("allNoSnaps", "No Snapshots in any of the five slots"),
     imageUnavailableLabel: host.t("imageUnavailable", "Image unavailable"),
     members: hit.members.map((key, index) => card("members", key, index === 0)),
     snapshots: hit.snaps.map((key) => (key ? card("snaps", key, false) : null)),
     metrics: [
       { label: main.label, value: main.value, detail: "" },
-      { label: host.t("power", "Power"), value: format(host, hit.power), detail: "" },
+      ...(resultSettings(host, hit).goal === "power"
+        ? []
+        : [{ label: host.t("power", "Power"), value: format(host, hit.power), detail: "" }]),
       ...(hit.score
         ? [
             {
