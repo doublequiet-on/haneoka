@@ -739,7 +739,15 @@ export class TeamBuilder extends LitElement {
   private activeContext = "";
   private runGeneration = 0;
   calculationContext() {
-    return JSON.stringify([this.snapshot?.owner, this.loadedServer, this.data?.identity, this.data?.crossServer?.identities, this.request()]);
+    const request = this.request();
+    if (request) request.timeLimitMs = null;
+    return JSON.stringify([
+      this.snapshot?.owner,
+      this.loadedServer,
+      this.data?.identity,
+      this.data?.crossServer?.identities,
+      request,
+    ]);
   }
   async run(verify = false) {
     if (this.tab === "pt" && this.settings.rewardMode === "recommendation") { await this.pt.start(false); return; }
