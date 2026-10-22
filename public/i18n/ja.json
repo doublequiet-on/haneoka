@@ -2945,6 +2945,7 @@
       "importLocalChart": "ローカル譜面を読み込む",
       "importLocalAudio": "ローカル音源を読み込む",
       "serverLibrary": "サーバー楽曲",
+      "importGbp": "ガルパ譜面を取り込む",
       "catalogSource": "楽曲ソース",
       "currentServer": "現在のサーバー",
       "loadMoreSongs": "さらに楽曲を表示",

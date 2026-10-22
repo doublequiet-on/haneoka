@@ -6138,6 +6138,7 @@ export class CatalogScreen extends LitElement {
       onPlay: item.musicUrl ? () => void this.toggleSong(id, String(item.musicUrl)) : undefined,
       onChart: this.chartRow(item).file ? () => void this.openChart() : undefined,
       sonolus: this.sonolusUrl(item),
+      editor: this.chartEditorHref(item),
     });
   }
 
@@ -6148,7 +6149,16 @@ export class CatalogScreen extends LitElement {
       mode: this.chartMode,
       onMode: mode => { this.chartMode = mode; },
       onDownload: () => void this.downloadChartImage(item),
+      editor: this.chartEditorHref(item),
     });
+  }
+  private chartEditorHref(item: Item): string | undefined {
+    if (this.settings.origin !== "bestdori" || !this.chartRow(item).file) return;
+    const query = new URLSearchParams({
+      provider: "bestdori", region: this.bestdoriRegion(), songId: String(item.musicId),
+      difficulty: difficultyKey(this.chartRow(item), this.detailDifficulty),
+    });
+    return `/${this.settings.locale}/chart-editor/create/?${query}`;
   }
   /** Sekai scores are SUS files; the player reads them through the Sekai plugin. */
   private renderChartPlayer(item: Item, chart: Item, label: string) {

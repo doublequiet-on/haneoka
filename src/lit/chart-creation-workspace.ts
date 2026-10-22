@@ -1,8 +1,8 @@
 // L3 — GEB
-// Input: 本地／云端工程、歌曲资料、音频与原生素材 release 身份。
+// Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
 // Output: 谱面编辑、本地保存及社区发布；预览复用 chart-simulator 观看宿主。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
-// Effects/Dependencies: IndexedDB、媒体与应用栏；预览退出和断开时销毁查看器并释放素材 URL。
+// Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { snackbar } from "../lib/snackbar";
 import { LitElement, html, nothing, type PropertyValues } from "lit";
@@ -50,6 +50,7 @@ import type { ChartCollectionScope } from "./chart-creation-collections";
 import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
 import { applyAuthorCollectionOperation, type AuthorCollectionOperation } from "../../packages/chart-editor/src/creation/collections-history";
 import type { ChartCreationLibrary, PublicChartImport, CreationLibraryProvider } from "./chart-creation-library";
+import { isBestdoriServer } from "../../packages/bestdori/src/transport";
 import type { ChartSkin } from "../../packages/embed-cassiopeia/src/types";
 import type { ChartSimulator, ChartSimulatorPlayback } from "./runtime/chart-simulator";
 import { AuthorNativeSpeedError } from "../lib/chart-creation/native-speed-plan";
@@ -449,7 +450,20 @@ export class ChartCreationWorkspace extends LitElement {
         const recent = localStorage.getItem("haneoka-chart-last-project");
         if (recent && this.documents.some(document => document.id === recent)) await this.open(recent);
       }
-    });
+    }).then(() => this.openLinkedBestdoriChart());
+  }
+  private async openLinkedBestdoriChart() {
+    if (!this.isConnected) return;
+    const url = new URL(location.href), params = url.searchParams;
+    const region = params.get("region") ?? "jp", songId = params.get("songId") ?? "", difficulty = params.get("difficulty") ?? "";
+    if (params.get("provider") !== "bestdori" || !isBestdoriServer(region) || !/^[1-9]\d{0,8}$/.test(songId) || !["easy", "normal", "hard", "expert", "special"].includes(difficulty)) return;
+    await this.updateComplete;
+    const library = this.querySelector<ChartCreationLibrary>("chart-creation-library");
+    if (!library) return;
+    for (const key of ["provider", "region", "songId", "difficulty"]) params.delete(key);
+    history.replaceState(history.state, "", url);
+    if (this.narrow) this.closePanels();
+    await library.show("bestdori", undefined, { region, songId, difficulty });
   }
   disconnectedCallback() {
     clearTimeout(this.autosaveTimer);
@@ -2169,7 +2183,7 @@ export class ChartCreationWorkspace extends LitElement {
           ${this.t("serverLibrary")}
         </button>
         <button class="button button--tonal" ?disabled=${this.busy} @click=${() => this.showLibrary("bestdori")}>
-          Bestdori
+          ${this.t("importGbp")}
         </button>
         <button class="button button--filled" ?disabled=${this.busy} @click=${() => this.pick("[data-audio]")}>
           ${this.t("importLocalAudio")}

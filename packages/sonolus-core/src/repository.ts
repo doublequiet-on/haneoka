@@ -39,6 +39,8 @@ export function matchesChartSearch(chart: ChartDescriptor, keywords: string, tag
     chart.artistFilters,
     chart.author,
     chart.difficulty,
+    chart.description,
+    chart.searchKeywords,
     chart.tags,
     chart.categories,
     tags,

@@ -2945,6 +2945,7 @@
       "importLocalChart": "Import local chart",
       "importLocalAudio": "Load local audio",
       "serverLibrary": "Server library",
+      "importGbp": "Import GBP chart",
       "catalogSource": "Library source",
       "currentServer": "Current server",
       "loadMoreSongs": "Show more songs",

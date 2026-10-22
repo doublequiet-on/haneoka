@@ -53,11 +53,13 @@ export interface ChartDescriptor {
   categories?: ChartFilterValue[];
   tags?: JsonValue[];
   dataId: string;
+  description?: string;
   difficulty: string;
   name: string;
   publishedAt: number;
   rating: number;
   songId: string;
+  searchKeywords?: string[];
   title: string;
 }
 

@@ -235,6 +235,7 @@ class BuildData:
         self.restore_archive = restore_archive
         self.restore_output = restore_output
         self.prefetch_stats: dict[str, dict[str, Any]] = {}
+        self.sonolus_combo_audit: dict[str, Any] = {"status": "unavailable"}
         self.assets = root / "assets"
         self.runtime = root / "runtime"
         self.asset_path_set = {
@@ -2329,6 +2330,10 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
     }
     canonical_charts = _canonical_score_charts(chart_files)
     difficulty_estimates = build_difficulty_estimates(data, source_id, chart_files, score_rows)
+    combo_audit: dict[str, Any] = {
+        "source": "our-notes", "reference": "MasterLiveMusicScore._fullComboCount",
+        "matched": 0, "mismatches": [], "unavailable": [], "missingReference": [],
+    }
     score_model = _score_model(data)
     luck_expectations = _luck_expectations(data)
     gekisou_rank_bonuses = _gekisou_rank_bonuses(data)
@@ -2413,6 +2418,18 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
             score_path = f"Assets/AddressableResources/Live/MusicScore/{score_name}.bytes"
             score_file = data.asset(score_path)
             note_count = int(score.get("_fullComboCount") or 0)
+            estimate = difficulty_estimates.get(str(score_id))
+            audit_entry = {"musicId": identity, "difficulty": name, "scoreId": score_id}
+            if not estimate:
+                combo_audit["unavailable"].append(audit_entry)
+            elif note_count <= 0:
+                combo_audit["missingReference"].append(audit_entry)
+            else:
+                converted = estimate["quality"]["canonicalJudgedCount"]
+                if converted == note_count:
+                    combo_audit["matched"] += 1
+                else:
+                    combo_audit["mismatches"].append({**audit_entry, "official": note_count, "converted": converted})
             play_level = int(score.get("_musicScoreLevel") or 0)
             raw_display_level = score.get("_musicScoreDisplayLevel")
             sort_level = float(play_level if raw_display_level is None else raw_display_level)
@@ -2428,7 +2445,7 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
                     noteCount=note_count,
                     publishedAt=_timestamp(row.get("_startAt")),
                     file=score_file,
-                    difficultyEstimate=difficulty_estimates.get(str(score_id)),
+                    difficultyEstimate=estimate,
                 )
             )
             metrics = _score_metrics(
@@ -2535,6 +2552,8 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
         output[str(identity)] = _present(
             musicId=identity,
             musicTitle=data.text(row.get("_titleTextID"), f"Music {identity}"),
+            ruby=data.text(row.get("_rubyTitleTextID"), ""),
+            phonetic=data.text(row.get("_phoneticTextID"), ""),
             artistId=row.get("_bandNameTextID") or None,
             artistName=(
                 data.text(row.get("_bandNameTextID"), "")
@@ -2623,6 +2642,18 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
                 "MasterLiveComboScoreBonus", "MasterLiveSettings",
             ],
         }
+    combo_audit["checked"] = combo_audit["matched"] + len(combo_audit["mismatches"])
+    combo_audit["status"] = (
+        "mismatch" if combo_audit["mismatches"] else
+        "incomplete" if combo_audit["unavailable"] or combo_audit["missingReference"] else
+        "matched" if combo_audit["checked"] else "unavailable"
+    )
+    data.sonolus_combo_audit = combo_audit
+    for mismatch in combo_audit["mismatches"]:
+        print(
+            f"Sonolus Combo {mismatch['scoreId']}: {mismatch['converted']} / {mismatch['official']}",
+            file=sys.stderr,
+        )
     return output, metadata
 
 
@@ -8779,6 +8810,7 @@ def build_api(
     result = {
         "schema": "haneoka-catalog-build-v1",
         "cardRecognition": recognition,
+        "sonolusComboAudit": data.sonolus_combo_audit,
         "server": config.id,
         "sourceId": source_id,
         "buildId": build_id,

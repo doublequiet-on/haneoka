@@ -27,3 +27,9 @@ plus five songs sharing an artist. Artist recommendations favor the current
 difficulty and nearby ratings, with a search link to the full artist catalog.
 Section titles use Sonolus client localization tokens. Catalog `previewUrl`
 values become the level's separate `preview` audio resource.
+
+Descriptions show lyricist, composer and arranger credits with Sonolus's
+`#LYRICIST`, `#COMPOSER`, `#ARRANGER` and `#SEPARATOR_COLON` interpolation keys.
+Ruby and phonetic readings also provide hiragana, katakana and romaji keywords.
+Search includes these readings, every credit translation and description text;
+it filters descriptors before preparing chart data.

@@ -367,6 +367,12 @@ PYTHONPATH=scripts python scripts/pipeline.py --server jp <command> --help
 
 ## Commands
 
+`build-api` compares every available official song chart's converted judged-note
+count with `MasterLiveMusicScore._fullComboCount`. The build's `reports/api.json`
+includes `sonolusComboAudit` with matched counts, per-chart mismatches, unavailable
+charts and missing references. Inspect this report before publishing a release;
+an incomplete audit is reported separately from matching counts.
+
 | Command                                               | Purpose                                                                                                     |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `ingest`                                              | Normalize an APK, APKS/XAPK, or split-APK directory                                                         |

@@ -117,6 +117,140 @@ const finiteNumber = (value: unknown): number => (typeof value === "number" && N
 const toTick = (beat: number): number => Math.round(beat * PPQ);
 const laneToPos = (lane: number): number => lane * LANE_POS_SCALE;
 
+/** Size simultaneous neighbours together; their source lane centres stay fixed. */
+function fitAdjacentNoteWidths(notes: BestdoriSsNote[]): void {
+  const events = new Map<number, Array<{ node: BestdoriSsNote; owner: number }>>();
+  const lines: Array<{
+    owner: number;
+    target: BestdoriSsNote[];
+    points: Array<{ tick: number; center: number; size: number }>;
+    cursor: number;
+  }> = [];
+  for (const [owner, note] of notes.entries()) {
+    const nodes = note.node ?? [note];
+    if (!note.node && (note.size ?? NOTE_SIZE) > NOTE_SIZE) continue;
+    for (const node of nodes) {
+      const tick = node.t ?? 0,
+        group = events.get(tick) ?? [];
+      group.push({ node, owner });
+      events.set(tick, group);
+    }
+    if (note.node)
+      lines.push({
+        owner,
+        target: note.node,
+        cursor: 0,
+        points: note.node.map((node) => ({
+          tick: node.t ?? 0,
+          center: finiteNumber(node.pos) + (node.size ?? NOTE_SIZE) / 2,
+          size: node.size ?? NOTE_SIZE,
+        })),
+      });
+  }
+  const starts = [...lines].sort((a, b) => a.points[0]!.tick - b.points[0]!.tick);
+  const active = new Set<(typeof lines)[number]>();
+  let nextLine = 0;
+  for (const [tick, group] of [...events].sort(([a], [b]) => a - b)) {
+    while (nextLine < starts.length && starts[nextLine]!.points[0]!.tick <= tick) active.add(starts[nextLine++]!);
+    const occupants = new Map<
+      number,
+      { center: number; size: number; node?: BestdoriSsNote; line?: (typeof lines)[number] }
+    >();
+    for (const line of active) {
+      if (line.points.at(-1)!.tick < tick) {
+        active.delete(line);
+        continue;
+      }
+      while (line.cursor + 1 < line.points.length && line.points[line.cursor + 1]!.tick <= tick) line.cursor++;
+      const head = line.points[line.cursor]!,
+        tail = line.points[line.cursor + 1] ?? head;
+      const ratio = tail.tick === head.tick ? 0 : (tick - head.tick) / (tail.tick - head.tick);
+      occupants.set(line.owner, {
+        center: head.center + (tail.center - head.center) * ratio,
+        size: head.size + (tail.size - head.size) * ratio,
+        line,
+      });
+    }
+    for (const { node, owner } of group) {
+      const existing = occupants.get(owner);
+      occupants.set(
+        owner,
+        existing
+          ? { ...existing, node }
+          : {
+              node,
+              center: finiteNumber(node.pos) + (node.size ?? NOTE_SIZE) / 2,
+              size: node.size ?? NOTE_SIZE,
+            },
+      );
+    }
+    const ordered = [...occupants.values()].sort((a, b) => a.center - b.center);
+    const widths = ordered.map((point) => {
+      let width = point.size;
+      for (const other of ordered) {
+        const distance = Math.abs(other.center - point.center);
+        if (distance > 1e-6) width = Math.min(width, distance);
+      }
+      return width;
+    });
+    ordered.forEach((point, index) => {
+      const width = widths[index]!;
+      if (width >= point.size) return;
+      const node = point.node ?? { t: tick, visible: false };
+      node.pos = point.center - width / 2;
+      node.size = width;
+      if (!point.node) point.line!.target.push(node);
+    });
+  }
+  for (const line of lines) line.target.sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
+}
+
+/** Hidden ornament runs have no source checkpoints between their visible ends. */
+function connectHiddenWaveCorridors(connections: BestdoriChartConnection[], nodes: BestdoriSsNote[]): void {
+  let begin = 0;
+  for (let end = 1; end < connections.length; end++) {
+    if (connections[end]!.hidden) continue;
+    const points = connections.slice(begin, end + 1);
+    let turns = 0;
+    for (let i = 2; i < points.length - 1; i++) {
+      const a = points[i - 1]!,
+        b = points[i]!,
+        c = points[i + 1]!;
+      const left = finiteNumber(b.lane) - finiteNumber(a.lane);
+      const right = finiteNumber(c.lane) - finiteNumber(b.lane);
+      if (
+        left * right < 0 &&
+        Math.abs(left) >= 1 &&
+        Math.abs(right) >= 1 &&
+        finiteNumber(b.beat) - finiteNumber(a.beat) <= 1 / 8 &&
+        finiteNumber(c.beat) - finiteNumber(b.beat) <= 1 / 8
+      )
+        turns++;
+    }
+    if (turns >= 6) {
+      const head = connections[begin]!,
+        tail = connections[end]!;
+      const firstBeat = finiteNumber(head.beat),
+        span = finiteNumber(tail.beat) - firstBeat;
+      const headNode = nodes.find((node) => node.t === toTick(firstBeat))!;
+      const tailNode = nodes.find((node) => node.t === toTick(finiteNumber(tail.beat)))!;
+      const corridorWidth = Math.min(headNode.size ?? NOTE_SIZE, tailNode.size ?? NOTE_SIZE);
+      if (span > 0)
+        for (const node of nodes) {
+          if ((node.t ?? 0) <= toTick(firstBeat) || (node.t ?? 0) >= toTick(finiteNumber(tail.beat))) continue;
+          const ratio = ((node.t ?? 0) / PPQ - firstBeat) / span;
+          const centerLane = finiteNumber(head.lane) + (finiteNumber(tail.lane) - finiteNumber(head.lane)) * ratio;
+          const corridorLeft = laneToPos(centerLane) + (NOTE_SIZE - corridorWidth) / 2,
+            originalLeft = finiteNumber(node.pos);
+          const originalRight = originalLeft + (node.size ?? NOTE_SIZE);
+          node.pos = Math.min(originalLeft, corridorLeft);
+          node.size = Math.max(originalRight, corridorLeft + corridorWidth) - node.pos;
+        }
+    }
+    begin = end;
+  }
+}
+
 /**
  * Return the SS left edge and width for a Bestdori directional flick.
  *
@@ -148,6 +282,7 @@ export function bestdoriChartToSs(input: unknown): BestdoriSsDocument {
   const skill: number[] = [];
   const feverRanges: Array<[startTick: number, endTick?: number]> = [];
   const notes: BestdoriSsNote[] = [];
+  const slides: Array<{ connections: BestdoriChartConnection[]; nodes: BestdoriSsNote[] }> = [];
 
   for (const raw of source) {
     if (!raw || typeof raw !== "object") continue;
@@ -202,6 +337,7 @@ export function bestdoriChartToSs(input: unknown): BestdoriSsDocument {
           if (point.hidden) entry.visible = false;
           return entry;
         });
+        slides.push({ connections, nodes: node });
         notes.push({ type: "long", node });
         break;
       }
@@ -220,6 +356,8 @@ export function bestdoriChartToSs(input: unknown): BestdoriSsDocument {
     }
   }
 
+  fitAdjacentNoteWidths(notes);
+  for (const slide of slides) connectHiddenWaveCorridors(slide.connections, slide.nodes);
   if (!bpm.some((entry) => entry.t === 0)) bpm.unshift({ t: 0, bpm: 120 });
   bpm.sort((left, right) => left.t - right.t);
   skill.sort((left, right) => left - right);

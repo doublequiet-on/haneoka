@@ -189,11 +189,11 @@ export class ChartCreationLibrary extends LitElement {
     this.query = ""; this.bandFilter = ""; this.characterFilter = "";
     if (this.opened) void this.loadIndex();
   }
-  async show(provider: CreationLibraryProvider = "haneoka", mediaKind?: "audio" | "cover") {
+  async show(provider: CreationLibraryProvider = "haneoka", mediaKind?: "audio" | "cover", selection?: { region: BestdoriServer; songId: string; difficulty: string }) {
     this.mediaKind = mediaKind;
     this.trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     const server = readReleaseServer();
-    if (provider !== this.provider || (provider === "haneoka" && server !== this.server) || (this.indexLocale && this.indexLocale !== this.locale)) {
+    if (provider !== this.provider || (provider === "haneoka" && server !== this.server) || (selection && selection.region !== this.bestdoriRegion) || (this.indexLocale && this.indexLocale !== this.locale)) {
       this.cancelRequest();
       this.identity = undefined;
       this.items = [];
@@ -207,6 +207,7 @@ export class ChartCreationLibrary extends LitElement {
       this.provider = provider;
       this.difficulty = "";
     }
+    if (selection) this.bestdoriRegion = selection.region;
     this.opened = true;
     await this.updateComplete;
     if (!this.isConnected || !this.opened) return;
@@ -214,6 +215,11 @@ export class ChartCreationLibrary extends LitElement {
     if (!dialog.open) dialog.showModal();
     if (!this.indexLoaded) await this.loadIndex();
     else if (!this.filterCatalog) void this.loadFilters();
+    if (selection && this.isConnected && this.opened && this.indexLoaded) {
+      this.chosen = selection.songId;
+      this.difficulty = selection.difficulty;
+      await this.importChosen();
+    }
   }
   private close() {
     this.cancelRequest();

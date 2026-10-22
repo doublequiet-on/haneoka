@@ -1533,6 +1533,8 @@ const baseSong = (musicId: number, entry: Obj, lang?: string): Obj => {
   return {
     musicId,
     musicTitle: entry.musicTitle ?? null,
+    ruby: entry.ruby ?? null,
+    phonetic: entry.phonetic ?? null,
     bandId: num(entry.bandId),
     jacketUrl: jacket,
     jacketThumbUrl: jacketThumb,

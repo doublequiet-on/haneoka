@@ -2945,6 +2945,7 @@
       "importLocalChart": "從本機匯入譜面",
       "importLocalAudio": "從本機載入音樂",
       "serverLibrary": "伺服器曲庫",
+      "importGbp": "匯入 GBP 譜面",
       "catalogSource": "曲庫來源",
       "currentServer": "目前伺服器",
       "loadMoreSongs": "顯示更多歌曲",

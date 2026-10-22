@@ -1,3 +1,4 @@
+import { toHiragana, toKatakana, toRomaji } from "wanakana";
 import type {
   CatalogLocale,
   CatalogProjectionOptions,
@@ -161,6 +162,47 @@ function absoluteUrl(value: unknown, baseUrl: string | undefined): string | unde
   } catch {
     return value;
   }
+}
+
+function textVariants(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (Array.isArray(value)) return value.flatMap(textVariants);
+  return isObject(value) ? Object.values(value).flatMap(textVariants) : [];
+}
+
+function songDescription(
+  song: Record<string, unknown>,
+  locales: readonly CatalogLocale[],
+  options: CatalogProjectionOptions,
+) {
+  const readings = [
+    ...new Set(
+      [song.ruby, song.phonetic, song.reading]
+        .flatMap(textVariants)
+        .flatMap((reading) => [reading, toHiragana(reading), toKatakana(reading), toRomaji(reading)]),
+    ),
+  ];
+  const credits = [
+    ["lyricist", "#LYRICIST"],
+    ["composer", "#COMPOSER"],
+    ["arranger", "#ARRANGER"],
+  ] as const;
+  const lines = credits.flatMap(([field, label]) => {
+    const value = localizedText(song[field], locales, options.encodeText);
+    return value ? [`${label}:#SEPARATOR_COLON:${value.startsWith("##LOCALIZE:") ? value : `##:${value}`}`] : [];
+  });
+  if (readings.length) lines.push(`##:${readings.join(" ")}`);
+  if (!lines.length) lines.push(`##:${localizedText(song.musicTitle ?? song.title, locales)}`);
+  return {
+    description: lines.join("\n"),
+    searchKeywords: [
+      ...new Set([
+        ...readings,
+        ...credits.flatMap(([field]) => textVariants(song[field])),
+        ...textVariants(song.description),
+      ]),
+    ],
+  };
 }
 
 function difficultyName(value: Record<string, unknown>, index: number): string | null {
@@ -364,6 +406,7 @@ export function projectCatalogCharts(
     const artists = options.encodeText ? songArtists(song, names, locales, options.encodeText) : author;
     const artistFilters = songArtistFilters(song, names, locales, options.encodeText);
     const categories = songCategories(song, options);
+    const description = songDescription(song, locales, options);
     const difficulties = Array.isArray(song.difficulty) ? song.difficulty : [];
     for (const [index, rawDifficulty] of difficulties.entries()) {
       if (!isObject(rawDifficulty)) continue;
@@ -380,6 +423,7 @@ export function projectCatalogCharts(
       const bgmUrl = absoluteUrl(song.musicUrl, options.mediaBaseUrl);
       const previewUrl = absoluteUrl(song.previewUrl, options.mediaBaseUrl);
       const metadata = {
+        ...description,
         artists,
         artistFilters,
         categories,
@@ -576,6 +620,7 @@ export function projectLevelDetails(
   return {
     ...(template ?? {}),
     item: chart.item,
+    description: chart.description ?? template?.description ?? "",
     actions: Array.isArray(template?.actions) ? template.actions : [],
     hasCommunity: typeof template?.hasCommunity === "boolean" ? template.hasCommunity : false,
     leaderboards: Array.isArray(template?.leaderboards) ? template.leaderboards : [],

@@ -1,11 +1,17 @@
 // L3 — GEB
-// Input: 歌曲／社区谱面播放、谱面页与 Sonolus 入口。
-// Output: 共用详情图标和谱面页下载／视图切换控件。
+// Input: 歌曲／社区谱面播放、谱面页、GBP 编辑器与 Sonolus 入口。
+// Output: 共用详情图标、编辑器导入和谱面页下载／视图切换控件。
 // Pos: [Map](L2-2.md)；歌曲媒体入口模板。
 // Effects/Dependencies: Lit 模板与已有共享样式；行为由调用者持有。
 import { html, nothing } from "lit";
 import { clientText } from "../../i18n/client";
 import { segmented } from "./controls";
+import { icon } from "./icon";
+
+function editChartAction(locale: string, href?: string) {
+  const label = clientText(locale, "editors.chart.importGbp");
+  return href ? html`<a class="icon-button" href=${href} aria-label=${label} title=${label}>${icon("edit")}</a>` : nothing;
+}
 
 export function songDetailActions(options: {
   locale: string;
@@ -13,11 +19,13 @@ export function songDetailActions(options: {
   onPlay?: () => void;
   onChart?: () => void;
   sonolus?: string;
+  editor?: string;
 }) {
   const t = (key: string) => clientText(options.locale, key);
   return html`
     <span class="detail-header-actions">
       ${options.leading ?? nothing}
+      ${editChartAction(options.locale, options.editor)}
       ${
         options.onPlay
           ? html`
@@ -60,10 +68,12 @@ export function chartPageActions(options: {
   mode: "simple" | "watch";
   onMode: (mode: "simple" | "watch") => void;
   onDownload: () => void;
+  editor?: string;
 }) {
   const t = (key: string) => clientText(options.locale, key);
   return html`
     <span class="chart-page-actions">
+      ${editChartAction(options.locale, options.editor)}
       <button
         class="icon-button"
         @click=${options.onDownload}

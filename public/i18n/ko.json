@@ -2945,6 +2945,7 @@
       "importLocalChart": "로컬 채보 가져오기",
       "importLocalAudio": "로컬 음원 불러오기",
       "serverLibrary": "서버 곡 라이브러리",
+      "importGbp": "걸파 채보 가져오기",
       "catalogSource": "라이브러리 소스",
       "currentServer": "현재 서버",
       "loadMoreSongs": "곡 더 보기",
