@@ -304,7 +304,7 @@ export function resourceCollectionHref(route: string, server: ReleaseServer, loc
     return parts.length === 2 ? `/${server}/${locale}/skills/${source.search}` : undefined;
   }
   if (collection === "studio") return parts.length === 2 ? `/${server}/${locale}/studio/${source.search}` : undefined;
-  if (collection === "player-ranks" || collection === "friendship-ranks")
+  if (collection === "player-ranks" || collection === "friendship-ranks" || collection === "band-rating" || collection === "high-score-rating")
     return parts.length === 2 ? `/${server}/${locale}/${collection}/${source.search}` : undefined;
   if (collection === "song-meta") {
     if (parts.length !== 2) return undefined;
@@ -373,7 +373,7 @@ export function legacyCollectionRedirectTarget(pathname: string, search = ""): s
   if (collection === "skills") return parts.length === 3 ? `${prefix}/skills/${suffix()}` : undefined;
   if (collection === "song-meta") return parts.length === 3 ? `${prefix}/song-meta/${suffix()}` : undefined;
   if (collection === "studio") return parts.length === 3 ? `${prefix}/studio/${suffix()}` : undefined;
-  if (collection === "player-ranks" || collection === "friendship-ranks")
+  if (collection === "player-ranks" || collection === "friendship-ranks" || collection === "band-rating" || collection === "high-score-rating")
     return parts.length === 3 ? `${prefix}/${collection}/${suffix()}` : undefined;
   if (collection === "anon-tokyo") {
     return parts.length === 4 && isAnonTokyoMode(parts[3]) ? `${prefix}/anon-tokyo/${parts[3]}/${suffix()}` : undefined;

@@ -991,7 +991,17 @@
       "friendshipRank": "角色羈絆等級",
       "level": "等級",
       "requiredExp": "升級所需經驗",
-      "cumulativeExp": "累計經驗"
+      "cumulativeExp": "累計經驗",
+      "bandRating": "樂團綜合評價",
+      "totalBandRating": "綜合評價",
+      "singleBandRating": "單樂團評價",
+      "highScoreRating": "最高分評級",
+      "grade": "段位",
+      "bandHighScoreRating": "樂團評級",
+      "totalHighScoreRating": "綜合評級",
+      "bronze": "BRONZE",
+      "silver": "SILVER",
+      "gold": "GOLD"
     },
     "studio": {
       "title": "錄音室練習",

@@ -1,0 +1,61 @@
+---
+import Base from "../layouts/Base.astro";
+import AppShell from "./AppShell.astro";
+import { fetchStaticCatalog, staticCatalogRelease } from "../lib/static-catalog-source";
+import { highScoreRatingIcon } from "../lit/ui/rating";
+import { resourceCollectionHref } from "../lib/resource-route";
+import { titleOf, type RouteDefinition } from "../config/routes";
+import { renderWorkspace } from "../server/render-workspace";
+import { collectionTable } from "../lit/ui/collection-view";
+import { t } from "../i18n/messages";
+import type { Locale } from "../i18n/locales";
+import type { ReleaseServer } from "../lib/release-server";
+
+interface Rating {
+  raw: { _bandId: number; _grade: number; _step: number; _rating: number };
+}
+interface Props {
+  locale: Locale;
+  server: ReleaseServer;
+  entry: RouteDefinition;
+}
+const { locale, server, entry } = Astro.props;
+const title = titleOf(entry, locale);
+const release = await staticCatalogRelease(server);
+const [ratingData, atlasData] = await Promise.all([
+  fetchStaticCatalog("live-tools", server, release),
+  fetchStaticCatalog("sources/Assets/AddressableResources/UI/Atlas/FixUiSpriteAtlas.spriteatlasv2", server, release),
+]);
+const ratings = ratingData as {
+  bandHighScoreRatings: Rating[];
+  totalHighScoreRatings: Rating[];
+};
+const atlas = atlasData as { outputs: Array<{ path: string; type: string }> };
+const sprites = new Map(atlas.outputs.filter(output => output.type === "Sprite").map(output => [
+  output.path.split("/").at(-1)!.replace(/--Sprite-?-?\d+\.png$/u, ""),
+  `/runtime/${server}/${output.path.replace(/^runtime\//u, "")}?release=${release.releaseId}`,
+]));
+const totalRatings = new Map(ratings.totalHighScoreRatings.map(({ raw }) => [`${raw._grade}:${raw._step}`, raw._rating]));
+const gradeKeys = ["bronze", "silver", "gold"];
+const steps = ["", "I", "II", "III", "IV", "V"];
+const number = new Intl.NumberFormat(locale);
+const rows = ratings.bandHighScoreRatings
+  .filter(({ raw }) => raw._bandId === 0)
+  .sort((a, b) => a.raw._grade - b.raw._grade || a.raw._step - b.raw._step)
+  .map(({ raw }) => [
+    highScoreRatingIcon(raw._grade, raw._step, `${t(locale, `catalog.progression.${gradeKeys[raw._grade]}`)} ${steps[raw._step]}`.trim(), sprites),
+    number.format(raw._rating),
+    number.format(totalRatings.get(`${raw._grade}:${raw._step}`)!),
+  ]);
+const table = renderWorkspace({ render: () => collectionTable(
+  title,
+  [t(locale, "catalog.progression.grade"), t(locale, "catalog.progression.bandHighScoreRating"), t(locale, "catalog.progression.totalHighScoreRating")],
+  rows,
+  { numeric: true },
+) }, locale, entry.route);
+---
+<Base locale={locale} route={entry.route} title={title} titleKey={entry.titleKey} canonicalRoute={resourceCollectionHref(entry.route, server, locale)}>
+  <AppShell locale={locale} route={entry.route} title={title} titleKey={entry.titleKey} server={server}>
+    <div class="page" set:html={table}></div>
+  </AppShell>
+</Base>

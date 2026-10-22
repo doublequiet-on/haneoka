@@ -991,7 +991,17 @@
       "friendshipRank": "キャラクター絆レベル",
       "level": "レベル",
       "requiredExp": "レベルアップ必要EXP",
-      "cumulativeExp": "累計EXP"
+      "cumulativeExp": "累計EXP",
+      "bandRating": "バンド評価値",
+      "totalBandRating": "総合評価値",
+      "singleBandRating": "バンド評価値",
+      "highScoreRating": "ハイスコアレーティング",
+      "grade": "グレード",
+      "bandHighScoreRating": "バンドレート",
+      "totalHighScoreRating": "総合レート",
+      "bronze": "BRONZE",
+      "silver": "SILVER",
+      "gold": "GOLD"
     },
     "studio": {
       "title": "スタジオ練習",

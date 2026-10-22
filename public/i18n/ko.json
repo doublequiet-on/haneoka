@@ -991,7 +991,17 @@
       "friendshipRank": "캐릭터 인연 레벨",
       "level": "레벨",
       "requiredExp": "레벨업 필요 EXP",
-      "cumulativeExp": "누적 EXP"
+      "cumulativeExp": "누적 EXP",
+      "bandRating": "밴드 평가 점수",
+      "totalBandRating": "종합 평가 점수",
+      "singleBandRating": "밴드 평가 점수",
+      "highScoreRating": "하이 스코어 레이팅",
+      "grade": "등급",
+      "bandHighScoreRating": "밴드 레이팅",
+      "totalHighScoreRating": "종합 레이팅",
+      "bronze": "BRONZE",
+      "silver": "SILVER",
+      "gold": "GOLD"
     },
     "studio": {
       "title": "스튜디오 연습",

@@ -1,0 +1,47 @@
+---
+import Base from "../layouts/Base.astro";
+import AppShell from "./AppShell.astro";
+import { fetchStaticCatalog, staticCatalogRelease } from "../lib/static-catalog-source";
+import { bandRatingIcon } from "../lit/ui/rating";
+import { resourceCollectionHref } from "../lib/resource-route";
+import { titleOf, type RouteDefinition } from "../config/routes";
+import { renderWorkspace } from "../server/render-workspace";
+import { collectionTable } from "../lit/ui/collection-view";
+import { t } from "../i18n/messages";
+import type { Locale } from "../i18n/locales";
+import type { ReleaseServer } from "../lib/release-server";
+
+interface BandRank {
+  raw: { _rank: number; _value: number };
+}
+interface Props {
+  locale: Locale;
+  server: ReleaseServer;
+  entry: RouteDefinition;
+}
+const { locale, server, entry } = Astro.props;
+const title = titleOf(entry, locale);
+const release = await staticCatalogRelease(server);
+const progression = await fetchStaticCatalog("progression", server, release) as {
+  bandRanks: BandRank[];
+  bandTypeRanks: BandRank[];
+};
+const bandRatings = new Map(progression.bandTypeRanks.map(({ raw }) => [raw._rank, raw._value]));
+const number = new Intl.NumberFormat(locale);
+const rows = progression.bandRanks.map(({ raw }) => [
+  bandRatingIcon(server, release.releaseId, raw._rank),
+  number.format(raw._value),
+  number.format(bandRatings.get(raw._rank)!),
+]);
+const table = renderWorkspace({ render: () => collectionTable(
+  title,
+  [t(locale, "catalog.progression.level"), t(locale, "catalog.progression.totalBandRating"), t(locale, "catalog.progression.singleBandRating")],
+  rows,
+  { numeric: true },
+) }, locale, entry.route);
+---
+<Base locale={locale} route={entry.route} title={title} titleKey={entry.titleKey} canonicalRoute={resourceCollectionHref(entry.route, server, locale)}>
+  <AppShell locale={locale} route={entry.route} title={title} titleKey={entry.titleKey} server={server}>
+    <div class="page" set:html={table}></div>
+  </AppShell>
+</Base>

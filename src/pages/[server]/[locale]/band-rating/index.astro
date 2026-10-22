@@ -1,0 +1,18 @@
+---
+import { staticBuildPaths } from "../../../../server/static-build";
+import BandRatingDocument from "../../../../components/BandRatingDocument.astro";
+import { findRoute } from "../../../../config/routes";
+import { LOCALES, type Locale } from "../../../../i18n/locales";
+import { RELEASE_SERVERS, type ReleaseServer } from "../../../../lib/resource-route";
+
+export const prerender = true;
+
+export function getStaticPaths() {
+  return staticBuildPaths("src/pages/[server]/[locale]/band-rating/index.astro", RELEASE_SERVERS.flatMap((server) =>
+    LOCALES.map((locale) => ({ params: { server, locale } })),
+  ));
+}
+const { server, locale } = Astro.params as { server: ReleaseServer; locale: Locale };
+const entry = findRoute("/catalog/band-rating")!;
+---
+<BandRatingDocument locale={locale} entry={entry} server={server} />

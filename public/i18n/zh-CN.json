@@ -991,7 +991,17 @@
       "friendshipRank": "角色羁绊等级",
       "level": "等级",
       "requiredExp": "升级所需经验",
-      "cumulativeExp": "累计经验"
+      "cumulativeExp": "累计经验",
+      "bandRating": "乐队评分",
+      "totalBandRating": "综合评分",
+      "singleBandRating": "单乐队评分",
+      "highScoreRating": "最高分评级",
+      "grade": "段位",
+      "bandHighScoreRating": "乐队评级",
+      "totalHighScoreRating": "综合评级",
+      "bronze": "BRONZE",
+      "silver": "SILVER",
+      "gold": "GOLD"
     },
     "studio": {
       "title": "录音室练习",

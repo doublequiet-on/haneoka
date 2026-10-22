@@ -991,7 +991,17 @@
       "friendshipRank": "Character Bond Level",
       "level": "Level",
       "requiredExp": "EXP to Level Up",
-      "cumulativeExp": "Cumulative EXP"
+      "cumulativeExp": "Cumulative EXP",
+      "bandRating": "Band Rating Value",
+      "totalBandRating": "Overall Rating",
+      "singleBandRating": "Band Rating",
+      "highScoreRating": "High Score Rating",
+      "grade": "Grade",
+      "bandHighScoreRating": "Band Rating",
+      "totalHighScoreRating": "Overall Rating",
+      "bronze": "BRONZE",
+      "silver": "SILVER",
+      "gold": "GOLD"
     },
     "studio": {
       "title": "Studio Practice",
