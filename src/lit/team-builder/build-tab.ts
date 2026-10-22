@@ -218,7 +218,7 @@ export function playConditions(host: TeamBuilder, s = host.searchSettings): Temp
   const key = `play-${host.tab}-${host.tab === "build" ? host.buildMode : s.goal}`;
   return accordion({
     id: `tb-${key}`,
-    label: host.t("play", "Play"),
+    label: host.t("playJudgements", "Play judgements"),
     supportingText: s.playMode === "ap" ? host.t("playAp", "All Perfect") : host.t("playCustom", "Custom"),
     leading: icon("piano", 20),
     expanded: host.expanded.has(key),
@@ -271,7 +271,7 @@ export function playSection(
   `;
   return html`
     ${segmented({
-      label: host.t("play", "Play"),
+      label: host.t("playJudgements", "Play judgements"),
       value: s.playMode,
       options: [
         { value: "ap", label: host.t("playAp", "All Perfect"), icon: "workspace_premium" },
@@ -861,7 +861,9 @@ export function renderBuildRun(host: TeamBuilder, showTimeLimit = true): Templat
                 ${[3, 5, 15, 60, 0].map(
                   (limit) => html`
                     <md-select-option value=${String(limit)}>
-                      <div slot="headline">${limit ? `${limit} s` : host.t("noLimit", "Until proven")}</div>
+                      <div slot="headline">
+                        ${limit ? host.t("secondsShort", "{count} s", { count: limit }) : host.t("noLimit", "Until proven")}
+                      </div>
                     </md-select-option>
                   `,
                 )}
@@ -899,7 +901,11 @@ export function renderBuildRun(host: TeamBuilder, showTimeLimit = true): Templat
       ${
         host.taskKind === "build"
           ? html`
-              <button class="button button--tonal button--full" type="button" @click=${() => host.cancel()}>
+              <button
+                class="button button--tonal button--full tb-run__button"
+                type="button"
+                @click=${() => host.cancel()}
+              >
                 ${icon("stop", 18)}${host.common("common.actions.cancel", "Cancel")}
               </button>
               <span role="status">${host.computationStatus()}</span>

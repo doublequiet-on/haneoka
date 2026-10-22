@@ -2064,7 +2064,7 @@
       "manualProgress": "正在评估谱面：{done} / {total}",
       "compare": "比较",
       "candidateComparison": "候选比较",
-      "comparisonCandidate": "候选 {number}",
+      "comparisonCandidate": "候选",
       "clearComparison": "清除比较",
       "comparisonLimit": "从这次搜索中选择最多3个候选。",
       "comparisonNeedTwo": "请再选择1个候选以进行比较。",
@@ -2757,7 +2757,17 @@
       "outsideRanking": "当前榜单外",
       "comparisonAdded": "已加入比较",
       "addComparison": "加入比较",
-      "readyToCalculate": "已准备好计算"
+      "readyToCalculate": "已准备好计算",
+      "secondsShort": "{count}秒",
+      "originalConditions": "原结果条件",
+      "calculationDetails": "计算详情",
+      "emptyBoxTitle": "还没有导入卡牌",
+      "emptyRangeTitle": "当前范围没有可用卡牌",
+      "importMyCards": "导入我的卡牌",
+      "adjustCardRange": "调整卡牌范围",
+      "allNoSnaps": "五人均未配置留影",
+      "comparisonValue": "指标值",
+      "playJudgements": "演奏判定"
     },
     "calendar": {
       "title": "日历",

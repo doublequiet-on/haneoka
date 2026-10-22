@@ -2064,7 +2064,7 @@
       "manualProgress": "Evaluating charts: {done} / {total}",
       "compare": "Compare",
       "candidateComparison": "Candidate comparison",
-      "comparisonCandidate": "Candidate {number}",
+      "comparisonCandidate": "Candidate",
       "clearComparison": "Clear comparison",
       "comparisonLimit": "Select up to 3 candidates from this search.",
       "comparisonNeedTwo": "Select one more candidate to compare.",
@@ -2757,7 +2757,17 @@
       "outsideRanking": "Outside current ranking",
       "comparisonAdded": "Added to comparison",
       "addComparison": "Add to comparison",
-      "readyToCalculate": "Ready to calculate"
+      "readyToCalculate": "Ready to calculate",
+      "secondsShort": "{count} s",
+      "originalConditions": "Original result conditions",
+      "calculationDetails": "Calculation details",
+      "emptyBoxTitle": "No cards imported yet",
+      "emptyRangeTitle": "No cards in this range",
+      "importMyCards": "Import my cards",
+      "adjustCardRange": "Adjust card range",
+      "allNoSnaps": "No Snapshots in any of the five slots",
+      "comparisonValue": "Value",
+      "playJudgements": "Play judgements"
     },
     "calendar": {
       "title": "Calendar",

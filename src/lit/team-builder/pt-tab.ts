@@ -805,7 +805,7 @@ function renderRun(host: TeamBuilder): TemplateResult {
       ${
         pt.running
           ? html`
-              <button class="button button--tonal button--full" type="button" @click=${() => pt.stop()}>
+              <button class="button button--tonal button--full tb-run__button" type="button" @click=${() => pt.stop()}>
                 ${icon("stop", 18)}${t("stop", "Stop")}
               </button>
             `
@@ -843,13 +843,30 @@ function renderRanking(host: TeamBuilder): TemplateResult {
   const t = (key: string, fallback: string, params?: Record<string, string | number>) =>
     host.t(`pt.${key}`, fallback, params);
   const job = pt.job;
-  if (!job)
+  if (!job) {
+    const issue = host.inputIssues(true)[0];
+    const emptyBox = issue?.field === "tb-cards" && host.searchSettings.scope === "box" && !host.view?.members.size;
     return html`
-      <div class="state">
-        <span class="state__icon">${icon("emoji_events", 40)}</span>
-        <p class="state__title">${host.t("resultsEmpty", "Results appear here")}</p>
+      <div class="state tb-results--empty">
+        <span class="state__icon">${icon("emoji_events", 32)}</span>
+        <p class="state__title">
+          ${emptyBox ? host.t("emptyBoxTitle", "No cards imported yet") : (issue?.message ?? host.t("readyToCalculate", "Ready to calculate"))}
+        </p>
+        ${
+          issue
+            ? html`
+                <button
+                  class="button button--tonal"
+                  @click=${() => (emptyBox ? host.imports.openBox() : host.focusInput(issue.field))}
+                >
+                  ${emptyBox ? host.t("importMyCards", "Import my cards") : host.t("adjustConditions", "Adjust conditions")}
+                </button>
+              `
+            : nothing
+        }
       </div>
     `;
+  }
   const measure = job.request.goal.kind === "event" && job.request.goal.measure === "items" ? "items" : "points";
   const ranking = ptSongRanking(job, measure);
   const challenge = ptChallengeBest(job, measure);

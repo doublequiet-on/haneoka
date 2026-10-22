@@ -344,8 +344,13 @@ export class TeamBuilder extends LitElement {
     if (payload?.schema === "haneoka-team-builder-page-v1") this.preparePage(payload);
     super.connectedCallback();
     this.layoutObserver = new ResizeObserver(() => {
+      const surface = this.querySelector<HTMLElement>(".team-builder");
+      const style = surface ? getComputedStyle(surface) : null;
+      const availableWidth =
+        (surface?.clientWidth ?? this.clientWidth) -
+        (style ? parseFloat(style.paddingInlineStart) + parseFloat(style.paddingInlineEnd) : 0);
       const compact =
-        this.clientWidth < 900 || (this.closest<HTMLElement>("#main-content")?.clientHeight ?? innerHeight) < 640;
+        availableWidth < 900 || (this.closest<HTMLElement>("#main-content")?.clientHeight ?? innerHeight) < 640;
       if (compact !== this.compactConditions) {
         this.compactConditions = compact;
         this.conditionsOpen = false;
@@ -505,9 +510,12 @@ export class TeamBuilder extends LitElement {
   private measureWorkspace() {
     const main = this.closest<HTMLElement>("#main-content"),
       tool = this.querySelector<HTMLElement>(".tb-tool");
-    if (!main || !tool || this.compactConditions) return;
+    if (!main || !tool) return;
     const offset = tool.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
-    this.style.setProperty("--tb-workspace-block", `${main.clientHeight - offset - 24}px`);
+    this.style.setProperty(
+      "--tb-workspace-block",
+      `${Math.max(0, main.clientHeight - offset - (this.compactConditions ? 0 : 24))}px`,
+    );
   }
   t(key: string, fallback: string, params?: Record<string, string | number>) {
     const readable = fallback.replace(/\{([^}]+)\}/gu, (token, name: string) =>
@@ -1515,22 +1523,24 @@ export class TeamBuilder extends LitElement {
     if (this.pt.correcting && this.tab !== "pt") this.pt.sync();
     this.songComparison.sync();
     const buildPanel = () => html`
-      <div class="stack">
-        ${segmented({
-          label: this.t("buildMode", "Team building"),
-          value: this.buildMode,
-          options: [
-            { value: "automatic", label: this.t("automaticTeam", "Find a team") },
-            { value: "manual", label: this.t("manualTeam", "Build a team by hand") },
-          ],
-          onSelect: (mode) => {
-            this.saveScroll();
-            this.buildMode = mode;
-            this.submitted = false;
-            this.requestUpdate();
-            void this.restoreScroll();
-          },
-        })}
+      <div class="stack tb-build-panel">
+        <div class="tb-mode">
+          ${segmented({
+            label: this.t("buildMode", "Team building"),
+            value: this.buildMode,
+            options: [
+              { value: "automatic", label: this.t("automaticTeam", "Find a team") },
+              { value: "manual", label: this.t("manualTeam", "Build a team by hand") },
+            ],
+            onSelect: (mode) => {
+              this.saveScroll();
+              this.buildMode = mode;
+              this.submitted = false;
+              this.requestUpdate();
+              void this.restoreScroll();
+            },
+          })}
+        </div>
         ${this.buildMode === "manual" ? renderManualTeamTab(this) : renderBuildTab(this)}
       </div>
     `;

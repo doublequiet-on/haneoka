@@ -359,7 +359,16 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
       ...catalog.songOptions(song.songId, song.difficulty),
       marks: [],
       value: chartKey(song),
-      subtitle: `${catalog.songArtist(song.songId)} · ${catalog.difficultyLabel(song.songId, song.difficulty)} · ${chartDuration(catalog.chartMetadata(song)?.time)}${gekiso ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}`,
+      adornment: nothing,
+      subtitle: html`
+        <span class="tb-picker-chart">
+          ${catalog.difficultyLabel(song.songId, song.difficulty)} · ${chartDuration(catalog.chartMetadata(song)?.time)}
+        </span>
+        <span class="tb-picker-artist">
+          ${catalog.songArtist(song.songId)} ·
+          ${catalog.attributeName(Number(catalog.song(song.songId).musicType))}${gekiso ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}
+        </span>
+      `,
     })),
     selected: "",
     selectedValues: selected,
@@ -377,77 +386,90 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
           <span role="status">
             ${durationLoading ? host.t("durationLoading", "Loading durations") : state.maxSeconds != null ? host.t("unknownDuration", "Unknown duration {count}", { count: allCharts.filter((song) => catalog.metadataStatus(song.songId) === "ready" && typeof catalog.chartMetadata(song)?.time !== "number").length }) : ""}
           </span>
+          ${
+            !shown.length && !incomplete
+              ? html`
+                  <button class="button button--text" @click=${clearFilters}>
+                    ${host.t("clearFilters", "Clear filters")}
+                  </button>
+                `
+              : nothing
+          }
         `,
     preview: html`
       <div class="stack tb-picker-footer">
-        <div class="cluster" role="status">
-          <span>${host.t("selectedCharts", "Selected {count}", { count: validSelected.length })}</span>
-          ${
-            outside.length || state.view === "outside"
-              ? html`
-                  <button
-                    class="button button--text"
-                    @click=${() => update({ view: state.view === "outside" ? "all" : "outside" })}
-                    aria-pressed=${String(state.view === "outside")}
-                  >
-                    ${host.t("outsideCharts", "Outside filters {count}", { count: outside.length })}
-                  </button>
-                `
-              : nothing
-          }
-          ${
-            unavailable.length || state.view === "unavailable"
-              ? html`
-                  <button
-                    class="button button--text"
-                    @click=${() => update({ view: state.view === "unavailable" ? "all" : "unavailable" })}
-                    aria-pressed=${String(state.view === "unavailable")}
-                  >
-                    ${host.t("unavailableCharts", "Unavailable {count}", { count: unavailable.length })}
-                  </button>
-                `
-              : nothing
-          }
+        <div class="tb-picker-tools">
+          <div class="cluster tb-picker-count" role="status">
+            <span>${host.t("selectedCharts", "Selected {count}", { count: validSelected.length })}</span>
+            ${
+              outside.length || state.view === "outside"
+                ? html`
+                    <button
+                      class="button button--text"
+                      @click=${() => update({ view: state.view === "outside" ? "all" : "outside" })}
+                      aria-pressed=${String(state.view === "outside")}
+                    >
+                      ${host.t("outsideCharts", "Outside filters {count}", { count: outside.length })}
+                    </button>
+                  `
+                : nothing
+            }
+            ${
+              unavailable.length || state.view === "unavailable"
+                ? html`
+                    <button
+                      class="button button--text"
+                      @click=${() => update({ view: state.view === "unavailable" ? "all" : "unavailable" })}
+                      aria-pressed=${String(state.view === "unavailable")}
+                    >
+                      ${host.t("unavailableCharts", "Unavailable {count}", { count: unavailable.length })}
+                    </button>
+                  `
+                : nothing
+            }
+          </div>
+          <div class="cluster tb-picker-actions">
+            ${actionMenu({
+              id: "tb-selection-actions",
+              label: host.t("selectionActions", "Selection actions"),
+              items: [
+                ...(state.single
+                  ? []
+                  : [
+                      {
+                        label: host.t("appendMatching", "Add matching charts"),
+                        disabled: incomplete,
+                        run: () => replace([...state.songs, ...visible]),
+                      },
+                      {
+                        label: host.t("replaceSelection", "Use only filtered charts"),
+                        disabled: incomplete,
+                        run: () => replace(visible),
+                      },
+                    ]),
+                { label: host.t("clearSelection", "Clear selection"), run: () => replace([]) },
+              ],
+            })}
+            ${
+              state.undo
+                ? html`
+                    <button class="button button--text" @click=${() => update({ songs: state.undo!, undo: undefined })}>
+                      ${host.t("undoSelection", "Undo")}
+                    </button>
+                  `
+                : nothing
+            }
+          </div>
         </div>
-        <div class="row row--wrap">
-          ${actionMenu({
-            id: "tb-selection-actions",
-            label: host.t("selectionActions", "Selection actions"),
-            items: [
-              ...(state.single
-                ? []
-                : [
-                    {
-                      label: host.t("appendMatching", "Add matching charts"),
-                      disabled: incomplete,
-                      run: () => replace([...state.songs, ...visible]),
-                    },
-                    {
-                      label: host.t("replaceSelection", "Use only filtered charts"),
-                      disabled: incomplete,
-                      run: () => replace(visible),
-                    },
-                  ]),
-              { label: host.t("clearSelection", "Clear selection"), run: () => replace([]) },
-            ],
-          })}
-          <button
-            class="button button--text"
-            ?disabled=${!state.undo}
-            @click=${() => update({ songs: state.undo!, undo: undefined })}
-          >
-            ${host.t("undoSelection", "Undo")}
-          </button>
-          <button
-            class="button"
-            @click=${() => {
-              state.change(uniqueCharts(validSelected));
-              close();
-            }}
-          >
-            ${host.t("applyCharts", "Use {count} charts", { count: validSelected.length })}
-          </button>
-        </div>
+        <button
+          class="button"
+          @click=${() => {
+            state.change(uniqueCharts(validSelected));
+            close();
+          }}
+        >
+          ${host.t("applyCharts", "Use {count} charts", { count: validSelected.length })}
+        </button>
       </div>
     `,
   });

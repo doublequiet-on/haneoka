@@ -45,10 +45,7 @@ export function conditionSummary(host: TeamBuilder) {
 export function toolLayout(host: TeamBuilder, body: unknown, actions: unknown, results: unknown) {
   const summary = conditionSummary(host);
   const footer = html`
-    <div class="tb-operation">
-      <span class="tb-results__meta">${summary}</span>
-      ${actions}${host.renderCompareTray()}
-    </div>
+    <div class="tb-operation">${actions}${host.renderCompareTray()}</div>
   `;
   return html`
     <div class=${`tb-build tb-tool${host.compactConditions ? " tb-tool--compact" : " tb-tool--desktop"}`}>
@@ -57,7 +54,7 @@ export function toolLayout(host: TeamBuilder, body: unknown, actions: unknown, r
           ? html`
               <section class="surface tb-condition-summary">
                 <span>${summary}</span>
-                <button id="tb-adjust" class="button button--tonal" @click=${() => host.openConditions()}>
+                <button id="tb-adjust" class="button button--text" @click=${() => host.openConditions()}>
                   ${host.t("adjustConditions", "Adjust conditions")}
                 </button>
               </section>
@@ -76,9 +73,6 @@ export function toolLayout(host: TeamBuilder, body: unknown, actions: unknown, r
                         </header>
                         <div class="tb-config-body stack">${body}</div>
                         ${footer}
-                        <button class="button button--text" @click=${() => host.closeConditions()}>
-                          ${host.t("conditionsDone", "Done")}
-                        </button>
                       </dialog>
                     `
                   : nothing

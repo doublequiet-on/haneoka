@@ -2064,7 +2064,7 @@
       "manualProgress": "譜面を評価中：{done} / {total}",
       "compare": "比較",
       "candidateComparison": "候補の比較",
-      "comparisonCandidate": "候補{number}",
+      "comparisonCandidate": "比較対象",
       "clearComparison": "比較をクリア",
       "comparisonLimit": "この検索から最大3件の候補を選択してください。",
       "comparisonNeedTwo": "比較する候補をもう1件選択してください。",
@@ -2757,7 +2757,17 @@
       "outsideRanking": "現在の候補外",
       "comparisonAdded": "比較に追加済み",
       "addComparison": "比較に追加",
-      "readyToCalculate": "計算できます"
+      "readyToCalculate": "計算できます",
+      "secondsShort": "{count}秒",
+      "originalConditions": "元の結果の条件",
+      "calculationDetails": "計算詳細",
+      "emptyBoxTitle": "カードが未インポートです",
+      "emptyRangeTitle": "この範囲にカードがありません",
+      "importMyCards": "所持カードをインポート",
+      "adjustCardRange": "カード範囲を変更",
+      "allNoSnaps": "5人ともスナップ未設定",
+      "comparisonValue": "指標値",
+      "playJudgements": "演奏判定"
     },
     "calendar": {
       "title": "カレンダー",

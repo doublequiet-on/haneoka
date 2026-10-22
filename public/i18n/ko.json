@@ -2064,7 +2064,7 @@
       "manualProgress": "채보 평가 중: {done} / {total}",
       "compare": "비교",
       "candidateComparison": "후보 비교",
-      "comparisonCandidate": "후보 {number}",
+      "comparisonCandidate": "비교 대상",
       "clearComparison": "비교 지우기",
       "comparisonLimit": "이번 검색에서 최대 3개 후보를 선택하세요.",
       "comparisonNeedTwo": "비교할 후보를 하나 더 선택하세요.",
@@ -2757,7 +2757,17 @@
       "outsideRanking": "현재 순위 밖",
       "comparisonAdded": "비교에 추가됨",
       "addComparison": "비교에 추가",
-      "readyToCalculate": "계산 준비 완료"
+      "readyToCalculate": "계산 준비 완료",
+      "secondsShort": "{count}초",
+      "originalConditions": "기존 결과 조건",
+      "calculationDetails": "계산 상세",
+      "emptyBoxTitle": "가져온 카드가 없습니다",
+      "emptyRangeTitle": "이 범위에 카드가 없습니다",
+      "importMyCards": "보유 카드 가져오기",
+      "adjustCardRange": "카드 범위 조정",
+      "allNoSnaps": "5명 모두 스냅 미설정",
+      "comparisonValue": "지표 값",
+      "playJudgements": "연주 판정"
     },
     "calendar": {
       "title": "달력",

@@ -542,7 +542,7 @@ export function renderSongComparison(host: TeamBuilder, editor?: unknown) {
     html`
       <div class="tb-run">
         <button
-          class="button button--full"
+          class="button button--full tb-run__button"
           type="button"
           ?disabled=${host.running && !c.running}
           @click=${() => (c.running ? c.stop() : void c.start())}
@@ -716,7 +716,10 @@ export function renderSongComparison(host: TeamBuilder, editor?: unknown) {
                 </div>
               `
             : html`
-                <div class="state"><p class="state__title">${t("empty")}</p></div>
+                <div class="state">
+                  <p class="state__title">${t("empty")}</p>
+                  <button class="button button--tonal" @click=${() => c.choose()}>${t("choose")}</button>
+                </div>
               `
         }
       </section>
