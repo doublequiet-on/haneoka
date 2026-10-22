@@ -230,7 +230,8 @@ export class EngineClient {
     const work = async (): Promise<EngineResponse> => {
       if (!remaining(deadline)) { stop("budget"); return latest; }
       if (completeResponse(latest)) return latest;
-      const parallel = this.pool.length > 1 && request.members.length >= PARALLEL_MIN_MEMBERS && request.goal.kind !== "plan" && !request.seedOnly;
+      const parallel = this.pool.length > 1 && request.members.length >= PARALLEL_MIN_MEMBERS && request.goal.kind !== "plan" && !request.seedOnly
+        && !(request.goal.kind === "gekiso" && request.constraints.leader !== null && request.goal.songs.length === 1);
       if (!parallel) {
         const response = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, accept);
         if (!stopped) onFinalResult?.({ requestId: request.requestId!, contextKey: request.contextKey!, response: structuredClone(response) });
