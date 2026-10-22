@@ -1,4 +1,4 @@
-import { toHiragana, toKatakana, toRomaji } from "wanakana";
+import { isKana, toHiragana, toKatakana, toRomaji } from "wanakana";
 import type {
   CatalogLocale,
   CatalogProjectionOptions,
@@ -179,7 +179,9 @@ function songDescription(
     ...new Set(
       [song.ruby, song.phonetic, song.reading]
         .flatMap(textVariants)
-        .flatMap((reading) => [reading, toHiragana(reading), toKatakana(reading), toRomaji(reading)]),
+        .flatMap((reading) => isKana(reading)
+          ? [reading, toHiragana(reading), toKatakana(reading), toRomaji(reading)]
+          : [reading]),
     ),
   ];
   const credits = [
