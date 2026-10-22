@@ -661,6 +661,8 @@ def _remote_runtime_path(artifact: dict[str, Any]) -> PurePosixPath:
     if namespace.startswith("cri_assets_"):
         namespace = namespace.removeprefix("cri_assets_")
     namespace_parts = PurePosixPath(namespace).parts
+    if namespace_parts[:1] == ("embcri",):
+        namespace_parts = ("cri", *namespace_parts[1:])
     # Card payloads are namespaced through their addressable collection
     # (membercard_assets_membercard/51); drop the collection segment so the
     # runtime path stays cri/<card>/... like every other card movie.

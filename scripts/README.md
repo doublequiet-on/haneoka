@@ -398,6 +398,8 @@ an incomplete audit is reported separately from matching counts.
 
 ## Configuration and output
 
+Character voices follow the game's Master order: Comment, Training, Gacha and LIVE, followed by map interactions and startup calls. Each release keeps its source catalogue; character pages merge JP and Intl, fill translated text and join identical recording hashes. Short post-live and map conversations retain their authored speaker order and text. Package-owned CRI adds Intl's Bilibili and Bushiroad Games calls alongside the shared Bushimo and FromTokyo recordings. Multiple outputs for one native cue remain in `recordings`; the archive uses its first declared stream as the preferred recording and counts the line once.
+
 Server configuration lives in `scripts/config/servers/` and is validated
 against `scripts/config/server.schema.json`. Generated data is ignored by Git
 and stored under:

@@ -48,6 +48,7 @@ from build.runtime_texture_projection import RuntimeTextureProjection
 from build.game_systems import build_game_systems
 from build.jp_shop import bind_jp_shop_metadata
 from build.studio import build_studio
+from build.voice_catalog import complete_voices, COLLECTION_GROUPS
 from build.tgw_card import build_tgw_card
 from build.live2d_preview import PREVIEW_SCHEMA as LIVE2D_PREVIEW_SCHEMA
 from build.spine_catalog import build_spine_catalog
@@ -995,14 +996,17 @@ class BuildData:
         ]
         by_cue: dict[str, list[dict[str, Any]]] = {}
         for value in audio_outputs:
-            cue = VGMSTREAM_RANDOM_CUE_PREFIX.sub(
+            filename_cue = VGMSTREAM_RANDOM_CUE_PREFIX.sub(
                 "",
                 VGMSTREAM_SEQUENCE_PREFIX.sub(
                     "", PurePosixPath(str(value.get("path") or "")).stem, count=1
                 ),
                 count=1,
             ).casefold()
-            by_cue.setdefault(cue, []).append(value)
+            names = str(value.get("cueName") or "").split(";")
+            cues = [name.strip().casefold() for name in names if name.strip()] or [filename_cue]
+            for cue in dict.fromkeys(cues):
+                by_cue.setdefault(cue, []).append(value)
         cached = audio_outputs, by_cue
         self._cri_audio_output_cache[runtime_path] = cached
         return cached
@@ -1036,9 +1040,21 @@ class BuildData:
             str(entry.get("runtimePath") or "") for entry in entries
         )
         candidate_output_paths: list[str] = []
+        exact_outputs: list[dict[str, Any]] = []
         if len(entries) > 1:
-            status = "ambiguous"
-            reason = "multiple-exact-acb-runtime-paths"
+            for entry in entries:
+                _, by_cue = self._cri_audio_outputs(entry)
+                exact_outputs.extend({**value, "_runtimePath": entry["runtimePath"]} for value in by_cue.get(cue_name.casefold(), []))
+            candidate_output_paths = sorted(str(value["path"]) for value in exact_outputs)
+            if exact_outputs and exact_outputs[0].get("sha256") and len({value.get("sha256") for value in exact_outputs}) == 1:
+                exact_outputs = [min(exact_outputs, key=lambda value: str(value["path"]))]
+            if len(exact_outputs) == 1:
+                output = exact_outputs[0]
+                runtime_path = output["_runtimePath"]
+                status, reason, method = "resolved", "exact-cue-name", "exact-cue-sheet-runtime-and-cue-name"
+            else:
+                status = "ambiguous"
+                reason = "multiple-exact-cue-outputs" if exact_outputs else "multiple-exact-acb-runtime-paths"
         elif len(entries) == 1:
             entry = entries[0]
             runtime_path = str(entry.get("runtimePath") or "")
@@ -1080,6 +1096,7 @@ class BuildData:
             categoryName=CRI_SOUND_CATEGORIES.get(int(row.get("_category") or 0), ""),
             playableUrl=playable,
             durationMs=(output or {}).get("durationMs"),
+            sha256=(output or {}).get("sha256"),
             sampleRate=(output or {}).get("sampleRate"),
             channels=(output or {}).get("channels"),
             totalSamples=(output or {}).get("totalSamples"),
@@ -1099,6 +1116,23 @@ class BuildData:
             sourceTable=source_table,
             raw=row,
         )
+        if len(exact_outputs) > 1:
+            result["variants"] = [
+                {
+                    **result,
+                    **{field: value[field] for field in (
+                        "durationMs", "sampleRate", "channels", "totalSamples",
+                        "streamIndex", "streamCount", "loopInfo", "sha256",
+                    ) if field in value},
+                    "outputPath": value["path"],
+                    "runtimePath": value.get("_runtimePath", runtime_path),
+                    "playableUrl": self.runtime_output_url(value["path"]),
+                    "missing": False,
+                    "binding": "exact-cue-sheet-runtime-and-cue-variant",
+                    "resolution": {"status": "resolved", "reason": "exact-cue-output-variant"},
+                }
+                for value in sorted(exact_outputs, key=lambda item: int(item.get("streamIndex") or 0))
+            ]
         return result
 
     def sound(self, identity: int) -> dict[str, Any] | None:
@@ -7291,7 +7325,7 @@ def _enrich_live2d(data: BuildData, models: dict[str, dict[str, Any]]) -> dict[s
     return output
 
 
-def _voices(data: BuildData) -> dict[str, Any]:
+def _voices(data: BuildData, stories: dict[str, Any] | None = None) -> dict[str, Any]:
     entries: dict[str, dict[str, Any]] = {}
 
     for row in _sorted_rows(data, "MasterTalk"):
@@ -7306,6 +7340,7 @@ def _voices(data: BuildData) -> dict[str, Any]:
             masterTypeName=CHARACTER_VOICE_MASTER_TYPES[0],
             characterIds=[character_id],
             talkCategory=int(row.get("_category") or 0),
+            startAt=_timestamp(row.get("_startAt")),
             costumeId=int(row.get("_costumeId") or 0),
             expressionName=row.get("_expressionName"),
             motionName=row.get("_motionName"),
@@ -7467,7 +7502,8 @@ def _voices(data: BuildData) -> dict[str, Any]:
         )
 
     return {
-        "entries": entries,
+        "entries": complete_voices(data, entries, stories or {}),
+        "collectionGroups": list(COLLECTION_GROUPS),
         "enums": {
             "characterVoiceType": _enum_document(
                 "App.Master.CharacterVoiceType", CHARACTER_VOICE_TYPES
@@ -7519,8 +7555,8 @@ def _voices(data: BuildData) -> dict[str, Any]:
             ),
             "soundBinding": (
                 "Voice sounds use the same strict MasterSound -> MasterSoundCueSheet -> unique ACB "
-                "runtimePath -> exact cue output binding as audio.masterSounds. Unresolved or "
-                "ambiguous cues remain missing."
+                "runtimePath -> exact cue output binding as audio.masterSounds. Cue aliases and "
+                "identical output hashes are resolved explicitly; multiple recordings are retained."
             ),
         },
         "sourceTables": [
@@ -7528,6 +7564,8 @@ def _voices(data: BuildData) -> dict[str, Any]:
             "MasterLiveCharacter", "MasterLiveGekisouVoice",
             "MasterLiveDialogueCommon", "MasterLiveDialogueFixedPair",
             "MasterLiveStartCharacterVoice", "MasterSound", "MasterSoundCueSheet",
+            "MasterStoryLiveResultEpisode", "MasterHomeSpot", "MasterStoryHomeSpotTapTalkEpisode",
+            "MasterAdv", "MasterCharacter",
         ],
     }
 
@@ -7629,10 +7667,10 @@ def _audio(data: BuildData) -> dict[str, Any]:
             "classification": "No semantic category is invented beyond conservative filename rules.",
             "masterSoundBinding": (
                 "MasterSound._soundCueSheetID selects MasterSoundCueSheet._cueSheetName; that name "
-                "must equal exactly one normalized ACB runtimePath basename. Within that entry, the "
-                "MasterSound._cueName must exactly equal the output stem after removing only the "
-                "vgmstream numeric sequence prefix. A unique single-output cue sheet is the only "
-                "fallback. No substring or global cue-sheet search is used."
+                "selects normalized ACB runtimePath basenames by equality. Declared cue names and "
+                "aliases are matched exactly; identical SHA-256 outputs share one binding, while "
+                "distinct recordings are retained. Legacy outputs use normalized filename stems. "
+                "The single-output fallback requires one cue sheet. No substring or global cue-sheet search is used."
             ),
             "masterSoundResolution": {
                 "total": len(master_sounds),
@@ -8762,7 +8800,7 @@ def build_api(
         "anon-tokyo": anon_tokyo,
         "live2d": live2d,
         "spine": spine,
-        "voices": project("voices", _voices, data),
+        "voices": project("voices", _voices, data, stories),
         "audio": project("audio", _audio, data),
         "items": project("items", _items, data),
         "progression": project("progression", _progression, data),

@@ -786,6 +786,30 @@ def _file_record(root: Path, file: Path, role: str, addressables: dict[str, Any]
     return value
 
 
+def _extract_embedded_cri(archive: zipfile.ZipFile, directory: Path) -> dict[Path, dict[str, Any]]:
+    """Retain package-owned CRI payloads alongside downloadable CRI assets."""
+    prefix = "assets/aa/Android/"
+    result = {}
+    for entry in sorted(archive.infolist(), key=lambda item: item.filename):
+        if not entry.filename.startswith(prefix + "cri_assets_") or entry.is_dir() or entry.filename.endswith(".bundle"):
+            continue
+        with archive.open(entry) as stream:
+            if stream.read(4) not in (b"@UTF", b"AFS2", b"CRID"):
+                continue
+        relative = Path(entry.filename.removeprefix(prefix))
+        target = directory / relative.name
+        if target in result:
+            raise ValueError(f"embedded CRI filename collision: {relative.name}")
+        _copy_archive_entry(archive, entry, target, f"embedded CRI payload {entry.filename}")
+        result[target] = {
+            "primaryKey": f"{relative.name}/{relative.parent.as_posix()}",
+            "primaryParts": [relative.name, relative.parent.as_posix()],
+            "packagePath": entry.filename,
+            "locales": [""],
+        }
+    return result
+
+
 @dataclass(frozen=True)
 class CatalogResolution:
     hash_file: Path
@@ -1321,6 +1345,7 @@ def ingest_package(
                     target,
                     f"embedded Unity bundle {entry.filename}",
                 )
+            addressables_by_file.update(_extract_embedded_cri(archive, layout.cri))
 
         all_locations = [
             (locale_tag, loc)

@@ -551,9 +551,9 @@ RESOURCE_SPECS: dict[str, ResourceSpec] = {
     ),
     "voices": ResourceSpec(
         ("entries",),
-        projection=ProjectionSpec(exclude=("lines", "raw", "sound")),
+        projection=ProjectionSpec(exclude=("lines", "raw", "sound", "recordings")),
         relations=(RelationSpec("character", (("characterIds",),), value_mode="ids"),),
-        dependencies=("audio", "characters"),
+        dependencies=("audio", "characters", "stories"),
     ),
     "audio": ResourceSpec(
         ("entries",),

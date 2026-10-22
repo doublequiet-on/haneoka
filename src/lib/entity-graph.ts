@@ -25,6 +25,7 @@ import { searchableStoryPages } from "./searchable-stories";
 import type { ReleaseServer } from "./resource-route";
 import { PUBLIC_RELEASE_SERVERS, isPublicReleaseServer } from "./temporary-public-routing";
 import { staticBuildJson } from "../server/static-input-store";
+import { mergeCharacterVoices, type VoiceSnapshot } from "./cross-server/voices";
 
 export async function staticCatalogPageServers(configuredOnly = false): Promise<ReleaseServer[]> {
   if (!configuredOnly) return [...PUBLIC_RELEASE_SERVERS];
@@ -755,7 +756,40 @@ async function projectEntityPayloads(graph: Graph, resource: EntityPayloadResour
       await friendshipRewards(graph, aux);
       related.bandIds.forEach((band) => bandIds.add(band));
       characterRows = compactCharacters(graph, allCharacterIds(graph));
-      aux.voices = { entries: Object.fromEntries(graph.voices.filter(([, voice]) => characterIdsOf(voice).includes(Number(id)))) };
+      const snapshots: VoiceSnapshot[] = [
+        {
+          identity: graph.release,
+          entries: graph.voices
+            .filter(([, voice]) => characterIdsOf(voice).includes(Number(id)))
+            .map(([, voice]) => voice),
+        },
+      ];
+      const sourceAvailability: Record<string, "loaded" | "failed"> = { [server]: "loaded" };
+      if (server === "jp" || server === "intl") {
+        const peer = server === "jp" ? "intl" : "jp";
+        try {
+          const identity = await staticCatalogRelease(peer);
+          const document = await fetchStaticCatalog("voices", peer, identity);
+          const ids = entries(document, "entries")
+            .filter(([, voice]) => characterIdsOf(voice).includes(Number(id)))
+            .map(([key]) => key);
+          const rows = await fetchStaticCatalogBatch("voices", ids, peer, identity);
+          snapshots.push({ identity, entries: [...rows.values()] });
+          sourceAvailability[peer] = "loaded";
+        } catch {
+          sourceAvailability[peer] = "failed";
+        }
+      }
+      const complete = Object.values(sourceAvailability).every((status) => status === "loaded");
+      aux.voices = {
+        entries: Object.fromEntries(
+          Object.entries(mergeCharacterVoices(snapshots, server)).map(([key, voice]) => [
+            key,
+            { ...voice, sourcesComplete: complete },
+          ]),
+        ),
+        sourceAvailability,
+      };
       aux["character-missions"] = graph.missions;
     }
 
@@ -938,6 +972,10 @@ export async function catalogEntityData(
   const pin = await staticCatalogRelease(server);
   const identity = { schema: "haneoka-base-page-v1", server, sourceId: pin.sourceId, releaseId: pin.releaseId, resource, id };
   const record = await staticBuildJson(`base-page:${JSON.stringify(identity)}`, "entity-projection", async () => {
+    if (resource === "characters") {
+      const payloads = await buildEntityPayloads(server, resource, [id]);
+      return { ...identity, payload: payloads.get(id) ?? null };
+    }
     let pending = pageData.get(server);
     if (!pending) {
       pending = buildPageData(server);

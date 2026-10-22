@@ -1,14 +1,18 @@
 import { LitElement, html, nothing, type PropertyValues } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { resolveLocalizedText } from "../lib/localized-text";
-import { isLocale, localePath } from "../i18n/locales";
+import { isLocale } from "../i18n/locales";
+import { resourcePath } from "../lib/resource-route";
+import type { ReleaseServer } from "../lib/release-server";
 import { localizedText, uiText, type JsonRecord } from "./shared/catalog";
 import {
   compareVoices,
-  VOICE_GROUPS,
+  VOICE_TABS,
   voiceGroup,
   voiceGroupLabelKey,
-  voiceGroupMasterType,
+  voiceKind,
+  voiceTab,
+  type VoiceTab,
   voiceLines,
   voiceText,
   voiceTitleKey,
@@ -20,19 +24,22 @@ import { dialogueRow, type DialogueRowState } from "./ui/dialogue-row";
 import { emptyState } from "./ui/state";
 import "../styles/character-voices.css";
 import { loadingIndicator } from "./ui/loading-indicator";
+import { accordion } from "./ui/accordion";
+import { serverAvailabilityBadge } from "./shared/server-availability";
+import { preferredVoiceRecordings } from "../lib/cross-server/voices";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
-  "character": "catalog.fields.character",
-  "empty": "common.states.empty",
-  "error": "common.states.error",
-  "loading": "common.states.loading",
-  "none": "common.states.none",
-  "refresh": "common.actions.refresh",
-  "retry": "common.actions.retry",
-  "stop": "common.actions.stop",
-  "title": "common.fields.title",
-  "unavailable": "common.states.unavailable"
+  character: "catalog.fields.character",
+  empty: "common.states.empty",
+  error: "common.states.error",
+  loading: "common.states.loading",
+  none: "common.states.none",
+  refresh: "common.actions.refresh",
+  retry: "common.actions.retry",
+  stop: "common.actions.stop",
+  title: "common.fields.title",
+  unavailable: "common.states.unavailable",
 };
 
 type PlaybackState = Extract<DialogueRowState, "idle" | "loading" | "playing" | "error" | "cancelled">;
@@ -47,14 +54,18 @@ export class CharacterVoices extends LitElement {
     entries: { attribute: false },
     characters: { attribute: false },
     locale: {},
+    server: {},
     characterId: { type: Number },
     activeClipKey: { state: true },
+    expandedGroups: { state: true },
   };
   declare entries: JsonRecord[];
   declare characters: JsonRecord[];
   declare locale: string;
+  declare server: ReleaseServer;
   declare characterId: number;
   declare activeClipKey: string;
+  declare private expandedGroups: Set<VoiceTab>;
   private audio?: HTMLAudioElement;
   private audioEvents?: AbortController;
   private generation = 0;
@@ -71,8 +82,10 @@ export class CharacterVoices extends LitElement {
     this.entries = [];
     this.characters = [];
     this.locale = "ja";
+    this.server = "intl";
     this.characterId = 0;
     this.activeClipKey = "";
+    this.expandedGroups = new Set<VoiceTab>(["comment"]);
   }
 
   createRenderRoot() {
@@ -96,6 +109,7 @@ export class CharacterVoices extends LitElement {
     if (changed.has("characterId")) {
       this.releaseMedia();
       this.clipStatuses.clear();
+      this.expandedGroups = new Set<VoiceTab>(["comment"]);
     } else if (
       changed.has("entries") &&
       this.activeClipKey &&
@@ -110,7 +124,7 @@ export class CharacterVoices extends LitElement {
   }
 
   private t(key: string) {
-    return uiText(this.locale, (uiLabelPaths[key] ?? key));
+    return uiText(this.locale, uiLabelPaths[key] ?? key);
   }
 
   private character(id: number) {
@@ -132,17 +146,17 @@ export class CharacterVoices extends LitElement {
       Number(entry.masterType) === 1 && Number(entry.characterVoiceType) === 7 && rank > 0
         ? ["", "E", "D", "C", "B", "A", "S", "SS"][rank]
         : "";
-    const call = [5, 6].includes(Number(entry.masterType))
-      ? Number(entry.dialogueCallType) === 1
+    const call =
+      Number(entry.dialogueCallType) === 1
         ? this.v("call")
         : Number(entry.dialogueCallType) === 2
           ? this.v("response")
-          : ""
-      : "";
+          : "";
     const birthdayId = Number(entry.birthdayCharacterId || 0);
     if (birthdayId > 0) return this.v("birthdayOf", this.name(birthdayId));
     const pair =
-      Number(entry.masterType) === 6
+      Number(entry.masterType) === 6 ||
+      (voiceKind(entry) === "resultPair" && (entry.characterIds as unknown[]).length > 1)
         ? (entry.characterIds as unknown[]).map((id) => this.name(Number(id))).join(" → ")
         : "";
     return [title, score, call, pair].filter(Boolean).join(" · ");
@@ -262,19 +276,19 @@ export class CharacterVoices extends LitElement {
       );
   }
 
-  private lineAction(entry: JsonRecord, index: number, line: ReturnType<typeof voiceLines>[number]) {
+  private lineAction(entry: JsonRecord, index: number, line: ReturnType<typeof voiceLines>[number], speaker: string) {
     const key = this.clipKey(entry, index);
     const status = this.clipStatus(key);
     const active = this.activeClipKey === key;
     const playing = active && status.state === "playing";
     const loading = active && status.state === "loading";
     const label = loading
-      ? `${this.v("loading")} · ${this.name(line.characterId)}`
+      ? `${this.v("loading")} · ${speaker}`
       : playing
-        ? `${this.v("stop")} · ${this.name(line.characterId)}`
+        ? `${this.v("stop")} · ${speaker}`
         : status.state === "error"
-          ? `${this.t("retry")} · ${this.name(line.characterId)}`
-          : `${this.v("playLine")} · ${this.name(line.characterId)}`;
+          ? `${this.t("retry")} · ${speaker}`
+          : `${this.v("playLine")} · ${speaker}`;
     return html`
       <button
         class="icon-button dialogue-row__play"
@@ -305,6 +319,9 @@ export class CharacterVoices extends LitElement {
     const key = this.clipKey(entry, index);
     const status = this.clipStatus(key);
     const statusMessage = status.message || (!line.url ? this.v("unavailable") : "");
+    const speaker = line.characterId
+      ? this.name(line.characterId)
+      : (entry.characterIds as number[]).map((id) => this.name(id)).join(" · ");
     return dialogueRow({
       key,
       className: `voice-line voice-line--${voiceGroup(entry)}`,
@@ -313,44 +330,69 @@ export class CharacterVoices extends LitElement {
             <img src=${image} alt="" loading="lazy" width="48" height="48" />
           `
         : icon("person", 24),
-      speaker: this.name(line.characterId),
+      speaker,
+      speakerContent: html`
+        ${speaker}
+        ${entry.sourcesComplete ? serverAvailabilityBadge((entry.sourceServers as string[] | undefined) || [], this.locale) : nothing}
+      `,
       speakerLanguage: resolveLocalizedText(character?.characterName, this.locale).locale,
-      text: text.text || this.v("noText"),
+      text: text.text || (voiceGroup(entry) === "title" ? this.v(voiceKind(entry)) : this.v("noText")),
       textLanguage: text.locale,
-      action: this.lineAction(entry, index, line),
+      action: this.lineAction(entry, index, line, speaker),
       state: status.state,
       statusMessage,
     });
   }
 
-  private condition(entry: JsonRecord) {
+  private calendarDate(entry: JsonRecord) {
     const seasonal = voiceSeasonRange(entry, this.locale);
     const birthday = this.character(Number(entry.birthdayCharacterId))?.birthday as JsonRecord | undefined;
     const birthdayDate = birthday
       ? voiceCalendarDate(this.locale, `${birthday.month}/${birthday.day}`, Number(entry.year) || 0)
       : "";
-    const unlock =
-      Number(entry.unlockCharacterRank) > 1
-        ? this.v("unlockRank", Number(entry.unlockCharacterRank))
-        : Number(entry.unlockFriendshipRank) > 0
-          ? this.v("unlockBond", Number(entry.unlockFriendshipRank))
-          : "";
-    return [seasonal || birthdayDate, unlock].filter(Boolean).join(" · ");
+    const startAt = Number((entry.startAt as number[] | undefined)?.[0] || 0);
+    const realLiveDate =
+      voiceGroup(entry) === "realLive" && startAt
+        ? new Intl.DateTimeFormat(this.locale, {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            timeZone: "Asia/Tokyo",
+          }).format(startAt)
+        : "";
+    return seasonal || birthdayDate || realLiveDate;
   }
 
-  private renderEntry(entry: JsonRecord, previous?: JsonRecord) {
+  private condition(entry: JsonRecord) {
+    return Number(entry.unlockCharacterRank) > 1
+      ? this.v("unlockRank", Number(entry.unlockCharacterRank))
+      : Number(entry.unlockFriendshipRank) > 0
+        ? this.v("unlockBond", Number(entry.unlockFriendshipRank))
+        : "";
+  }
+
+  private renderEntry(entry: JsonRecord, previous?: JsonRecord, calendarInGroup = false) {
     const lines = voiceLines(entry);
     const title = this.entryTitle(entry);
     const titleLanguage = entry.title ? resolveLocalizedText(entry.title, this.locale).locale : this.locale;
-    const condition = this.condition(entry);
+    const condition = [calendarInGroup ? "" : this.calendarDate(entry), this.condition(entry)]
+      .filter(Boolean)
+      .join(" · ");
     const sequence = lines.length > 1;
     const groupActive = this.activeClipKey.startsWith(`${this.voiceKey(entry)}:`);
+    const hasHeading =
+      sequence || entry.title || condition || entry.scoreRank || entry.dialogueCallType || entry.birthdayCharacterId;
     const showHeading =
-      sequence ||
-      !previous ||
-      title !== this.entryTitle(previous) ||
-      condition !== this.condition(previous) ||
-      entry.cardId !== previous.cardId;
+      hasHeading &&
+      (sequence ||
+        !previous ||
+        title !== this.entryTitle(previous) ||
+        this.condition(entry) !== this.condition(previous) ||
+        (!calendarInGroup && this.calendarDate(entry) !== this.calendarDate(previous)) ||
+        entry.cardId !== previous.cardId);
+    const linkedKind = entry.cardId ? "member-cards" : entry.storyId ? "stories" : undefined;
+    const linkedId = entry.cardId || entry.storyId;
+    const heading = condition ? this.v("withDetails", title, condition) : title;
     return html`
       <article
         class=${`voice-entry${sequence ? " voice-entry--sequence" : ""}`}
@@ -362,26 +404,19 @@ export class CharacterVoices extends LitElement {
             ? html`
                 <header class="voice-entry__header">
                   <div class="voice-entry__identity">
-                    <h4 lang=${titleLanguage}>
+                    <h5 lang=${titleLanguage}>
                       ${
-                        entry.cardId
+                        linkedKind
                           ? html`
                               <a
-                                href=${`${localePath("/catalog/member-cards", isLocale(this.locale) ? this.locale : "en")}?card=${encodeURIComponent(String(entry.cardId))}`}
+                                href=${resourcePath({ server: String(entry.sourceServer || this.server), locale: isLocale(this.locale) ? this.locale : "en", kind: linkedKind, id: String(linkedId) })}
                               >
-                                ${title}
+                                ${heading}
                               </a>
                             `
-                          : title
+                          : heading
                       }
-                    </h4>
-                    ${
-                      condition
-                        ? html`
-                            <small>${condition}</small>
-                          `
-                        : nothing
-                    }
+                    </h5>
                   </div>
                   ${
                     sequence
@@ -416,11 +451,17 @@ export class CharacterVoices extends LitElement {
   }
 
   private grouped() {
-    const entries = [...this.entries].sort(compareVoices);
-    return VOICE_GROUPS.map((group) => ({
+    const entries = preferredVoiceRecordings(this.entries).sort((a, b) => compareVoices(a, b, this.characterId));
+    return VOICE_TABS.map((group) => ({
       group,
-      items: entries.filter((entry) => voiceGroup(entry) === group),
+      items: entries.filter((entry) => voiceTab(entry) === group),
     })).filter(({ items }) => items.length);
+  }
+
+  private subgroupKey(entry: JsonRecord) {
+    return [voiceGroup(entry), voiceKind(entry), voiceGroup(entry) === "birthday" ? "" : this.calendarDate(entry)].join(
+      ":",
+    );
   }
 
   render() {
@@ -429,26 +470,46 @@ export class CharacterVoices extends LitElement {
       <section class="character-voices" aria-label=${this.v("title")}>
         ${
           groups.length
-            ? groups.map(
-                ({ group, items }) => html`
-                  <section
-                    class="voice-group"
-                    id=${`voice-group-${group}`}
-                    data-source-master-type=${String(voiceGroupMasterType(group))}
-                  >
-                    <h3>
-                      <span class="voice-group__title">${this.v(voiceGroupLabelKey(group))}</span>
-                      <span class="voice-group__count">${items.length}</span>
-                    </h3>
-                    <div class="dialogue-list">
-                      ${repeat(
-                        items,
-                        (entry) => this.voiceKey(entry),
-                        (entry, index) => this.renderEntry(entry, items[index - 1]),
-                      )}
+            ? groups.map(({ group, items }) =>
+                accordion({
+                  id: `voice-group-${group}`,
+                  label: this.v(voiceGroupLabelKey(group)),
+                  metadata: items.length,
+                  headingLevel: 3,
+                  expanded: this.expandedGroups.has(group),
+                  onExpandedChange: (expanded) => {
+                    const groups = new Set(this.expandedGroups);
+                    if (expanded) groups.add(group);
+                    else groups.delete(group);
+                    this.expandedGroups = groups;
+                  },
+                  content: html`
+                    <div class="voice-group">
+                      ${[...new Set(items.map((entry) => this.subgroupKey(entry)))].map((key) => {
+                        const entries = items.filter((entry) => this.subgroupKey(entry) === key);
+                        const kind = voiceKind(entries[0]!);
+                        const category = voiceGroup(entries[0]!);
+                        const title = ["realLive", "liveDialogue", "livePairDialogue", "seasonal"].includes(category)
+                          ? this.v(voiceGroupLabelKey(category)) + " · " + this.v(kind)
+                          : this.v(kind);
+                        const date = category === "birthday" ? "" : this.calendarDate(entries[0]!);
+                        const label = date ? this.v("withDetails", title, date) : title;
+                        return html`
+                          <section class="voice-subgroup" data-voice-kind=${kind}>
+                            <h4 class="detail-section-title">${label}</h4>
+                            <div class="dialogue-list">
+                              ${repeat(
+                                entries,
+                                (entry) => this.voiceKey(entry),
+                                (entry, index) => this.renderEntry(entry, entries[index - 1], Boolean(date)),
+                              )}
+                            </div>
+                          </section>
+                        `;
+                      })}
                     </div>
-                  </section>
-                `,
+                  `,
+                }),
               )
             : emptyState({ title: this.t("empty"), icon: "volume_off" })
         }

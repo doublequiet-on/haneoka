@@ -437,6 +437,7 @@ export class CharacterDetailArchive extends LitElement {
             .entries=${data.voices}
             .characters=${values(c.detailAux.characters)}
             .characterId=${id}
+            .server=${this.controller.contentServer}
             locale=${this.controller.contentLocale}
           ></character-voices>
         `;
