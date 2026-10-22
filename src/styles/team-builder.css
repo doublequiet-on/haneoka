@@ -1775,6 +1775,19 @@
     backdrop-filter: none;
     border-radius: 0;
   }
+  @media (min-width: 900px) {
+    .app-shell[data-route="/team-builder"] .app-shell__main {
+      background: transparent;
+    }
+    .team-builder.tb {
+      margin-inline: 0;
+    }
+    .team-builder .tb-header,
+    .team-builder .tb-tool--desktop > .tb-config > .tb-operation,
+    .team-builder .tb-tool--desktop > .tb-config > .tb-operation .tb-run {
+      background: var(--md-sys-color-surface-container);
+    }
+  }
   .team-builder .tb-tabs {
     background: transparent;
     padding: 0;
