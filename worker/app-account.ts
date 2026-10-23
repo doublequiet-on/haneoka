@@ -204,7 +204,9 @@ const webSession = async (request: Request, env: Env, url: URL): Promise<Respons
     "raw", new TextEncoder().encode(context.secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
   );
   const token = session.session.token;
-  const signature = base64url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(token)));
+  const signature = btoa(String.fromCharCode(...new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(token)),
+  )));
   const lifetime = Math.max(0, Math.floor((new Date(session.session.expiresAt).getTime() - Date.now()) / 1000));
   const cookie = `${context.authCookies.sessionToken.name}=${encodeURIComponent(`${token}.${signature}`)}; Path=/; Max-Age=${lifetime}; HttpOnly; Secure; SameSite=Lax`;
   return new Response(null, { status: 303, headers: {
