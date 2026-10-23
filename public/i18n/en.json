@@ -5111,6 +5111,7 @@
     "checksums": "SHA-256 checksums",
     "saveTitle": "Save import options",
     "saveBody": "Read Android saves with Shizuku or supported folder access. On desktop, connect and authorize an Android phone to import, or use a local iPhone / iPad backup. Standard iOS installations import save files exported on a computer.",
-    "saveGuide": "Explore save import"
+    "saveGuide": "Explore save import",
+    "windowsArmPackage": "Windows 11 ARM64 → x64"
   }
 }

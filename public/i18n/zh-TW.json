@@ -5111,6 +5111,7 @@
     "checksums": "SHA-256 校驗檔案",
     "saveTitle": "存檔匯入方式",
     "saveBody": "Android 可透過 Shizuku 或支援的資料夾存取方式讀取存檔；電腦連接並授權 Android 手機後即可匯入，也支援 iPhone / iPad 本機備份。標準 iOS 版可匯入從電腦匯出的存檔。",
-    "saveGuide": "瞭解存檔匯入"
+    "saveGuide": "瞭解存檔匯入",
+    "windowsArmPackage": "Windows 11 ARM64 → x64"
   }
 }

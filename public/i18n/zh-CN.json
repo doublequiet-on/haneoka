@@ -5111,6 +5111,7 @@
     "checksums": "SHA-256 校验文件",
     "saveTitle": "存档导入方式",
     "saveBody": "Android 可通过 Shizuku 或受支持的文件夹访问方式读取存档；电脑端连接并授权 Android 手机后即可导入，也支持 iPhone / iPad 本地备份。标准 iOS 版可导入从电脑导出的存档文件。",
-    "saveGuide": "了解存档导入"
+    "saveGuide": "了解存档导入",
+    "windowsArmPackage": "Windows 11 ARM64 → x64"
   }
 }

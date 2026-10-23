@@ -5111,6 +5111,7 @@
     "checksums": "SHA-256 체크섬",
     "saveTitle": "세이브 가져오기 방법",
     "saveBody": "Android는 Shizuku 또는 지원되는 폴더 접근 방식으로 세이브를 읽습니다. 데스크톱에서는 Android 기기를 연결하고 승인한 뒤 가져오거나 iPhone / iPad 로컬 백업을 사용할 수 있습니다. 일반 iOS 설치는 컴퓨터에서 내보낸 세이브 파일을 가져옵니다.",
-    "saveGuide": "세이브 가져오기 안내"
+    "saveGuide": "세이브 가져오기 안내",
+    "windowsArmPackage": "Windows 11 ARM64 → x64"
   }
 }
