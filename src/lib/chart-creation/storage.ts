@@ -2,7 +2,7 @@
 // Input: 本地谱面工程、音频、发布配置及备份 ZIP。
 // Output: CAS 本地历史与带音频／封面的可移植工程备份。
 // Pos: [Map](../L2-2.md)；谱面创作的 IndexedDB 与文件持久化边界。
-// Effects/Dependencies: IndexedDB、ZIP、哈希；导出云端封面时按当前账户读取素材，导入移除云端写入身份。
+// Effects/Dependencies: IndexedDB 连接生命周期、ZIP、哈希；导出云端封面时按当前账户读取素材，导入移除云端写入身份。
 import { zip, unzip } from "fflate";
 import { assertValidProject } from "../../../packages/chart-editor/src/validation";
 import { structuredCloneValue, type Project } from "../../../packages/chart-editor/src/model";
@@ -54,7 +54,15 @@ export class CreationStore {
       };
       pending.onsuccess = () => {
         const db = pending.result;
-        db.onversionchange = () => db.close();
+        const active = this.database;
+        const clear = () => {
+          if (this.database === active) this.database = undefined;
+        };
+        db.onclose = clear;
+        db.onversionchange = () => {
+          clear();
+          db.close();
+        };
         resolve(db);
       };
       pending.onerror = () => {
