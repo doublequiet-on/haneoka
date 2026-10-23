@@ -282,11 +282,12 @@ export class EngineClient {
     const work = async (): Promise<EngineResponse> => {
       if (!remaining(deadline)) { stop("budget"); return latest; }
       if (completeResponse(latest)) return latest;
+      const opponents = request.goal.kind === "gekiso" && !!request.goal.opponents;
       const parallel = this.pool.length > 1 && request.members.length >= PARALLEL_MIN_MEMBERS && request.goal.kind !== "plan" && !request.seedOnly
         && !wholeSongReward(this.data, request)
-        && !(request.goal.kind === "gekiso" && request.constraints.leader !== null && request.goal.songs.length === 1);
+        && !(request.goal.kind === "gekiso" && request.goal.songs.length === 1 && (request.constraints.leader !== null || request.goal.opponents));
       if (!parallel) {
-        const response = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, accept);
+        const response = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, opponents ? undefined : accept);
         if (!stopped) onFinalResult?.({ requestId: request.requestId!, contextKey: request.contextKey!, response: structuredClone(response) });
         return response;
       }
@@ -469,6 +470,7 @@ export class EngineClient {
               completed: request.completed?.filter(same(song)),
             };
             const response = await engine.send<EngineResponse>({ type: "run", id: 0, request: part }, undefined, value => {
+              if (opponents) return;
               if (stopped || value.contextKey !== request.contextKey || value.requestId !== request.requestId) return;
               parts[index] = value.response.results[0] ?? parts[index]!;
               publish(merged());
