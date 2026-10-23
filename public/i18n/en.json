@@ -4544,6 +4544,22 @@
   },
   "admin": {
     "page": {
+      "creations": {
+        "content": "Content",
+        "posts": "Posts",
+        "charts": "Charts",
+        "playlists": "Playlists",
+        "all": "All",
+        "latest": "Latest",
+        "artist": "Artist",
+        "charter": "Charter",
+        "difficulty": "Difficulty",
+        "tracks": "Tracks",
+        "open": "View page",
+        "remove": "Remove content",
+        "confirmRemove": "Remove this content?",
+        "search": "Search content"
+      },
       "title": "Admin",
       "sectionNotFound": "Admin section not found.",
       "moderationPolicy": "Content moderation",
@@ -4600,6 +4616,9 @@
         "contributor": "Contributor"
       },
       "values": {
+        "unlisted": "Unlisted",
+        "charts": "Charts",
+        "playlists": "Playlists",
         "accepted": "Accepted",
         "active": "Active",
         "allow": "Allowed",
@@ -4660,6 +4679,8 @@
       },
       "operations": {
         "actions": {
+          "chartsRemove": "Remove chart",
+          "playlistsRemove": "Remove playlist",
           "postStateSet": "Update post state",
           "commentStateSet": "Update comment state",
           "appealDecision": "Review appeal",

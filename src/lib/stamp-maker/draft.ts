@@ -58,8 +58,8 @@ export function parseStampDraft(value: unknown): StampDraft | undefined {
     (input.version !== 1 && input.version !== 2) ||
     !string(input.server, 32) ||
     !/^[a-z][a-z0-9-]*$/u.test(input.server) ||
-    !string(input.selected, 24) ||
-    !/^\d+$/u.test(input.selected) ||
+    !string(input.selected, 65) ||
+    !/^(?:[a-z0-9]+(?:-[a-z0-9]+)*:)?\d{1,24}$/u.test(input.selected) ||
     !string(input.resourceName, 160) ||
     !/^[a-zA-Z0-9_.()-]+$/u.test(input.resourceName) ||
     !string(input.imageLanguage, 16) ||

@@ -4,6 +4,7 @@ import { ipDetailsJson, readIpDetails, requestIpMetadata } from "./ip-address";
 import { resolveModerationAppeal } from "./moderation";
 import { readAdminPost, readAdminAttachment, readAdminStatistics } from "./admin-content";
 import { readAdminUser } from "./admin-user-details";
+import { listAdminCreations, readAdminCreation, removeAdminCreation, type CreationKind } from "./admin-creations";
 import { adminVisitFilter, readAdminGeo, readAdminSeries } from "./admin-analytics";
 import { USER_ROLES, isUserRole, isStaffRole, type UserRole, type StaffRole, type StoredUserRole, type MemberTier } from "../src/lib/user-roles";
 import { effectiveUserRoleSql } from "./user-roles";
@@ -958,6 +959,42 @@ const getUsers = async (request: Request, env: Env, url: URL): Promise<Response>
     users,
     nextCursor: last && result.results.length === limit ? encodeCursor({ sort: last.createdAt, id: last.id }) : null,
   });
+};
+
+const handleAdminCreations = async (request: Request, env: Env, kind: CreationKind, id?: string): Promise<Response> => {
+  const access = await requireStaff(request, env, "admin");
+  if (access instanceof Response) return access;
+  const url = new URL(request.url);
+  if (id && !UUID_PATTERN.test(id)) return error(request, 404, "content_not_found", "Content not found");
+  if (request.method === "GET" || request.method === "HEAD") {
+    if (id) {
+      const creation = await readAdminCreation(env, kind, id);
+      return creation ? json(request, { creation }) : error(request, 404, "content_not_found", "Content not found");
+    }
+    const limit = parseLimit(url, 50);
+    const raw = url.searchParams.get("cursor"), cursor = raw ? decodeCursor(raw) : null;
+    const status = url.searchParams.get("status") || "all";
+    const query = (url.searchParams.get("q") || "").normalize("NFKC").trim();
+    if (!limit || (raw && (!cursor || typeof cursor.sort !== "number")) || query.length > 100 || !["all", "draft", "published", "deleted"].includes(status))
+      return error(request, 400, "invalid_query", "Invalid content filters");
+    const rows = await listAdminCreations(env, kind, { limit: limit + 1, query, status,
+      cursor: cursor && typeof cursor.sort === "number" ? { sort: cursor.sort, id: cursor.id } : null });
+    const more = rows.length > limit, creations = rows.slice(0, limit), last = creations.at(-1);
+    return json(request, { creations, nextCursor: more && last ? encodeCursor({ sort: Number(last.createdAt), id: String(last.id) }) : null });
+  }
+  const body = await readJsonBody(request), version = body ? expectedVersion(body) : null;
+  const reasonCode = body?.reasonCode;
+  if (!id || version === null || typeof reasonCode !== "string" || !REASON_PATTERN.test(reasonCode))
+    return error(request, 422, "invalid_body", "reasonCode and expectedVersion are required");
+  const started = await startOperation(request, env, access, `${kind}.remove`, kind, id);
+  if (started.kind === "response") return started.response;
+  if (started.kind === "existing") return existingOperationResponse(request, started.operation);
+  const removed = await removeAdminCreation(env, kind, id, version, started.operationId, reasonCode);
+  if (!removed) {
+    await failOperation(env, started.operationId, "version_conflict");
+    return error(request, 409, "version_conflict", "The content changed; refresh and try again");
+  }
+  return json(request, { deleted: true, version: version + 1 });
 };
 
 const getPosts = async (request: Request, env: Env, url: URL): Promise<Response> => {
@@ -4192,6 +4229,10 @@ export const handleAdminRequest = async (request: Request, env: Env): Promise<Re
   if (segments.some((segment) => segment === null))
     return error(request, 404, "route_not_found", "API route not found");
   const path = segments as string[];
+
+  if ((path[0] === "charts" || path[0] === "playlists") &&
+      ((method === "GET" && (path.length === 1 || path.length === 2)) || (method === "DELETE" && path.length === 2)))
+    return handleAdminCreations(request, env, path[0], path[1]);
 
   if (method === "GET" && (
     (path.length === 1 && path[0] === "statistics") ||

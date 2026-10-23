@@ -80,6 +80,7 @@ export function stampChoices(catalog: JsonRecord, locale: string, imageLanguage 
       if (!source) return [];
       const resourceName =
         image
+          .split(/[?#]/u)[0]!
           .split("/")
           .pop()
           ?.replace(/\.png$/u, "") || "";
