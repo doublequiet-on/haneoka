@@ -146,7 +146,7 @@ export interface EngineRequest {
   /** Private sampled warm pass; retained candidates still use every requested seed. */
   seedVariant?: "sample" | "quiet";
   seeded?: boolean;
-  /** Internal COMBO reward proof stage; later stages follow completed global reward proofs. */
+  /** Internal reward proof stage; later stages follow completed global reward proofs. */
   rewardPhase?: { kind: "primary" } | { kind: "other"; reward: number; floor?: number } | { kind: "score"; reward: number; other: number; floor?: number };
   /** Known lower bounds on each song's k-th key (`songId:difficulty`), from teams other shards already found. */
   floors?: Record<string, number>;

@@ -169,7 +169,14 @@ function wholeSongReward(data: TeamBuilderData, request: EngineRequest): boolean
   return Array.isArray(missions) && missions.length > 0 && missions.every(mission => mission === 2 || mission === 3);
 }
 
+function weightedLiveReward(request: EngineRequest): boolean {
+  const goal = request.goal;
+  return goal.kind === "event" && !goal.gekiso && goal.route !== "skip"
+    && goal.measure !== "challenge-points" && !!goal.weights
+    && request.k === 1 && goal.songs.length === 1;
+}
 function phasedReward(data: TeamBuilderData, request: EngineRequest): boolean {
+  if (weightedLiveReward(request)) return true;
   const goal = request.goal;
   if (request.k !== 1 || goal.kind !== "event" || !goal.gekiso || goal.songs.length !== 1) return false;
   const missions = objectRow(data.songs[String(goal.songs[0]!.songId)]?.gekisou).missionTypes;
@@ -283,6 +290,7 @@ export class EngineClient {
       if (!remaining(deadline)) { stop("budget"); return latest; }
       if (completeResponse(latest)) return latest;
       const opponents = request.goal.kind === "gekiso" && !!request.goal.opponents;
+      const weightedLive = weightedLiveReward(request);
       const parallel = this.pool.length > 1 && request.members.length >= PARALLEL_MIN_MEMBERS && request.goal.kind !== "plan" && !request.seedOnly
         && !wholeSongReward(this.data, request)
         && !(request.goal.kind === "gekiso" && request.goal.songs.length === 1 && (request.constraints.leader !== null || request.goal.opponents));
@@ -493,7 +501,7 @@ export class EngineClient {
           if (!stopped && value.requestId === request.requestId && value.contextKey === request.contextKey) publish(value.response);
         };
         let seeds = request.seeds ?? [];
-        if (!request.noFloor && stage < 0) {
+        if (!request.noFloor && (stage < 0 || weightedLive && stage === 0)) {
           const quick = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, deadline: Math.min(deadline, clock() + QUICK_MS) } }, stageProgress, acceptPart);
           publish(quick);
           if (completeResponse(quick)) return quick;
@@ -502,7 +510,7 @@ export class EngineClient {
         const valueOf = (hit: EngineHit) => request.rewardPhase?.kind === "other" ? hit.event?.otherMean ?? 0
           : request.rewardPhase?.kind === "score" ? hit.score?.mean ?? 0 : hit.key;
         const sampledRewards = request.goal.kind === "event" && request.goal.gekiso;
-        const workers = request.rewardPhase ? this.pool.slice(0, 4) : this.pool;
+        const workers = request.rewardPhase && !weightedLive ? this.pool.slice(0, 4) : this.pool;
         const count = sampledRewards
           ? (request.constraints.leader ? 1 : workers.length)
           : workers.length * SHARDS_PER_WORKER;

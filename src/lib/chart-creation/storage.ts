@@ -75,21 +75,29 @@ export class CreationStore {
       };
     }));
   }
+  private async transaction(stores: string | string[], mode: IDBTransactionMode = "readonly") {
+    const pending = this.db(), db = await pending;
+    try {
+      return db.transaction(stores, mode);
+    } catch (error) {
+      if (!(error instanceof DOMException) || error.name !== "InvalidStateError") throw error;
+      if (this.database === pending) this.database = undefined;
+      db.close();
+      return (await this.db()).transaction(stores, mode);
+    }
+  }
   async list(): Promise<CreationDocument[]> {
-    const db = await this.db(),
-      tx = db.transaction("documents");
+    const tx = await this.transaction("documents");
     return ((await request(tx.objectStore("documents").getAll())) as CreationDocument[]).sort(
       (a, b) => b.updatedAt - a.updatedAt,
     );
   }
   async versions(id: string): Promise<CreationRevision[]> {
-    const db = await this.db(),
-      tx = db.transaction("revisions");
+    const tx = await this.transaction("revisions");
     return request(tx.objectStore("revisions").getAll(IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER])));
   }
   async open(id: string, revision?: number) {
-    const db = await this.db(),
-      tx = db.transaction(["documents", "revisions", "audio"]);
+    const tx = await this.transaction(["documents", "revisions", "audio"]);
     const done = completion(tx);
     void done.catch(() => {});
     const document = (await request(tx.objectStore("documents").get(id))) as CreationDocument | undefined;
@@ -117,8 +125,7 @@ export class CreationStore {
     assertValidProject(original);
     readAuthorCollections(chart);
     readAuthorCollections(original);
-    const db = await this.db(),
-      tx = db.transaction(["documents", "revisions", "audio"], "readwrite");
+    const tx = await this.transaction(["documents", "revisions", "audio"], "readwrite");
     const done = completion(tx);
     void done.catch(() => {});
     const docs = tx.objectStore("documents"),
@@ -162,8 +169,7 @@ export class CreationStore {
     return document;
   }
   async original(id: string) {
-    const db = await this.db(),
-      tx = db.transaction(["documents", "audio"]),
+    const tx = await this.transaction(["documents", "audio"]),
       done = completion(tx);
     void done.catch(() => {});
     const document = (await request(tx.objectStore("documents").get(id))) as CreationDocument | undefined;
@@ -177,8 +183,7 @@ export class CreationStore {
   }
   /** Project deletion is one local CAS transaction; audio shared by other projects/versions survives. */
   async delete(id: string, head: number) {
-    const db = await this.db(),
-      tx = db.transaction(["documents", "revisions", "audio"], "readwrite"),
+    const tx = await this.transaction(["documents", "revisions", "audio"], "readwrite"),
       done = completion(tx);
     void done.catch(() => {});
     const document = (await request(tx.objectStore("documents").get(id))) as CreationDocument | undefined;
@@ -206,8 +211,7 @@ export class CreationStore {
   }
   async export(id: string, revision?: number): Promise<Blob> {
     const { document, value } = await this.open(id, revision);
-    const db = await this.db(),
-      tx = db.transaction("audio");
+    const tx = await this.transaction("audio");
     const refs = [...new Map([document.originalAudio, value.audio].map((ref) => [ref.sha256, ref])).values()];
     const files = await Promise.all(
       refs.map((ref) => request(tx.objectStore("audio").get(ref.sha256)) as Promise<File>),
@@ -309,9 +313,8 @@ export class CreationStore {
     )
       throw new Error("archive_invalid");
     const id = crypto.randomUUID(),
-      savedAt = Date.now(),
-      db = await this.db();
-    const tx = db.transaction(["documents", "revisions", "audio"], "readwrite"),
+      savedAt = Date.now();
+    const tx = await this.transaction(["documents", "revisions", "audio"], "readwrite"),
       done = completion(tx);
     for (const [hash, audio] of audioFiles) tx.objectStore("audio").put(audio, hash);
     tx.objectStore("documents").add({
