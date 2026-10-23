@@ -29,7 +29,7 @@ const RESOURCE_SOURCE_LIST_PAGE_LIMIT = 1_000;
 const RESOURCE_SOURCE_LIST_MAX_PAGES = 5;
 const RESOURCE_SOURCE_OPTION_LIMIT = 100;
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/u;
 const REASON_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,79}$/u;
