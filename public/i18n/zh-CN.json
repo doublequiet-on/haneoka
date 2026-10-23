@@ -4544,6 +4544,22 @@
   },
   "admin": {
     "page": {
+      "creations": {
+        "content": "内容",
+        "posts": "帖子",
+        "charts": "谱面",
+        "playlists": "歌单",
+        "all": "全部",
+        "latest": "最新版本",
+        "artist": "艺术家",
+        "charter": "谱师",
+        "difficulty": "难度",
+        "tracks": "歌曲",
+        "open": "查看页面",
+        "remove": "移除内容",
+        "confirmRemove": "移除此内容？",
+        "search": "搜索内容"
+      },
       "title": "管理",
       "sectionNotFound": "未找到该管理页面。",
       "moderationPolicy": "内容审核",
@@ -4600,6 +4616,9 @@
         "contributor": "贡献者"
       },
       "values": {
+        "unlisted": "仅链接可见",
+        "charts": "谱面",
+        "playlists": "歌单",
         "accepted": "已接受",
         "active": "正常",
         "allow": "已通过",
@@ -4660,6 +4679,8 @@
       },
       "operations": {
         "actions": {
+          "chartsRemove": "移除谱面",
+          "playlistsRemove": "移除歌单",
           "postStateSet": "更新帖子状态",
           "commentStateSet": "更新评论状态",
           "appealDecision": "处理申诉",

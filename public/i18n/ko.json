@@ -4544,6 +4544,22 @@
   },
   "admin": {
     "page": {
+      "creations": {
+        "content": "콘텐츠",
+        "posts": "게시글",
+        "charts": "채보",
+        "playlists": "플레이리스트",
+        "all": "전체",
+        "latest": "최신 버전",
+        "artist": "아티스트",
+        "charter": "채보 제작자",
+        "difficulty": "난이도",
+        "tracks": "곡",
+        "open": "페이지 보기",
+        "remove": "콘텐츠 삭제",
+        "confirmRemove": "이 콘텐츠를 삭제할까요?",
+        "search": "콘텐츠 검색"
+      },
       "title": "관리",
       "sectionNotFound": "관리 페이지를 찾을 수 없습니다.",
       "moderationPolicy": "콘텐츠 검토",
@@ -4600,6 +4616,9 @@
         "contributor": "기여자"
       },
       "values": {
+        "unlisted": "링크 공개",
+        "charts": "채보",
+        "playlists": "플레이리스트",
         "accepted": "승인됨",
         "active": "활성",
         "allow": "허용됨",
@@ -4660,6 +4679,8 @@
       },
       "operations": {
         "actions": {
+          "chartsRemove": "채보 삭제",
+          "playlistsRemove": "플레이리스트 삭제",
           "postStateSet": "게시물 상태 업데이트",
           "commentStateSet": "댓글 상태 업데이트",
           "appealDecision": "이의 제기 검토",

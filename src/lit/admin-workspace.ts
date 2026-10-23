@@ -32,6 +32,7 @@ type Value = Record<string, unknown>;
 const sections = ["overview", "users", "posts", "forums", "reports", "appeals", "operations"] as const;
 type Section = (typeof sections)[number];
 type PostFilter = "all" | "pending" | "review" | "block" | "allow" | "hidden" | "draft" | "published";
+type ContentKind = "posts" | "charts" | "playlists";
 type HistorySection = "revisions" | "stateEvents" | "comments";
 const ADMIN_GEO_FILTERS = [
   "geoCountry",
@@ -73,6 +74,11 @@ export class AdminWorkspace extends LitElement {
     selectedResourceServer: { state: true },
     packageFileName: { state: true },
     postFilter: { state: true },
+    contentKind: { state: true },
+    creationFilter: { state: true },
+    creation: { state: true },
+    creationLoading: { state: true },
+    confirmRemoval: { state: true },
     reviewPostId: { state: true },
     historyLoading: { state: true },
     historyError: { state: true },
@@ -127,6 +133,11 @@ export class AdminWorkspace extends LitElement {
   declare selectedResourceServer: string;
   declare packageFileName: string;
   declare postFilter: PostFilter;
+  declare private contentKind: ContentKind;
+  declare private creationFilter: string;
+  declare private creation: Value | null;
+  declare private creationLoading: boolean;
+  declare private confirmRemoval: boolean;
   declare reviewPostId: string;
   declare historyLoading: boolean;
   declare historyError: string;
@@ -206,6 +217,11 @@ export class AdminWorkspace extends LitElement {
     this.selectedResourceServer = "";
     this.packageFileName = "";
     this.postFilter = "all";
+    this.contentKind = "posts";
+    this.creationFilter = "all";
+    this.creation = null;
+    this.creationLoading = false;
+    this.confirmRemoval = false;
     this.reviewPostId = "";
     this.historyLoading = false;
     this.historyError = "";
@@ -285,6 +301,9 @@ export class AdminWorkspace extends LitElement {
     this.forumFilter = filters.get("forumId") || "";
     const moderation = filters.get("moderationStatus");
     const state = filters.get("status");
+    const kind = filters.get("kind");
+    this.contentKind = kind === "charts" || kind === "playlists" ? kind : "posts";
+    this.creationFilter = ["draft", "published", "deleted"].includes(state || "") ? state! : "all";
     this.userRoleFilter = isUserRole(filters.get("role"))
       ? filters.get("role")!
       : "";
@@ -488,7 +507,7 @@ export class AdminWorkspace extends LitElement {
     return Array.isArray(this.staff.capabilities) && this.staff.capabilities.includes(capability);
   }
   private records(document = this.document) {
-    const value = document[this.section];
+    const value = document[this.section === "posts" && this.contentKind !== "posts" ? "creations" : this.section];
     return Array.isArray(value) ? (value as Value[]) : [];
   }
   private async load(append: boolean) {
@@ -497,8 +516,9 @@ export class AdminWorkspace extends LitElement {
     if (append && (!this.cursor || this.loadingMore || this.phase !== "ready")) return;
     const signal = this.listRequests.begin();
     let section = this.section;
+    const contentKind = this.contentKind;
     const active = () =>
-      this.accessCurrent(generation) && this.listRequests.current(signal) && section === this.section;
+      this.accessCurrent(generation) && this.listRequests.current(signal) && section === this.section && contentKind === this.contentKind;
     const progress = beginLoading(this.label("loading", "Loading"), { signal });
     this.loadingMore = append;
     this.refreshing = !append && this.phase === "ready";
@@ -524,8 +544,9 @@ export class AdminWorkspace extends LitElement {
         for (const key of ADMIN_GEO_FILTERS)
           for (const value of location.searchParams.getAll(key)) query.append(key, value);
       }
-      if (section === "posts" && this.forumFilter) query.set("forumId", this.forumFilter);
-      if (section === "posts" && this.postFilter !== "all")
+      if (section === "posts" && contentKind === "posts" && this.forumFilter) query.set("forumId", this.forumFilter);
+      if (section === "posts" && contentKind !== "posts" && this.creationFilter !== "all") query.set("status", this.creationFilter);
+      if (section === "posts" && contentKind === "posts" && this.postFilter !== "all")
         query.set(
           ["hidden", "draft", "published"].includes(this.postFilter) ? "status" : "moderationStatus",
           this.postFilter,
@@ -544,10 +565,10 @@ export class AdminWorkspace extends LitElement {
             }))
           : section === "forums"
             ? await this.request("/api/v1/admin/forums", { signal })
-              : await this.request(`/api/v1/admin/${section}?${query}`, { signal });
+              : await this.request(`/api/v1/admin/${section === "posts" ? contentKind : section}?${query}`, { signal });
       if (!active()) return;
       if (append) {
-        const key = this.section;
+        const key = section === "posts" && contentKind !== "posts" ? "creations" : section;
         this.document = {
           ...result,
           [key]: [...this.records(), ...(Array.isArray(result[key]) ? (result[key] as Value[]) : [])],
@@ -558,7 +579,7 @@ export class AdminWorkspace extends LitElement {
         this.forums = Array.isArray(result.forums) ? (result.forums as unknown as CommunityForum[]) : [];
         this.forumGroups = Array.isArray(result.groups) ? (result.groups as unknown as ForumGroup[]) : [];
       }
-      if (!append && section === "posts" && this.staff.role === "admin")
+      if (!append && section === "posts" && contentKind === "posts" && this.staff.role === "admin")
         void this.loadAdminForums().catch((error) => {
           if (this.accessCurrent(generation)) this.error = error instanceof Error ? error.message : String(error);
         });
@@ -705,6 +726,9 @@ export class AdminWorkspace extends LitElement {
   }
   private closeReview() {
     this.historyRequests.cancel();
+    this.creation = null;
+    this.creationLoading = false;
+    this.confirmRemoval = false;
     this.closeMovePost();
     this.reviewPostId = "";
     this.history = null;
@@ -1137,6 +1161,127 @@ export class AdminWorkspace extends LitElement {
       </div>
     `;
   }
+  private selectContentKind(kind: ContentKind) {
+    this.closeReview();
+    this.contentKind = kind;
+    this.creationFilter = "all";
+    this.postFilter = "all";
+    this.document = {};
+    this.cursor = "";
+    const params = new URLSearchParams(location.search);
+    params.set("kind", kind);
+    params.delete("status");
+    params.delete("moderationStatus");
+    history.replaceState(history.state, "", `${location.pathname}?${params}`);
+    void this.load(false);
+  }
+  private renderContentFilters() {
+    return html`
+      <div class="admin-filters">${segmented({
+        label: this.label("creations.content", "Content"), value: this.contentKind,
+        options: (["posts", "charts", "playlists"] as ContentKind[]).map(value => ({ value, label: this.label(`creations.${value}`, value) })),
+        onSelect: value => this.selectContentKind(value),
+      })}</div>
+      ${this.contentKind === "posts" ? this.renderPostFilters() : html`
+        <div class="admin-filters">${segmented({
+          label: this.label("columns.status", "Status"), value: this.creationFilter,
+          options: ["all", "published", "draft", "deleted"].map(value => ({ value, label: value === "all" ? this.label("creations.all", "All") : this.valueLabel(value) })),
+          onSelect: value => {
+            this.creationFilter = value;
+            const params = new URLSearchParams(location.search);
+            if (value === "all") params.delete("status"); else params.set("status", value);
+            history.replaceState(history.state, "", `${location.pathname}?${params}`);
+            void this.load(false);
+          },
+        })}</div>`}
+    `;
+  }
+  private async openCreation(record: Value) {
+    this.closeReview();
+    this.creation = record;
+    this.creationLoading = true;
+    const signal = this.historyRequests.begin(), kind = this.contentKind;
+    try {
+      const result = await this.request(`/api/v1/admin/${kind}/${encodeURIComponent(String(record.id))}`, { signal });
+      if (this.historyRequests.current(signal)) this.creation = result.creation as Value;
+    } catch (error) {
+      if (this.historyRequests.current(signal)) {
+        this.creation = null;
+        this.error = error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (this.historyRequests.current(signal)) this.creationLoading = false;
+    }
+  }
+  private removeCreation() {
+    const creation = this.creation, kind = this.contentKind;
+    if (!creation || this.creationLoading) return;
+    void this.mutate(`remove:${creation.id}`, async assertCurrent => {
+      await this.request(`/api/v1/admin/${kind}/${encodeURIComponent(String(creation.id))}`, {
+        method: "DELETE", body: JSON.stringify({ expectedVersion: creation.version, reasonCode: "admin.dashboard.remove" }),
+      });
+      assertCurrent();
+      this.closeReview();
+      await this.load(false);
+    });
+  }
+  private renderCreation() {
+    const record = this.creation;
+    if (!record || this.privateAccess.signal.aborted) return nothing;
+    const details = (record.details || []) as Value[];
+    const close = () => this.closeReview();
+    return html`
+      <dialog ${modal(close)} class="dialog-host admin-dialog-scrim" aria-labelledby="admin-creation-title" @click=${close}>
+        <section class="admin-history-dialog surface" @click=${(event: Event) => event.stopPropagation()}>
+          <header class="admin-review-header">
+            <div><span class="admin-eyebrow">${this.label(`creations.${this.contentKind}`, this.contentKind)}</span>
+              <h2 id="admin-creation-title">${String(record.title || record.id)}</h2></div>
+            <button class="icon-button" aria-label=${this.label("history.close", "Close")} @click=${close}>${icon("close", 24)}</button>
+          </header>
+          ${this.creationLoading ? loadingState(this.label("loading", "Loading")) : html`
+            <div class="admin-review-layout">
+              <main class="admin-review-content">
+                <div class="admin-statuses">${this.statusBadge(record.status)}${this.statusBadge(record.visibility)}</div>
+                <p class="admin-post-body">${String(record.body || "")}</p>
+                ${this.contentKind === "charts" ? details.map(revision => html`
+                  <section class="surface stack">
+                    <h3>${this.label("history.revision", "Version")} ${String(revision.revision)}
+                      ${revision.isHead ? html`<span class="chip">${this.label("creations.latest", "Latest")}</span>` : nothing}
+                      ${revision.isPublished ? this.statusBadge("published") : nothing}</h3>
+                    <strong>${String(revision.title)}</strong>
+                    <dl class="spec-list">
+                      <dt>${this.label("creations.artist", "Artist")}</dt><dd>${String(revision.artist || "—")}</dd>
+                      <dt>${this.label("creations.charter", "Charter")}</dt><dd>${String(revision.charter || "—")}</dd>
+                      <dt>${this.label("creations.difficulty", "Difficulty")}</dt><dd>${String(revision.difficulty)} ${String(revision.level)}</dd>
+                    </dl>
+                    <p class="admin-post-body">${String(revision.summary || "")}</p>
+                  </section>`) : html`
+                  <h3>${this.label("creations.tracks", "Tracks")} · ${details.length}</h3>
+                  <ol>${details.map(track => html`<li><a href=${track.provider === "bestdori" ? `/${preferredLocale()}/community/gbp/songs/detail/?song=${encodeURIComponent(String(track.musicId))}` : ["jp", "intl"].includes(String(track.server)) ? `/${track.server}/${preferredLocale()}/songs/${encodeURIComponent(String(track.musicId))}/` : `/catalog/songs?song=${encodeURIComponent(String(track.musicId))}`}>${String(track.provider)} / ${String(track.server)} / ${String(track.musicId)}</a></li>`)}</ol>`}
+              </main>
+              <aside class="admin-review-context">
+                <dl class="spec-list">
+                  <dt>${this.label("columns.author", "Author")}</dt><dd>${String(record.authorName || record.authorAccountName || record.authorId)}</dd>
+                  <dt>ID</dt><dd>${String(record.id)}</dd>
+                  <dt>${this.label("history.revision", "Version")}</dt><dd>${String(record.version)}</dd>
+                  <dt>${this.label("columns.createdAt", "Created")}</dt><dd>${this.date(record.createdAt)}</dd>
+                </dl>
+                ${record.status === "published" && record.visibility === "public" ? html`<a class="button button--outlined" target="_blank" rel="noopener" href=${`/intl/${preferredLocale()}/${this.contentKind}/${encodeURIComponent(String(record.id))}/`}>${this.label("creations.open", "View page")}</a>` : nothing}
+                ${record.deletedAt ? nothing : html`<button class="button button--danger" ?disabled=${!!this.busy} @click=${() => { this.confirmRemoval = true; }}>${this.label("creations.remove", "Remove content")}</button>`}
+              </aside>
+            </div>`}
+        </section>
+      </dialog>
+      ${this.confirmRemoval ? html`<dialog class="dialog" aria-labelledby="admin-remove-title" ${modal(() => { this.confirmRemoval = false; })}>
+        <div class="dialog__surface"><header class="dialog__header"><h2 id="admin-remove-title">${this.label("creations.confirmRemove", "Remove this content?")}</h2></header>
+        <div class="dialog__body">${String(record.title || record.id)}</div>
+        <div class="dialog__actions">
+          <button class="button button--text" ?disabled=${!!this.busy} @click=${() => { this.confirmRemoval = false; }}>${clientText(preferredLocale(), "common.actions.cancel", "Cancel")}</button>
+          <button class="button button--danger" ?disabled=${!!this.busy} @click=${() => this.removeCreation()}>${this.label("creations.remove", "Remove content")}</button>
+        </div></div>
+      </dialog>` : nothing}
+    `;
+  }
   private renderNavigation() {
     const icons: Record<Section, string> = {
       overview: "space_dashboard",
@@ -1159,7 +1304,7 @@ export class AdminWorkspace extends LitElement {
                 href=${section === "overview" ? "/admin" : `/admin/${section}`}
               >
                 ${icon(icons[section])}
-                <span>${this.label(`sections.${section}`, section)}</span>
+                <span>${section === "posts" ? this.label("creations.content", "Content") : this.label(`sections.${section}`, section)}</span>
               </a>
             `,
           )}
@@ -2497,6 +2642,16 @@ export class AdminWorkspace extends LitElement {
     });
   }
   private renderRecord(record: Value) {
+    if (this.section === "posts" && this.contentKind !== "posts") return html`
+      <article class="admin-record admin-post-row">
+        <div class="admin-post-row__content">
+          <button class="admin-post-title" aria-haspopup="dialog" ?disabled=${!!this.busy} @click=${() => this.openCreation(record)}><strong>${String(record.title || record.id)}</strong></button>
+          <p>${String(record.body || "")}</p>
+        </div>
+        <span class="admin-statuses">${this.statusBadge(record.status)}${this.statusBadge(record.visibility)}</span>
+        <span class="admin-post-row__author"><strong>${String(record.authorName || record.authorAccountName || "—")}</strong></span>
+        <span class="admin-post-row__time"><time>${this.date(record.createdAt)}</time></span>
+      </article>`;
     if (this.section === "users") {
       const visit = record.lastVisit as Value | undefined;
       return html`
@@ -2687,7 +2842,7 @@ export class AdminWorkspace extends LitElement {
             ${this.label(`operations.actions.${String(record.action || "").replace(/[._-]([a-z])/g, (_match, letter: string) => letter.toUpperCase())}`, String(record.action || ""))}
           </strong>
           ${this.statusBadge(record.status)}
-          <small>${String(record.targetKind || "")} · ${String(record.targetId || "")}</small>
+          <small>${this.valueLabel(record.targetKind)} · ${String(record.targetId || "")}</small>
           <small>${String(record.actorName || "")} · ${this.date(record.createdAt)}</small>
         </span>
         ${
@@ -3955,7 +4110,7 @@ export class AdminWorkspace extends LitElement {
             "Review what needs attention and see the current state of your community.",
           )
         : this.section === "posts"
-          ? this.label("workspace.postsDescription", "All post states remain available to administrators for review.")
+          ? ""
           : this.section === "users"
             ? this.label(
                 "workspace.usersDescription",
@@ -3972,7 +4127,7 @@ export class AdminWorkspace extends LitElement {
                 <span class="admin-eyebrow">
                   ${this.label("workspace.communityOperations", "Community operations")}
                 </span>
-                <h2>${this.label(`sections.${this.section}`, this.section)}</h2>
+                <h2>${this.section === "posts" ? this.label("creations.content", "Content") : this.label(`sections.${this.section}`, this.section)}</h2>
                 ${
                   description
                     ? html`
@@ -4056,8 +4211,8 @@ export class AdminWorkspace extends LitElement {
                                             type="search"
                                             maxlength="100"
                                             .value=${this.query}
-                                            aria-label=${this.section === "posts" ? this.label("workspace.searchPosts", "Search posts") : this.label("columns.user", "User")}
-                                            placeholder=${this.section === "posts" ? this.label("workspace.searchPosts", "Search posts") : this.label("columns.user", "User")}
+                                            aria-label=${this.section === "posts" ? this.label("creations.search", "Search content") : this.label("columns.user", "User")}
+                                            placeholder=${this.section === "posts" ? this.label("creations.search", "Search content") : this.label("columns.user", "User")}
                                           />
                                           <button
                                             class="icon-button"
@@ -4073,7 +4228,7 @@ export class AdminWorkspace extends LitElement {
                               </header>
                               ${
                                 this.section === "posts"
-                                  ? this.renderPostFilters()
+                                  ? this.renderContentFilters()
                                   : this.section === "users"
                                     ? html`
                                         ${this.renderUserFilters()}${this.renderGeoFilterSummary()}
@@ -4084,7 +4239,7 @@ export class AdminWorkspace extends LitElement {
                                 this.section === "posts"
                                   ? html`
                                       <div class="admin-post-columns" aria-hidden="true">
-                                        <span>${this.label("columns.post", "Post")}</span>
+                                        <span>${this.label("creations.content", "Content")}</span>
                                         <span>${this.label("columns.status", "Status")}</span>
                                         <span>${this.label("columns.author", "Author")}</span>
                                         <span>${this.label("columns.createdAt", "Created")}</span>
@@ -4135,7 +4290,7 @@ export class AdminWorkspace extends LitElement {
             }
           </main>
         </div>
-        ${this.renderUserDetails()}${this.renderHistory()}
+        ${this.renderUserDetails()}${this.renderHistory()}${this.renderCreation()}
       </section>
     `;
   }

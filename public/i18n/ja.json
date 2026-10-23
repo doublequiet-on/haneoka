@@ -4544,6 +4544,22 @@
   },
   "admin": {
     "page": {
+      "creations": {
+        "content": "コンテンツ",
+        "posts": "投稿",
+        "charts": "譜面",
+        "playlists": "プレイリスト",
+        "all": "すべて",
+        "latest": "最新版",
+        "artist": "アーティスト",
+        "charter": "譜面制作者",
+        "difficulty": "難易度",
+        "tracks": "楽曲",
+        "open": "ページを開く",
+        "remove": "コンテンツを削除",
+        "confirmRemove": "このコンテンツを削除しますか？",
+        "search": "コンテンツを検索"
+      },
       "title": "管理",
       "sectionNotFound": "管理ページが見つかりません。",
       "moderationPolicy": "コンテンツ審査",
@@ -4600,6 +4616,9 @@
         "contributor": "貢献者"
       },
       "values": {
+        "unlisted": "限定公開",
+        "charts": "譜面",
+        "playlists": "プレイリスト",
         "accepted": "承認済み",
         "active": "有効",
         "allow": "許可済み",
@@ -4660,6 +4679,8 @@
       },
       "operations": {
         "actions": {
+          "chartsRemove": "譜面を削除",
+          "playlistsRemove": "プレイリストを削除",
           "postStateSet": "投稿状態を更新",
           "commentStateSet": "コメント状態を更新",
           "appealDecision": "異議申し立てを審査",

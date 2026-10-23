@@ -4544,6 +4544,22 @@
   },
   "admin": {
     "page": {
+      "creations": {
+        "content": "內容",
+        "posts": "貼文",
+        "charts": "譜面",
+        "playlists": "歌單",
+        "all": "全部",
+        "latest": "最新版本",
+        "artist": "藝術家",
+        "charter": "譜師",
+        "difficulty": "難度",
+        "tracks": "歌曲",
+        "open": "查看頁面",
+        "remove": "移除內容",
+        "confirmRemove": "移除此內容？",
+        "search": "搜尋內容"
+      },
       "title": "管理",
       "sectionNotFound": "找不到此管理頁面。",
       "moderationPolicy": "內容審核",
@@ -4600,6 +4616,9 @@
         "contributor": "貢獻者"
       },
       "values": {
+        "unlisted": "僅連結可見",
+        "charts": "譜面",
+        "playlists": "歌單",
         "accepted": "已接受",
         "active": "正常",
         "allow": "已通過",
@@ -4660,6 +4679,8 @@
       },
       "operations": {
         "actions": {
+          "chartsRemove": "移除譜面",
+          "playlistsRemove": "移除歌單",
           "postStateSet": "更新貼文狀態",
           "commentStateSet": "更新留言狀態",
           "appealDecision": "處理申訴",
