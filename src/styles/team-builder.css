@@ -940,9 +940,6 @@
   }
   .tb-toolbar {
     --surface-padding: 12px;
-    position: sticky;
-    z-index: 2;
-    top: 64px;
     display: grid;
     gap: var(--md-sys-spacing-2);
     box-shadow: var(--md-sys-elevation-level1);
@@ -971,10 +968,8 @@
     border-top: 1px solid var(--md-sys-color-outline-variant);
   }
   @media (max-width: 760px) {
-    /* On a phone the cards need the height: the toolbar scrolls away and the
-     * bulk actions stay on one line that scrolls sideways. */
+    /* Bulk actions scroll within their row on narrow screens. */
     .tb-toolbar {
-      position: static;
       box-shadow: none;
     }
     .tb-bulk {
