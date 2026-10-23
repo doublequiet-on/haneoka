@@ -117,6 +117,7 @@
     "src/lib/team-builder/box-import/client.ts",
     "worker/index.ts",
     "worker/auth.ts",
+    "worker/app-account.ts",
     "worker/user-roles.ts",
     "worker/content-access.ts",
     "worker/community.ts",

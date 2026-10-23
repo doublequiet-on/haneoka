@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: App bearer sessions, browser handoffs and imported player summaries.
+// Output: PKCE sign-in, same-session browser cookies and linked game accounts.
+// Pos: [Map](L2.md); native app account transport.
+// Effects/Dependencies: Better Auth, D1 sessions/codes and private account records.
 import { createAuth, getAuthSession } from "./auth";
 
 /**
@@ -18,6 +23,7 @@ import { createAuth, getAuthSession } from "./auth";
  */
 const AUTHORIZE_PATH = "/api/v1/account/app/authorize";
 const TOKEN_PATH = "/api/v1/account/app/token";
+const WEB_PATH = "/api/v1/account/app/web";
 const OAUTH_PATH = "/api/v1/account/app/oauth";
 const OAUTH_RETURN_PATH = "/api/v1/account/app/oauth/return";
 const GAME_ACCOUNTS_PATH = "/api/v1/account/game-accounts";
@@ -178,6 +184,37 @@ const token = async (request: Request, env: Env): Promise<Response> => {
   return json({ token: created.token, expiresAt: new Date(created.expiresAt).toISOString() });
 };
 
+const webSession = async (request: Request, env: Env, url: URL): Promise<Response> => {
+  if (request.method !== "GET") return error(405, "method_not_allowed", "Method not allowed");
+  if (!sameOrigin(request)) return error(403, "cross_origin_request", "Cross-origin requests are not allowed");
+  if (!/^Bearer \S+$/iu.test(request.headers.get("Authorization") || ""))
+    return error(401, "unauthenticated", "Sign in first");
+  let destination: URL;
+  try {
+    destination = new URL(url.searchParams.get("returnTo") || "/", url.origin);
+  } catch {
+    return error(400, "invalid_request", "A local return address is required");
+  }
+  if (destination.origin !== url.origin || destination.username || destination.password)
+    return error(400, "invalid_request", "A local return address is required");
+  const session = await getAuthSession(request, env, { authoritative: true });
+  if (!session?.user?.id) return error(401, "unauthenticated", "Sign in first");
+  const context = await createAuth(request, env).$context;
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(context.secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const token = session.session.token;
+  const signature = base64url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(token)));
+  const lifetime = Math.max(0, Math.floor((new Date(session.session.expiresAt).getTime() - Date.now()) / 1000));
+  const cookie = `${context.authCookies.sessionToken.name}=${encodeURIComponent(`${token}.${signature}`)}; Path=/; Max-Age=${lifetime}; HttpOnly; Secure; SameSite=Lax`;
+  return new Response(null, { status: 303, headers: {
+    Location: destination.pathname + destination.search + destination.hash,
+    "Set-Cookie": cookie,
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+  } });
+};
+
 const PROVIDER = "our-notes";
 const SNAPSHOT_SCHEMA = "haneoka-app-save-summary-v1";
 
@@ -320,6 +357,7 @@ export const handleAppAccountRequest = async (request: Request, env: Env): Promi
     });
   if (url.pathname === AUTHORIZE_PATH) return authorize(request, env);
   if (url.pathname === TOKEN_PATH) return token(request, env);
+  if (url.pathname === WEB_PATH) return webSession(request, env, url);
   if (url.pathname === OAUTH_PATH) return oauthStart(request, env, url);
   if (url.pathname === OAUTH_RETURN_PATH) return oauthReturn(request, env, url);
   if (url.pathname === GAME_ACCOUNTS_PATH || url.pathname.startsWith(`${GAME_ACCOUNTS_PATH}/`))
