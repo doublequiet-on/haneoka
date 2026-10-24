@@ -89,10 +89,10 @@ export async function prepareStaticInputs(): Promise<void> {
       }
     }
     await prepareAll(
-      ENTITY_PAYLOAD_RESOURCES.filter(isCrossCatalogResource).map((resource) => async () => {
+      ENTITY_PAYLOAD_RESOURCES.flatMap((resource) => isCrossCatalogResource(resource) ? [async () => {
         const document = await fetchStaticCatalog(resource, server, pin);
         await primeStaticCatalogBatch(resource, Object.keys(crossCatalogRows(resource, document)), server, pin);
-      }),
+      }] : []),
     );
     for (const locale of LOCALES) {
       console.log(`capture localized ${server}/${locale}`);

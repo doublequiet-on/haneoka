@@ -145,7 +145,7 @@ def _resource(
     elif resource_type in CHAT_CUSTOMIZATIONS:
         kind, table = CHAT_CUSTOMIZATIONS[resource_type]
         row = _master_row(data, table, resource_id)
-        source = chat_customization(data, resource_type, row) if row else None
+        source = chat_customization(data, resource_type, row) if row and row.get("_iconAssetPath") else None
         name = source.get("name") if source else None
         image = source.get("image") if source else None
         route = f"/catalog/chat-customizations?entry={kind}-{resource_id}"

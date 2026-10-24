@@ -85,7 +85,9 @@
       "captureCopyFailed": "이미지를 복사하지 못했습니다. 다운로드를 이용해 주세요.",
       "metadataUnavailable": "일부 모델 정보를 불러오지 못했습니다.",
       "requestTimedOut": "요청 시간이 초과되었습니다. 다시 시도해 주세요.",
-      "updateAvailable": "새 버전이 있습니다"
+      "updateAvailable": "새 버전이 있습니다",
+      "unknown": "알 수 없음",
+      "unlimited": "무제한"
     },
     "layout": {
       "ascending": "오름차순",
@@ -262,7 +264,8 @@
     "media": "미디어",
     "games": "게임",
     "gbpArchive": "GBP 자료",
-    "projectSekai": "프로젝트 세카이"
+    "projectSekai": "프로젝트 세카이",
+    "chatCustomizations": "채팅 꾸미기"
   },
   "settings": {
     "labels": {
@@ -826,10 +829,10 @@
     "exchange": {
       "finiteTotal": "유한 재고 전체 교환 비용",
       "unknownCost": "일부 상품의 비용 또는 구매 제한 데이터가 없습니다",
-      "fullStockHint": "표시된 유한 재고 전체 기준입니다. 이미 구매한 수량은 차감하지 않으며 무제한 상품은 제외합니다.",
       "finiteOnly": "유한 재고만",
       "purchaseLimit": "교환 횟수 제한",
-      "exchangeGoods": "교환 상품"
+      "exchangeGoods": "교환 상품",
+      "currency": "교환 재화"
     },
     "skills": {
       "costsHint": "관련 카드를 열어 해당 카드의 강화 재료를 확인하세요.",
@@ -1324,6 +1327,12 @@
       "resetDaily": "매일",
       "resetWeekly": "매주",
       "resetMonthly": "매월"
+    },
+    "chatCustomizations": {
+      "theme": "테마",
+      "bubble": "말풍선",
+      "frame": "프로필 프레임",
+      "initialOwnership": "기본 보유"
     }
   },
   "story": {

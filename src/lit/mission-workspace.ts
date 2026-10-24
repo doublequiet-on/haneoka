@@ -17,7 +17,7 @@ import {
 } from "../lib/mission-groups";
 import { syncEntityNavigation, updateEntityHeading } from "../lib/detail-navigation";
 import { beginLoading, type LoadingReporter } from "../lib/loading-progress";
-import { entityHref, parseResourceRoute, resourcePath, type ReleaseServer } from "../lib/resource-route";
+import { catalogResourceHref, entityHref, parseResourceRoute, resourcePath, type ReleaseServer } from "../lib/resource-route";
 import { isPublicReleaseServer } from "../lib/release-server";
 import { fetchCrossServerCatalog } from "../lib/cross-server/fetch";
 import { crossCatalogPresentation, type CrossCatalogPresentation } from "../lib/cross-server/presentation";
@@ -310,7 +310,13 @@ export class MissionWorkspace extends LitElement {
         const key = `${String(reward.kind || "")}:${String(reward.resourceType ?? "")}:${String(reward.resourceId ?? this.name(reward.name))}`;
         const entry = totals.get(key);
         if (entry) entry.count = Number(entry.count || 0) + Number(reward.count || 1);
-        else totals.set(key, { ...reward, count: Number(reward.count || 1), href: "" });
+        else totals.set(key, {
+          ...reward,
+          count: Number(reward.count || 1),
+          href: catalogResourceHref(
+            String(reward.href || ""), this.missionEntry(mission)?.displayServer || this.server, this.locale as Locale,
+          ),
+        });
       }
     return [...totals.values()];
   }
@@ -435,7 +441,7 @@ export class MissionWorkspace extends LitElement {
                 </span>
                 <span class="mission-row__rewards">
                   ${(Array.isArray(mission.rewards) ? mission.rewards : []).map((reward) =>
-                    this.reward(reward as JsonRecord),
+                    this.reward(reward as JsonRecord, this.missionEntry(mission)?.displayServer || this.server),
                   )}
                 </span>
               </li>
@@ -497,12 +503,12 @@ export class MissionWorkspace extends LitElement {
         `,
       );
   }
-  private reward(reward: JsonRecord) {
+  private reward(reward: JsonRecord, server = this.server) {
     const title = this.name(reward.name);
     if (!title) return nothing;
     const image = this.image(reward);
     const count = Number(reward.count || 0);
-    const href = String(reward.href || "");
+    const href = catalogResourceHref(String(reward.href || ""), server, this.locale as Locale);
     const body = html`
       ${
         image

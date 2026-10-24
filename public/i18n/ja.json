@@ -85,7 +85,9 @@
       "captureCopyFailed": "画像をコピーできませんでした。ダウンロードをご利用ください。",
       "metadataUnavailable": "モデル情報の一部を読み込めませんでした。",
       "requestTimedOut": "通信がタイムアウトしました。もう一度お試しください。",
-      "updateAvailable": "新しいバージョンがあります"
+      "updateAvailable": "新しいバージョンがあります",
+      "unknown": "不明",
+      "unlimited": "無制限"
     },
     "layout": {
       "ascending": "昇順",
@@ -262,7 +264,8 @@
     "media": "メディア",
     "games": "ゲーム",
     "gbpArchive": "ガルパ資料",
-    "projectSekai": "プロジェクトセカイ"
+    "projectSekai": "プロジェクトセカイ",
+    "chatCustomizations": "チャットカスタマイズ"
   },
   "settings": {
     "labels": {
@@ -826,10 +829,10 @@
     "exchange": {
       "finiteTotal": "有限在庫の全交換費用",
       "unknownCost": "一部の商品の費用または上限データがありません",
-      "fullStockHint": "掲載された有限在庫すべての費用です。購入済み分は差し引かず、無制限の商品は含みません。",
       "finiteOnly": "有限在庫のみ",
       "purchaseLimit": "交換回数上限",
-      "exchangeGoods": "交換アイテム"
+      "exchangeGoods": "交換アイテム",
+      "currency": "交換通貨"
     },
     "skills": {
       "costsHint": "関連カードを開くと、そのカードの強化素材を確認できます。",
@@ -1324,6 +1327,12 @@
       "resetDaily": "毎日",
       "resetWeekly": "毎週",
       "resetMonthly": "毎月"
+    },
+    "chatCustomizations": {
+      "theme": "テーマ",
+      "bubble": "吹き出し",
+      "frame": "アイコンフレーム",
+      "initialOwnership": "初期所持"
     }
   },
   "story": {

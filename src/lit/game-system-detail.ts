@@ -727,15 +727,18 @@ function renderExchangeGoods(c: Controller, item: Item) {
   return html`
     <section class="detail-section">
       ${renderDetailSectionHeading(c.label("exchangeGoods", "Exchange goods"), "content", { count: shown.length })}
-      <dl class="spec-list">
+      <dl class="spec-list spec-list--split spec-list--rewards">
+        <div class="spec-list__wide">
+          <dt>${c.label("exchangeCurrency", "Exchange currency")}</dt>
+          <dd>${rewardRow(c, currency)}</dd>
+        </div>
         <div>
           <dt>${c.label("exchangeFiniteTotal", "Full finite stock cost")}</dt>
           <dd>${totals.total === undefined
             ? c.label("exchangeUnknownCost", "Some product costs or limits are unavailable")
-            : costLine(`${totals.total.toLocaleString(c.settings.locale)} ${c.localized(currency.name)}`, currency.image)}</dd>
+            : costLine(totals.total.toLocaleString(c.settings.locale), currency.image)}</dd>
         </div>
       </dl>
-      <p class="detail-copy">${c.label("exchangeFullStockHint", "All listed finite stock; prior purchases are not deducted. Unlimited goods are excluded.")}</p>
       ${filterChip({
         label: c.label("exchangeFiniteOnly", "Finite stock only"), selected: Boolean(c.detailExchangeOnlyFinite),
         count: totals.finite,
@@ -750,7 +753,7 @@ function renderExchangeGoods(c: Controller, item: Item) {
             : c.label("unknown", "Unknown");
           return rewardRow(
             c, (product.reward || {}) as Item,
-            html`<span><strong>${costLine(`${cost} ${c.localized(currency.name)}`, currency.image)}</strong>
+            html`<span><strong>${costLine(cost, currency.image)}</strong>
               <small class="detail-copy">${c.label("exchangePurchaseLimit", "Purchase limit")}: ${limit}</small></span>`,
           );
         })}

@@ -142,6 +142,17 @@ const COLLECTIONS: CollectionDefinition[] = [
     subtitle: "description",
   },
   {
+    collection: "chat-customizations",
+    resource: "chat-customizations",
+    route: "/catalog/chat-customizations",
+    selectionParam: "entry",
+    kind: "stamp",
+    document: "entries",
+    titleField: "name",
+    subtitle: "description",
+    optional: true,
+  },
+  {
     collection: "band-items",
     resource: "band-items",
     route: "/catalog/band-items",

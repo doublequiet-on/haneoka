@@ -164,7 +164,7 @@ import {
   rankingPath,
   entityHref,
   resourceCollectionHref,
-  legacyEntityRedirectTarget,
+  catalogResourceHref,
   parseEntitySelection,
   parseResourceRoute,
   resourceKindForCollection,
@@ -512,6 +512,16 @@ const profiles: Record<string, Profile> = {
     presentation: "background",
     defaultSort: "id",
     defaultOrder: "desc",
+  },
+  "chat-customizations": {
+    id: ["id"],
+    title: ["name"],
+    image: ["image", "icon"],
+    document: "entries",
+    detail: ["kind", "releaseCondition", "initialOwnership"],
+    presentation: "stamp",
+    defaultSort: "id",
+    defaultOrder: "asc",
   },
   songs: {
     id: ["musicId", "songId", "id"],
@@ -1788,6 +1798,7 @@ export class CatalogScreen extends LitElement {
           stamps: "stamp",
           stickers: "sticker",
           backgrounds: "background",
+          "chat-customizations": "entry",
           songs: "song",
           "song-meta": "song",
           events: "entry",
@@ -2316,17 +2327,15 @@ export class CatalogScreen extends LitElement {
   }
   resourceHref(value: string): string {
     if (!value.startsWith("/catalog")) return value;
-    const target = resourceCollectionHref(value, this.dataServer(), this.settings.locale as Locale);
-    if (!target) {
-      const source = new URL(value, "https://route.invalid");
-      if (source.pathname === "/catalog/bands") {
-        const base = resourceCollectionHref("/catalog", this.dataServer(), this.settings.locale as Locale);
-        return base ? `${base}bands/${source.search}` : value;
-      }
-      return value;
+    const server = this.selected ? this.itemSourceServer(this.selected) : this.dataServer();
+    const target = catalogResourceHref(value, server, this.settings.locale as Locale);
+    if (target !== value) return target;
+    const source = new URL(value, "https://route.invalid");
+    if (source.pathname === "/catalog/bands") {
+      const base = resourceCollectionHref("/catalog", server, this.settings.locale as Locale);
+      return base ? `${base}bands/${source.search}` : value;
     }
-    const url = new URL(target, "https://route.invalid");
-    return legacyEntityRedirectTarget(url.pathname, url.search) || target;
+    return value;
   }
   private entityLink(id: string, difficulty?: number, server: ReleaseServer = this.dataServer()): string | undefined {
     const kind = this.canonicalKind();
@@ -3842,6 +3851,7 @@ export class CatalogScreen extends LitElement {
     return kind === "character" ? this.character(Number(value)) : this.band(Number(value));
   }
   private facetValues(item: Item, key: string): string[] {
+    if (this.settings.resource === "chat-customizations" && key === "kind") return [String(item.kind)];
     const skillTypes = skillFacetValues(item, key);
     if (skillTypes) return skillTypes;
     if (key === "gekisouType") {
@@ -4128,6 +4138,19 @@ export class CatalogScreen extends LitElement {
             : kind === "system"
               ? []
               : ["artwork"];
+    if (this.settings.resource === "chat-customizations") {
+      const counts = tally((item) => this.facetValues(item, "kind"));
+      groups.push({
+        key: "kind",
+        label: this.label("type", "Type"),
+        options: [...counts.keys()].map((value) => ({
+          value,
+          label: uiText(this.settings.locale, `catalog.chatCustomizations.${value}`),
+          image: String(this.items.find((item) => item.kind === value)?.icon || ""),
+          count: counts.get(value),
+        })),
+      });
+    }
     if (kind === "system") {
       const keys = ["status", "kind", ...(this.settings.resource === "gacha" ? ["category"] : [])];
       for (const key of keys) {
@@ -4256,6 +4279,8 @@ export class CatalogScreen extends LitElement {
       levels: "level",
       maximum: "size",
       itemTypeName: "type",
+      releaseCondition: "unlockConditions",
+      initialOwnership: "chatInitialOwnership",
       max: "size",
     };
     const label = aliases[key] || key;
@@ -4283,6 +4308,10 @@ export class CatalogScreen extends LitElement {
   }
   private fieldValue(item: Item, key: string) {
     const raw = readPath(item, key);
+    if (this.settings.resource === "chat-customizations") {
+      if (key === "kind") return uiText(this.settings.locale, `catalog.chatCustomizations.${String(raw)}`);
+      if (key === "initialOwnership") return uiText(this.settings.locale, raw ? "common.states.yes" : "common.states.no");
+    }
     if (key === "kind") return this.entryKindLabel(item);
     if (key === "characterId") return this.characterName(Number(raw || 0));
     if (key === "characterIds" || key === "characters" || key === "vocalCharacterIds")
@@ -4338,6 +4367,8 @@ export class CatalogScreen extends LitElement {
     ).adornment;
   }
   private secondary(item: Item) {
+    if (this.settings.resource === "chat-customizations")
+      return uiText(this.settings.locale, `catalog.chatCustomizations.${String(item.kind)}`);
     const kind = this.profile.presentation;
     if (["member", "support"].includes(kind))
       return this.formatList(this.itemCharacterIds(item).map((id) => this.characterName(id)));
@@ -5378,7 +5409,9 @@ export class CatalogScreen extends LitElement {
         ["release", "release", "Release"],
       ],
     };
-    const rows = [...options[this.profile.presentation]];
+    const rows = this.settings.resource === "chat-customizations"
+      ? [["id", "id", "ID"], ["title", "title", "Title"], ["kind", "type", "Type"]]
+      : [...options[this.profile.presentation]];
     if (this.profile.presentation === "song" && this.hasNativeMetaReference())
       rows.splice(
         rows.findIndex(([value]) => value === "score"),
@@ -5489,6 +5522,7 @@ export class CatalogScreen extends LitElement {
                 subtitle: this.tileDescriptionContent(item),
                 trailing: this.itemExclusive(item),
                 image: this.image(item),
+                href: this.itemEntityLink(item),
                 onOpen: () => this.open(item),
                 itemId: this.itemKey(item),
               })),

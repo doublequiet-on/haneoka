@@ -27,6 +27,7 @@ export const RESOURCE_KINDS = [
   "stamps",
   "stickers",
   "backgrounds",
+  "chat-customizations",
   "band-items",
   "items",
   "events",
@@ -191,6 +192,7 @@ const SELECTION_PARAMS: Readonly<Partial<Record<ResourceKind, string>>> = {
   stamps: "stamp",
   stickers: "sticker",
   backgrounds: "background",
+  "chat-customizations": "entry",
   "band-items": "item",
   items: "item",
   events: "entry",
@@ -338,6 +340,15 @@ export function resourceCollectionHref(route: string, server: ReleaseServer, loc
   const target = new URL(resourcePath({ server, locale, kind }), source);
   target.search = source.search;
   return `${target.pathname}${target.search}`;
+}
+
+/** Resolve a catalog data link in its owning server and current locale. */
+export function catalogResourceHref(value: string, server: ReleaseServer, locale: Locale): string {
+  if (!value.startsWith("/catalog")) return value;
+  const target = resourceCollectionHref(value, server, locale);
+  if (!target) return value;
+  const url = new URL(target, "https://route.invalid");
+  return legacyEntityRedirectTarget(url.pathname, url.search) || target;
 }
 
 /**

@@ -21,6 +21,7 @@ const catalogs: Array<[string, string, string?]> = [
   ["stamps", "navigation.stamps"],
   ["stickers", "navigation.stickers"],
   ["backgrounds", "navigation.backgrounds"],
+  ["chat-customizations", "navigation.chatCustomizations"],
   ["live2d", "navigation.live2d"],
   ["songs", "navigation.songs"],
   ["song-meta", "catalog.songs.fields.songMeta"],

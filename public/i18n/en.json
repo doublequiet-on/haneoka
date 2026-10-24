@@ -85,7 +85,9 @@
       "captureCopyFailed": "The image could not be copied. Download it instead.",
       "metadataUnavailable": "Some model information could not be loaded.",
       "requestTimedOut": "The request timed out. Please try again.",
-      "updateAvailable": "A new version is available"
+      "updateAvailable": "A new version is available",
+      "unknown": "Unknown",
+      "unlimited": "Unlimited"
     },
     "layout": {
       "ascending": "Ascending",
@@ -262,7 +264,8 @@
     "media": "Media",
     "games": "Games",
     "gbpArchive": "GBP archive",
-    "projectSekai": "Project Sekai"
+    "projectSekai": "Project Sekai",
+    "chatCustomizations": "Chat customizations"
   },
   "settings": {
     "labels": {
@@ -826,10 +829,10 @@
     "exchange": {
       "finiteTotal": "Full finite stock cost",
       "unknownCost": "Some product costs or limits are unavailable",
-      "fullStockHint": "All listed finite stock; prior purchases are not deducted. Unlimited goods are excluded.",
       "finiteOnly": "Finite stock only",
       "purchaseLimit": "Purchase limit",
-      "exchangeGoods": "Exchange goods"
+      "exchangeGoods": "Exchange goods",
+      "currency": "Exchange currency"
     },
     "skills": {
       "costsHint": "Open a related card to view its upgrade costs.",
@@ -1324,6 +1327,12 @@
       "resetDaily": "Daily",
       "resetWeekly": "Weekly",
       "resetMonthly": "Monthly"
+    },
+    "chatCustomizations": {
+      "theme": "Theme",
+      "bubble": "Bubble",
+      "frame": "Avatar frame",
+      "initialOwnership": "Owned by default"
     }
   },
   "story": {

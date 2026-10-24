@@ -89,6 +89,11 @@ const COLUMNS: Record<string, Column[]> = {
     column("characters", "entity", "characters"),
     column("release", "text", "release"),
   ],
+  "chat-customizations": [
+    column("title", "entity", "title", true),
+    column("kind", "text", "kind"),
+    column("initialOwnership"),
+  ],
   background: [column("title", "entity", "title", true)],
   song: [
     column("play", "action"),
@@ -255,7 +260,7 @@ export class CatalogTable extends LitElement {
           ? this.meta?.mode === "gekisou"
             ? "song-meta-gekisou"
             : "song-meta"
-          : c.profile.presentation
+          : c.settings.resource === "chat-customizations" ? "chat-customizations" : c.profile.presentation
       ] || COLUMNS.item;
     const visibleColumns = columns.filter((entry) =>
       (!entry.key.startsWith("gekisouPhase") || c.settings.origin !== "bestdori") &&
@@ -289,7 +294,9 @@ export class CatalogTable extends LitElement {
               (item) => html`
                 <tr
                   class=${c.itemId(item) === c.itemId(c.selected || {}) ? "is-selected" : nothing}
-                  @click=${() => c.open(item)}
+                  @click=${(event: MouseEvent) => {
+                    if (!(event.target as Element).closest("a, button")) c.open(item);
+                  }}
                 >
                   ${visibleColumns.map((entry) => this.cell(item, entry))}
                 </tr>
@@ -372,16 +379,9 @@ export class CatalogTable extends LitElement {
 
     if (key === "title") {
       const image = c.image(item);
-      // The identity cell holds the row's control: one real button per row,
-      // so the table is operable without relying on the row click.
-      return html`
-        <th scope="row" class=${classes || nothing} style=${CELL_MAX.title ? `--cell-max:${CELL_MAX.title}` : nothing}>
-          <button
-            class="table-entity state-layer"
-            type="button"
-            data-open-item=${c.itemKey(item)}
-            @click=${() => c.open(item)}
-          >
+      const difficulty = Number(item.__difficultyIndex);
+      const href = c.itemEntityLink(item, c.profile.perDifficulty && Number.isFinite(difficulty) && difficulty >= 0 ? difficulty : undefined);
+      const body = html`
             ${
               image
                 ? html`
@@ -401,7 +401,12 @@ export class CatalogTable extends LitElement {
                   : nothing
               }
             </span>
-          </button>
+      `;
+      return html`
+        <th scope="row" class=${classes || nothing} style=${CELL_MAX.title ? `--cell-max:${CELL_MAX.title}` : nothing}>
+          ${href
+            ? html`<a class="table-entity state-layer" href=${href} data-open-item=${c.itemKey(item)}>${body}</a>`
+            : html`<button class="table-entity state-layer" type="button" data-open-item=${c.itemKey(item)} @click=${() => c.open(item)}>${body}</button>`}
         </th>
       `;
     }

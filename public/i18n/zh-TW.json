@@ -85,7 +85,9 @@
       "captureCopyFailed": "無法複製圖片，請使用下載。",
       "metadataUnavailable": "部分模型資料無法載入。",
       "requestTimedOut": "請求逾時，請重試。",
-      "updateAvailable": "有新版本可用"
+      "updateAvailable": "有新版本可用",
+      "unknown": "未知",
+      "unlimited": "不限"
     },
     "layout": {
       "ascending": "升序",
@@ -262,7 +264,8 @@
     "media": "媒體",
     "games": "遊戲",
     "gbpArchive": "GBP 資料",
-    "projectSekai": "世界計畫"
+    "projectSekai": "世界計畫",
+    "chatCustomizations": "聊天裝扮"
   },
   "settings": {
     "labels": {
@@ -826,10 +829,10 @@
     "exchange": {
       "finiteTotal": "有限庫存全部兌換費用",
       "unknownCost": "部分商品費用或限購資料無法取得",
-      "fullStockHint": "計算所列完整有限庫存；未扣除已購數量，無限商品不計入。",
       "finiteOnly": "僅有限庫存",
       "purchaseLimit": "兌換次數上限",
-      "exchangeGoods": "兌換道具"
+      "exchangeGoods": "兌換道具",
+      "currency": "兌換貨幣"
     },
     "skills": {
       "costsHint": "開啟關聯卡牌可查看該卡的升級材料。",
@@ -1324,6 +1327,12 @@
       "resetDaily": "每日",
       "resetWeekly": "每週",
       "resetMonthly": "每月"
+    },
+    "chatCustomizations": {
+      "theme": "主題",
+      "bubble": "氣泡",
+      "frame": "頭像框",
+      "initialOwnership": "初始擁有"
     }
   },
   "story": {

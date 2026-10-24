@@ -127,14 +127,14 @@
   align-items: center;
   gap: 10px;
 }
-/* The identity cell's button is the row's one real control. */
-button.table-entity {
+:is(a, button).table-entity {
   width: 100%;
   padding: 2px 0;
   color: inherit;
   border-radius: var(--md-sys-shape-corner-extra-small);
   font: inherit;
   text-align: start;
+  text-decoration: none;
   cursor: pointer;
 }
 .table-entity__media {

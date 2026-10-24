@@ -450,6 +450,7 @@ const DOCUMENT_RESOURCE_NAMES: Readonly<Partial<Record<ResourceKind, string>>> =
   stamps: "stamps",
   stickers: "stickers",
   backgrounds: "backgrounds",
+  "chat-customizations": "chat-customizations",
   "band-items": "band-items",
   items: "items",
   events: "events",

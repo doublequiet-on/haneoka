@@ -20,7 +20,7 @@ import { crossCatalogPresentation, pinCrossCatalogValue, type CrossCatalogPresen
 import { OFFICIAL_CATALOG_SERVERS, type OfficialCatalogServer } from "../lib/cross-server/catalog";
 import { catalogServerBadge } from "./shared/server-availability";
 import { syncEntityNavigation, updateEntityHeading } from "../lib/detail-navigation";
-import { entityHref, parseResourceRoute, type ReleaseServer } from "../lib/resource-route";
+import { catalogResourceHref, entityHref, parseResourceRoute, type ReleaseServer } from "../lib/resource-route";
 import { isPublicReleaseServer } from "../lib/release-server";
 import {
   catalogUrl,
@@ -301,7 +301,8 @@ export class TgwCardWorkspace extends LitElement {
   private rewardItem(value: Reward) {
     const title = this.name(value.name) || this.text("reward", "Reward");
     const image = this.image(value);
-    const href = String(value.href || "");
+    const tier = this.selectedTier();
+    const href = catalogResourceHref(String(value.href || ""), tier ? this.tierServer(tier) : this.server, this.locale as Locale);
     const count = Number(value.count || 0);
     const body = html`
       ${
