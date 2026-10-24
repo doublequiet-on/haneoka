@@ -1,7 +1,7 @@
 import { CARD_SKILL_FACETS } from "../../lib/catalog-filters";
 import { matchesCardFilters, renderCardFilters } from "./card-filters";
 import { ptField } from "./pt-fields";
-/** My cards: ownership, participation and growth, with filters and bulk edits. */
+/** My cards: quick ownership entry, participation and growth, with filters and bulk edits. */
 import { html, nothing, type TemplateResult } from "lit";
 import { live } from "lit/directives/live.js";
 import type { BoxValue } from "../../lib/team-builder/sync/box-doc";
@@ -27,7 +27,7 @@ export function visibleCards(host: TeamBuilder): Row[] {
   const ids = Object.keys(kind === "members" ? catalog.data.members : catalog.data.snapshots).map(Number);
   const owned = kind === "members" ? view.members : view.snaps;
   return ids
-    .filter((id) => (f.show === "owned" ? owned.has(id) : f.show === "unowned" ? !owned.has(id) : true))
+    .filter((id) => host.boxQuickEntry || (f.show === "owned" ? owned.has(id) : f.show === "unowned" ? !owned.has(id) : true))
     .filter((id) => matchesCardFilters(host, kind, id, f))
     .sort((a, b) => {
       const ca = kind === "members" ? catalog.member(a) : catalog.snap(a);
@@ -74,29 +74,36 @@ function maxChanges(host: TeamBuilder, row: Row): { key: string; value: BoxValue
 
 function renderCard(host: TeamBuilder, row: Row): TemplateResult {
   const catalog = host.catalog!;
-  const options = catalog.cardOptions(row.kind, row.id);
+  const quick = host.boxQuickEntry;
+  const options = catalog.cardOptions(row.kind, row.id, quick ? null : undefined);
   if (!options) return html``;
   const owned = row.owned;
-  const using = !!owned && owned.use;
+  const using = !!owned && (quick || owned.use);
   const toggle = () => {
     const p = prefix(row.kind);
-    if (!owned) host.write([{ key: `${p}.${row.id}.own`, value: true }, { key: `${p}.${row.id}.use`, value: true }]);
+    if (quick) host.write([{ key: `${p}.${row.id}.own`, value: !owned }]);
+    else if (!owned) host.write([{ key: `${p}.${row.id}.own`, value: true }, { key: `${p}.${row.id}.use`, value: true }]);
     else host.write([{ key: `${p}.${row.id}.use`, value: !owned.use }]);
   };
   const checkLabel = owned ? host.t("useInSearch", "Use in team search") : host.t("markOwned", "Mark as owned");
   return html`
-    <div class=${`tile tile--${row.kind === "members" ? "member" : "support"} tb-card${owned ? "" : " is-unowned"}${using ? " is-used" : ""}${owned?.lock ? " is-locked" : ""}`}>
+    <div class=${`tile tile--${row.kind === "members" ? "member" : "support"} tb-card${owned ? "" : " is-unowned"}${using ? " is-used" : ""}${quick && owned ? " is-selected" : ""}${owned?.lock ? " is-locked" : ""}`}>
       <span class="tb-card__media">
-        <button class="tb-card__open" type="button" aria-label=${`${host.t("editGrowth", "Edit growth")}: ${options.label}`}
+        <button class="tb-card__open" type="button" aria-pressed=${quick ? String(!!owned) : nothing}
+          aria-label=${`${quick ? host.t("showOwned", "Owned") : host.t("editGrowth", "Edit growth")}: ${options.label}`}
           @click=${() => {
+            if (quick) { toggle(); return; }
             host.editing = { kind: row.kind, cardId: row.id };
             host.requestUpdate();
           }}>
-          ${tileMedia(owned ? options : { ...options, marks: [...(options.marks ?? []), { at: "bottom-start", text: host.t("notOwned", "Not owned") }] })}
+          ${tileMedia(owned || quick ? options : { ...options, marks: [...(options.marks ?? []), { at: "bottom-start", text: host.t("notOwned", "Not owned") }] })}
+          ${quick ? html`<span class="tb-card__selection" aria-hidden="true">${owned ? icon("check", 16) : nothing}</span>` : nothing}
         </button>
-        <md-checkbox class="tb-card__check" touch-target="wrapper" aria-label=${`${checkLabel}: ${options.label}`} title=${checkLabel}
-          .checked=${live(using)} @change=${toggle}></md-checkbox>
-        ${owned?.lock ? html`<span class="tb-card__lock" title=${host.t("required", "Always include")}>${icon("push_pin", 16)}</span>` : nothing}
+        ${quick ? nothing : html`<button class="tb-card__check" type="button" role="checkbox" aria-checked=${String(using)}
+          aria-label=${`${checkLabel}: ${options.label}`} title=${checkLabel} @click=${toggle}>
+          <span class="tb-card__selection" aria-hidden="true">${using ? icon("check", 16) : nothing}</span>
+        </button>`}
+        ${!quick && owned?.lock ? html`<span class="tb-card__lock" title=${host.t("required", "Always include")}>${icon("push_pin", 16)}</span>` : nothing}
       </span>
       <span class="tile__identity">
         <strong class="tile__title" lang=${options.titleLanguage || nothing}>${options.title}</strong>
@@ -177,8 +184,10 @@ export function renderBoxTab(host: TeamBuilder): TemplateResult {
           onSelect: (server) => host.switchServer(server),
         })}
         <span class="row__spacer"></span>
+        ${host.boxQuickEntry ? nothing : html`
           <button class="button button--tonal" type="button" @click=${() => host.imports.openBox()}>${icon("upload_file", 18)}${host.t("importBox", "Import")}</button>
           <button class="button button--text" type="button" @click=${() => host.imports.exportJson()}>${icon("download", 18)}${host.common("common.actions.export", "Export")}</button>
+        `}
       </div>
       <div class="surface tb-toolbar">
         <div class="row row--wrap tb-toolbar__row">
@@ -187,8 +196,8 @@ export function renderBoxTab(host: TeamBuilder): TemplateResult {
             value: f.kind,
             grow: false,
             options: [
-              { value: "members", label: `${host.t("members", "Members")} ${view.members.size}`, icon: "person" },
-              { value: "snaps", label: `${host.t("snapshots", "Snaps")} ${view.snaps.size}`, icon: "photo" },
+              { value: "members", label: host.t("members", "Members"), icon: "person" },
+              { value: "snaps", label: host.t("snapshots", "Snaps"), icon: "photo" },
             ],
             onSelect: (kind) => {
               const presentation = kind === "members" ? "member" : "support";
@@ -196,7 +205,7 @@ export function renderBoxTab(host: TeamBuilder): TemplateResult {
               set({kind, facets: Object.fromEntries(Object.entries(f.facets).filter(([key]) => !inactive.has(key)))});
             },
           })}
-          ${segmented({
+          ${host.boxQuickEntry ? nothing : segmented({
             label: host.t("showCards", "Show"),
             value: f.show,
             grow: false,
@@ -225,11 +234,14 @@ export function renderBoxTab(host: TeamBuilder): TemplateResult {
             `
           : nothing}
         <div class="row row--wrap tb-toolbar__row tb-bulk">
-          <span class="tb-bulk__summary">${host.t("boxSummary", "{owned} owned · {used} in search · {shown} shown", { owned: ownedCount, used: usedCount, shown: rows.length })}</span>
+          <span class="tb-bulk__summary">${host.boxQuickEntry
+            ? host.t("quickEntrySummary", "{owned} owned · {shown} shown", { owned: ownedCount, shown: rows.length })
+            : host.t("boxSummary", "{owned} owned · {used} in search · {shown} shown", { owned: ownedCount, used: usedCount, shown: rows.length })}</span>
           <span class="row__spacer"></span>
           <button class="button button--text button--small" type="button" ?disabled=${!rows.length}
-            @click=${() => bulk(host, host.t("bulkOwned", "Marked {count} cards as owned", { count: rows.length }), rows.flatMap((row) => [{ key: `${prefix(row.kind)}.${row.id}.own`, value: true }, ...(row.owned ? [] : [{ key: `${prefix(row.kind)}.${row.id}.use`, value: true }])]))}>
-            ${icon("library_add_check", 18)}${host.t("bulkOwn", "Own all shown")}</button>
+            @click=${() => bulk(host, host.t("bulkOwned", "Marked {count} cards as owned", { count: rows.length }), rows.flatMap((row) => [{ key: `${prefix(row.kind)}.${row.id}.own`, value: true }, ...(row.owned || host.boxQuickEntry ? [] : [{ key: `${prefix(row.kind)}.${row.id}.use`, value: true }])]))}>
+            ${icon("library_add_check", 18)}${host.boxQuickEntry ? host.t("quickOwnAll", "Select all") : host.t("bulkOwn", "Own all shown")}</button>
+          ${host.boxQuickEntry ? nothing : html`
           <button class="button button--text button--small" type="button" ?disabled=${!ownedRows.length}
             @click=${() => bulk(host, host.t("bulkUsedDone", "{count} cards take part", { count: ownedRows.length }), ownedRows.map((row) => ({ key: `${prefix(row.kind)}.${row.id}.use`, value: true })))}>
             ${icon("check_box", 18)}${host.t("bulkUse", "Use all")}</button>
@@ -243,13 +255,14 @@ export function renderBoxTab(host: TeamBuilder): TemplateResult {
             clearing.set(host, { store: host.store, owner: host.snapshot?.owner, changes: Object.entries(host.snapshot?.entries ?? {}).filter(([key, entry]) => /^[ms]\.[1-9]\d*\.own$/u.test(key) && entry.v === true).map(([key]) => ({ key, value: false })) });
             host.requestUpdate();
           }}>${host.t("clearOwnership", "Mark all members and snapshots not owned")}</button>
+          `}
         </div>
       </div>
       ${clearOwnershipDialog(host)}
       ${rows.length
-        ? html`<div class=${`collection collection--${f.kind === "members" ? "member" : "support"} tb-grid`}>${rows.map((row) => renderCard(host, row))}</div>`
-        : html`<div class="state"><p class="state__title">${f.show === "owned" && !ownedCount ? host.t("emptyBox", "No cards yet") : host.t("noMatches", "No cards match")}</p>
-            ${f.show === "owned" && !ownedCount ? html`<div class="state__actions"><button class="button" type="button" @click=${() => set({ show: "all" })}>${host.t("showAll", "All")}</button><button class="button button--tonal" type="button" @click=${() => host.imports.openBox()}>${host.t("importBox", "Import")}</button></div>` : nothing}</div>`}
+        ? html`<div class=${`collection collection--${f.kind === "members" ? "member" : "support"} tb-grid${host.boxQuickEntry ? " tb-grid--quick" : ""}`}>${rows.map((row) => renderCard(host, row))}</div>`
+        : html`<div class="state"><p class="state__title">${!host.boxQuickEntry && f.show === "owned" && !ownedCount ? host.t("emptyBox", "No cards yet") : host.t("noMatches", "No cards match")}</p>
+            ${!host.boxQuickEntry && f.show === "owned" && !ownedCount ? html`<div class="state__actions"><button class="button" type="button" @click=${() => set({ show: "all" })}>${host.t("showAll", "All")}</button><button class="button button--tonal" type="button" @click=${() => host.imports.openBox()}>${host.t("importBox", "Import")}</button></div>` : nothing}</div>`}
     </div>
   `;
 }
@@ -354,7 +367,7 @@ export function renderCardEditor(host: TeamBuilder): TemplateResult | typeof not
           <div class="stack stack--tight">
             <h2 id="tb-editor-title" class="tb-editor__title">${options.title}</h2>
             <span class="tb-editor__subtitle">${options.subtitle}</span>
-            ${owned ? nothing : html`<span class="badge badge--primary">${host.t("notOwnedYet", "Not owned yet: any change adds it")}</span>`}
+            ${owned ? nothing : html`<span class="badge badge--primary">${host.t("notOwned", "Not owned")}</span>`}
           </div>
           ${iconButton({ icon: "close", label: host.common("common.actions.close", "Close"), onClick: close })}
         </header>

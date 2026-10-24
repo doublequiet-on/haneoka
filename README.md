@@ -25,6 +25,10 @@ interactive workspaces in `src/lit`, and the Material Design 3 styles in
 - Team builder with separate server inventories and reviewed cross-server JSON imports, including MoeNotes card inventories
 - Community chart publishing, cloud drafts, version history, remixes, and Sonolus play
 
+In the team builder's My cards view, Quick add lets you tap member or Snapshot
+artwork to toggle ownership while keeping the filtered list in place. Finish
+adding returns to growth editing; existing growth and search settings are preserved.
+
 The chart editor saves local revisions automatically and reopens the latest local
 project. Its Publish dialog selects audio and cover independently: upload your
 own files or reuse Our Notes and Bestdori song resources. Our Notes references
