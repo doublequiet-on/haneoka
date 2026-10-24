@@ -4,7 +4,7 @@
   "atlasSide": 1024,
   "wallGroupCount": 3,
   "sourceSeed": 4660,
-  "sourceRendererSha256": "9a9b6efd2c480b556796684c9d1defeefee465195e948c941890069bd62f73be",
+  "sourceRendererSha256": "81cc74be93c6deb28ba348aa88c7c021e02c360904da503e8684e9f805f299cc",
   "sourceAuthoredSha256": "61ba4c767cebb4260583b447830196ba69ae262b6117ed7d42b12e354a0845ac",
   "profiles": [
     {
@@ -64,6 +64,186 @@
           "kind": "flick",
           "width": 24,
           "name": "Our Notes Native Flick W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Great W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Great W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Great W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Great W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Great W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Good W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Good W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Good W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Good W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Good W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Bad W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Bad W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Bad W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Bad W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Bad W24"
         }
       ],
       "baselineJsonSha256": "3c5c413d546e39b4fb72b358f84ad1c499b75ce97f40f5fa71cdacb045ddb3a4",
@@ -130,6 +310,186 @@
           "kind": "flick",
           "width": 24,
           "name": "Our Notes Native Flick W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right",
+          "judgement": "perfect",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Great W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Great W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Great W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Great W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Great W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Good W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Good W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Good W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Good W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Good W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Bad W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Bad W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Bad W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Bad W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Bad W24"
         }
       ],
       "baselineJsonSha256": "363a18dec08d96cc1153524beaae7b45a2c85e92de81a75e0e5c53bd46b14ea7",
@@ -343,6 +703,141 @@
           "kind": "slide-loop",
           "width": 24,
           "name": "Our Notes Native Slide Loop W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Great W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Great W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Great W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Great W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-great",
+          "judgement": "great",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Great W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Good W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Good W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Good W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Good W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-good",
+          "judgement": "good",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Good W24"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 4,
+          "name": "Our Notes Native Flick Right Bad W4"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 6,
+          "name": "Our Notes Native Flick Right Bad W6"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 8,
+          "name": "Our Notes Native Flick Right Bad W8"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 12,
+          "name": "Our Notes Native Flick Right Bad W12"
+        },
+        {
+          "kind": "flick",
+          "direction": "right",
+          "family": "flick-right-bad",
+          "judgement": "bad",
+          "frameOnly": true,
+          "width": 24,
+          "name": "Our Notes Native Flick Right Bad W24"
         }
       ],
       "baselineJsonSha256": "71a2780012344da5db1e1f2426390f6aceb8bbd9b30e20ecd52a060e02543d7b",

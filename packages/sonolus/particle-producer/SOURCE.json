@@ -15,5 +15,6 @@
     }
   },
   "scope": "Pinned source evaluator for the qualified C3 particle recipe. Host renderer dependencies retain their own Git pins.",
+  "patches": ["Sliced frame borders follow the sign of mirrored sprite scales in the shader and mesh trace."],
   "build": "Existing Vite library configs and profile asset copier; output hashes are fixed in production.v1.json."
 }

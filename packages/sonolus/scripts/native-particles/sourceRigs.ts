@@ -18,6 +18,8 @@ type ParticleGroup = { count: number; particles: TrajectoryParticle[] };
 interface RigTarget {
   kind: "tap" | "flick" | "slide" | "connect" | "slide-loop";
   direction?: "left" | "right"; family?: string; width: number; name: string;
+  judgement?: "perfect" | "great" | "good" | "bad";
+  frameOnly?: boolean;
 }
 interface RigProfile {
   key: string; quality: number; renderingScale: number; nativeFrameGroupCount?: number;
@@ -87,16 +89,28 @@ export async function buildSourceRigDelta(options: {
       return { ...particle, sprite };
     }) });
     const cases = new Map<string, Mesh[]>(), durations = new Map<string, number>(), loopPeriods = new Map<string, number>();
+    const frameMaximums = new Map<string, [number, number, number]>();
+    const frameMaterials = new Map<string, [number, number, number]>();
     for (const target of profile.effects) {
       const familyKey = target.family ?? target.kind;
       const slot = target.kind === "flick" && target.direction === "left" ? "Left" : target.kind === "flick" && target.direction === "right" ? "Right" : ({ tap: "Normal", flick: "Flick", slide: "Slide", connect: "Connect", "slide-loop": "SlideLoop" } as Record<string, string>)[target.kind];
       const prefab = tracer.assets.particles.effect001Prefabs[slot as "Normal"];
       if (!prefab) throw new Error("Missing Source rig prefab");
-      const clip = target.kind === "slide-loop" ? contract.nativeEffects.timings.loopParticles[2] : await tracer.clipDuration(prefab.animationClipUrls?.perfect ?? prefab.animationClipUrl);
+      const judgement = target.judgement ?? "perfect";
+      const clip = target.kind === "slide-loop" ? contract.nativeEffects.timings.loopParticles[2] : await tracer.clipDuration(prefab.animationClipUrls?.[judgement] ?? prefab.animationClipUrl);
       durations.set(familyKey, clip);
       if (target.kind === "slide-loop") loopPeriods.set(familyKey, await tracer.clipDuration(prefab.animationClipUrl));
-      const result = tracer.trace({ kind: target.kind, direction: target.direction ?? "none", judgement: "perfect", lifetime: clip, ...(target.kind === "slide-loop" ? { loop: true } : {}) },
+      const result = tracer.trace({ kind: target.kind, direction: target.direction ?? "none", judgement, lifetime: clip, ...(target.kind === "slide-loop" ? { loop: true } : {}) },
         target.width, Array.from({ length: Math.ceil(clip * 60) + 1 }, (_, index) => index / 60), [recipe.sourceSeed], { particle: () => false });
+      // Judgements share one frame texture; their material clocks remain separate.
+      const materialKey = `${slot} W${target.width}`;
+      let maximum = frameMaximums.get(materialKey);
+      if (!maximum) frameMaximums.set(materialKey, maximum = [0, 0, 0]);
+      for (const mesh of result.meshes.values()) for (const sample of mesh) {
+        if (sample.texture !== "frame") continue;
+        for (let c = 0; c < 3; c++) maximum[c] = Math.max(maximum[c]!, sample.emission[c]!);
+      }
+      frameMaterials.set(`${familyKey} W${target.width}`, maximum);
       cases.set(`${familyKey}:${target.width}`, [...result.meshes].map(([name, samples]) => ({ name, samples })));
     }
     const family = (kind: string, width: number, name: string, plane: number) => {
@@ -123,7 +137,8 @@ export async function buildSourceRigDelta(options: {
     };
     const build = (kind: string, width: number, name: "frame" | "wall", plane: number) => {
       const source = family(kind, width, name, plane), { envelope, units } = source, clip = durations.get(kind)!;
-      const maximum = [0, 1, 2].map((c) => Math.max(...envelope.map((sample) => sample.emission[c]!))) as [number, number, number];
+      const maximum = name === "frame" ? frameMaterials.get(`${kind} W${width}`)!
+        : [0, 1, 2].map((c) => Math.max(...envelope.map((sample) => sample.emission[c]!))) as [number, number, number];
       const sourceDensity = profile.renderingScale / (name === "frame" ? 1 : 2);
       const nativeDensity = name === "frame" ? 1 : .25;
       const nearBloom = name === "frame" ? 1 : 0;
@@ -234,10 +249,12 @@ export async function buildSourceRigDelta(options: {
     };
     const replacements = new Map<string, ParticleGroup[]>(), backgrounds: ParticleData["effects"] = [];
     for (const kind of [...new Set(profile.effects.map((target) => target.family ?? target.kind))]) {
-      const reference = profile.frameOnly ? [] : [0, 1].map((plane) => build(kind, recipe.referenceWidth, "wall", plane));
-      for (const target of profile.effects.filter((target) => (target.family ?? target.kind) === kind)) {
+      const targets = profile.effects.filter((target) => (target.family ?? target.kind) === kind);
+      const frameOnly = profile.frameOnly || targets.every((target) => target.frameOnly);
+      const reference = frameOnly ? [] : [0, 1].map((plane) => build(kind, recipe.referenceWidth, "wall", plane));
+      for (const target of targets) {
         replacements.set(`${target.name} P3`, build(kind, target.width, "frame", 3).groups);
-        for (const plane of profile.frameOnly ? [] : [0, 1]) {
+        for (const plane of frameOnly ? [] : [0, 1]) {
           const own = family(kind, target.width, "wall", plane), ref = reference[plane]!, ratio = span(ref.source.quads) / span(own.quads);
           if (JSON.stringify(own.envelope.map(({ t, emission }) => [t, emission])) !==
               JSON.stringify(ref.source.envelope.map(({ t, emission }) => [t, emission])))

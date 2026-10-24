@@ -1255,16 +1255,16 @@ class EffectMeshBatch {
             offset.x = position.x < -1.0
               ? -aScale.x * 0.5
               : position.x < 0.0
-                ? -aScale.x * 0.5 + uSliceBorder.x
+                ? -aScale.x * 0.5 + uSliceBorder.x * sign(aScale.x)
                 : position.x < 1.0
-                  ? aScale.x * 0.5 - uSliceBorder.x
+                  ? aScale.x * 0.5 - uSliceBorder.x * sign(aScale.x)
                   : aScale.x * 0.5;
             offset.y = position.y < -1.0
               ? -aScale.y * 0.5
               : position.y < 0.0
-                ? -aScale.y * 0.5 + uSliceBorder.y
+                ? -aScale.y * 0.5 + uSliceBorder.y * sign(aScale.y)
                 : position.y < 1.0
-                  ? aScale.y * 0.5 - uSliceBorder.y
+                  ? aScale.y * 0.5 - uSliceBorder.y * sign(aScale.y)
                   : aScale.y * 0.5;
           }
           float cosine = cos(aRotationX);
@@ -1571,9 +1571,9 @@ export function nativeMeshQuads(trace: NativeMeshTrace): NativeWorldQuad[] {
         tag < -1
           ? -scale * 0.5
           : tag < 0
-            ? -scale * 0.5 + border
+            ? -scale * 0.5 + border * Math.sign(scale)
             : tag < 1
-              ? scale * 0.5 - border
+              ? scale * 0.5 - border * Math.sign(scale)
               : scale * 0.5;
       x = slice(px!, trace.scaleX, FRAME_SLICE_BORDER[0]);
       y = slice(py!, trace.scaleY, FRAME_SLICE_BORDER[1]);
