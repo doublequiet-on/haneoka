@@ -115,6 +115,7 @@
     "src/lib/team-builder/sync/box-store.ts",
     "src/lib/team-builder/save-sources/client.ts",
     "src/lib/team-builder/box-import/client.ts",
+    "src/lib/team-builder/box-import/parser.ts",
     "worker/index.ts",
     "worker/auth.ts",
     "worker/admin-creations.ts",
