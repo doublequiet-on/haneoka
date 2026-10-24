@@ -78,6 +78,7 @@ CATALOG_RESOURCES = (
     "passes",
     "stickers",
     "backgrounds",
+    "chat-customizations",
     "tgw-card",
     "studio",
 )
@@ -88,7 +89,7 @@ CATALOG_RESOURCES = (
 CATALOG_OPTIONAL_RESOURCES = (
     "story-assets", "anon-tokyo", "spine", "events", "real-lives", "home-banners", "gacha",
     "login-campaigns", "shop", "exchange", "circle", "challenge",
-    "missions", "passes", "stickers", "backgrounds", "tgw-card", "studio",
+    "missions", "passes", "stickers", "backgrounds", "chat-customizations", "tgw-card", "studio",
 )
 CATALOG_REQUIRED_RESOURCES = tuple(
     resource for resource in CATALOG_RESOURCES if resource not in CATALOG_OPTIONAL_RESOURCES

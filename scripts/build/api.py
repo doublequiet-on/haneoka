@@ -41,7 +41,7 @@ from core.manifests import atomic_write, read_json, write_json
 from core.paths import build_layout
 from core.unity_objects import iter_unity_object_archive
 from build.anon_tokyo import build_anon_tokyo_catalog
-from build.collectibles import build_backgrounds, build_stickers
+from build.collectibles import build_backgrounds, build_stickers, build_chat_customizations
 from build.story_unlocks import enrich_story_unlocks
 from build.story_birthdays import enrich_story_birthdays
 from build.runtime_texture_projection import RuntimeTextureProjection
@@ -8826,6 +8826,7 @@ def build_api(
         documents["shop"] = bind_jp_shop_metadata(documents["shop"], data.rows("MasterShop"))
     documents["stickers"] = project("stickers", build_stickers, data, _timestamp)
     documents["backgrounds"] = project("backgrounds", build_backgrounds, data)
+    documents["chat-customizations"] = project("chat-customizations", build_chat_customizations, data)
     documents["tgw-card"] = project("tgw-card", build_tgw_card, data, documents, RESOURCE_TYPES)
     documents["studio"] = project("studio", build_studio, data, documents, RESOURCE_TYPES)
     if is_validation_source(data.server):

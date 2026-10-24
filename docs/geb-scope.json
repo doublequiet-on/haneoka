@@ -221,7 +221,8 @@
     "src/lit/team-builder/result-comparison.ts",
     "src/lit/team-builder/result-metric.ts",
     "src/lit/team-builder/tool-layout.ts",
-    "src/lit/ui/action-menu.ts"
+    "src/lit/ui/action-menu.ts",
+    "scripts/publish/reward_catalog.py"
   ],
   "entry_documents": [
     "AGENTS.md",

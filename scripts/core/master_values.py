@@ -80,4 +80,5 @@ RESOURCE_TYPES = {
     8: "Music", 9: "Stamp", 10: "PremiumPass", 11: "EventMedal",
     12: "LiveLaneSkin", 13: "LiveNoteSkin", 14: "LiveNoteEffectSkin",
     15: "LiveNoteSEGroup", 16: "VipPoint", 17: "Degree",
+    19: "HomeSpot", 1001: "BiliChatTheme", 1002: "BiliChatBubble", 1003: "BiliChatFrame",
 }

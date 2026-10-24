@@ -11,6 +11,8 @@ import re
 from collections import defaultdict
 from typing import Any, Callable
 
+from build.collectibles import CHAT_CUSTOMIZATIONS, chat_customization
+
 
 def _number(row: dict[str, Any], *keys: str) -> int:
     for key in keys:
@@ -99,7 +101,7 @@ def _resource(
         name = source.get("name") if source else None
         image = source.get("image") if source else None
     elif resource_type == 7:
-        gacha = next(
+        source = next(
             (
                 row
                 for row in data.rows("MasterGacha")
@@ -107,8 +109,9 @@ def _resource(
             ),
             None,
         )
-        name = data.text(gacha.get("_nameTextId")) if gacha else None
+        name = data.text(source.get("_nameTextId")) if source else None
         image = None
+        route = f"/catalog/gacha?entry={resource_id}"
     elif resource_type == 6:
         source = _master_row(data, "MasterMonthlyPass", resource_id)
         name = data.text(source.get("_nameTextId")) if source else None
@@ -131,9 +134,21 @@ def _resource(
         source = _master_row(data, "MasterDegree", resource_id)
         name = data.text(source.get("_nameTextId")) if source else None
         image = _asset(data, source.get("_imagePath")) if source else None
-        # Degree is a native reward object without a registered public
-        # catalogue collection. Keep its source-backed label and art without
-        # inventing a noncanonical route.
+        route = f"/catalog/stickers?sticker={resource_id}"
+    elif resource_type == 19:
+        source = documents.get("stories", {}).get("homeSpots", {}).get(key)
+        name = source.get("name") if source else None
+        image = source.get("thumbnail") if source else None
+        intro = next((talk for talk in (source or {}).get("talks", []) if talk.get("type") == "spot"), {})
+        story_key = intro.get("storyKey")
+        route = f"/catalog/stories?story={story_key}&mode=home" if story_key else ""
+    elif resource_type in CHAT_CUSTOMIZATIONS:
+        kind, table = CHAT_CUSTOMIZATIONS[resource_type]
+        row = _master_row(data, table, resource_id)
+        source = chat_customization(data, resource_type, row) if row else None
+        name = source.get("name") if source else None
+        image = source.get("image") if source else None
+        route = f"/catalog/chat-customizations?entry={kind}-{resource_id}"
     else:
         name = None
         image = None

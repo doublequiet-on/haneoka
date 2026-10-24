@@ -7,6 +7,48 @@ import re
 from typing import Any, Callable
 
 
+CHAT_CUSTOMIZATIONS = {
+    1001: ("theme", "MasterBiliChatTheme"),
+    1002: ("bubble", "MasterBiliChatBubble"),
+    1003: ("frame", "MasterBiliChatFrame"),
+}
+
+
+def chat_customization(data: Any, resource_type: int, row: dict[str, Any]) -> dict[str, Any]:
+    kind, table = CHAT_CUSTOMIZATIONS[resource_type]
+    identity = int(row["_id"])
+
+    def image(field: str) -> str | None:
+        source = str(row.get(field) or "").strip("/")
+        return data.asset(f"Assets/AddressableResources/{source}.png") if source else None
+
+    icon = image("_iconAssetPath")
+    artwork = image("_previewAssetName") or image("_assetName")
+    return {
+        "id": f"{kind}-{identity}",
+        "resourceType": resource_type,
+        "resourceId": identity,
+        "kind": kind,
+        "name": data.text(row.get("_skinNameTextId")),
+        "description": data.text(row.get("_skinDescTextId")),
+        "releaseCondition": data.text(row.get("_releaseConditionTextId")),
+        "initialOwnership": bool(row.get("_isInitialOwnership")),
+        "image": artwork or icon,
+        "icon": icon,
+        "sourceTable": table,
+    }
+
+
+def build_chat_customizations(data: Any) -> dict[str, Any]:
+    return {"entries": {
+        entry["id"]: entry
+        for resource_type, (_, table) in CHAT_CUSTOMIZATIONS.items()
+        for row in data.rows(table)
+        if int(row.get("_id") or 0) > 0
+        for entry in [chat_customization(data, resource_type, row)]
+    }}
+
+
 def _catalog_image(data: Any, source: str, table: str, identity: int) -> str | None:
     image = data.asset(source)
     if image is None:

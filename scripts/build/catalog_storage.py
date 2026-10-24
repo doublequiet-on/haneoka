@@ -664,6 +664,10 @@ RESOURCE_SPECS: dict[str, ResourceSpec] = {
         (("backgroundId",),),
         projection=ProjectionSpec(include=("backgroundId", "name", "image", "thumbnail", "description")),
     ),
+    "chat-customizations": ResourceSpec(
+        ("entries",),
+        (("id",),),
+    ),
     "tgw-card": ResourceSpec(
         ("entries",),
         (("id",),),

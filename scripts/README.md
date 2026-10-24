@@ -477,3 +477,17 @@ Inputs, generated resources, and third-party tools retain their own terms; see
 新资源向量或投影版本仍可能使整批快照更新，压缩不会减少首次发布的对象数量。启用前应以实际输入测量新增 PUT 数和压缩字节数；当前保持关闭。重复完整发布不新增对象；本地验证不向生产 R2 写入对象。
 
 PR 的公开完整前端校验使用 optional Cubism 策略；没有 Core 时跳过原生模型 metadata 提取，生产部署仍要求完整授权运行时。
+
+## Reward catalog projection
+
+The `rewards` option in `band-description-projection.yml` reads each explicit
+current release, adds `chat-customizations`, and repairs reward references in
+the nine selected game-system catalogs. Home Spot rewards target the existing
+home story. Raw Masters, media and other catalogs retain their original entries.
+
+Run with `publish=false` and a `projection_json` object keyed by `jp` and `intl`,
+each containing `identity: {server, sourceId, releaseId}`. Review the emitted
+chat catalog, changed reward counts and candidate manifest. To publish, retain
+those exact inputs and add each receipt's `candidateReleaseId` and
+`candidateManifestSha256`; set `publish=true`. A changed parent requires a new
+dry-run. Publication reuses the existing conditional current-pointer update.

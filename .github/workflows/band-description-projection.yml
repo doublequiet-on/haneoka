@@ -5,7 +5,7 @@ on:
       resource:
         description: Existing catalog resource to recompile from the reviewed current pin
         type: choice
-        options: [bands, missions, runtime]
+        options: [bands, missions, runtime, rewards]
         default: bands
         required: true
       producer_pin:
@@ -50,7 +50,7 @@ jobs:
           CATALOG_PROJECTION_RESOURCE: ${{ inputs.resource }}
         run: |
           extra=()
-          if [ "$CATALOG_PROJECTION_RESOURCE" = runtime ]; then
+          if [ "$CATALOG_PROJECTION_RESOURCE" = runtime ] || [ "$CATALOG_PROJECTION_RESOURCE" = rewards ]; then
             extra=(--bootstrap-package numpy --bootstrap-package pillow)
           fi
           python scripts/publish/reference_postpin.py --bootstrap "$RUNNER_TEMP/band-dependencies" "${extra[@]}"
@@ -73,6 +73,7 @@ jobs:
             bands) python scripts/publish/band_descriptions.py --output "$RUNNER_TEMP/band-output" ;;
             missions) python scripts/publish/missions.py --output "$RUNNER_TEMP/band-output" ;;
             runtime) python scripts/publish/runtime_projection.py --output "$RUNNER_TEMP/band-output" ;;
+            rewards) python scripts/publish/reward_catalog.py --output "$RUNNER_TEMP/band-output" ;;
             *) exit 1 ;;
           esac
       - uses: actions/upload-artifact@v7
