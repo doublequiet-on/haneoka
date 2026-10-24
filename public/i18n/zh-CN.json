@@ -3248,6 +3248,25 @@
         "export_ease": "缓动值不受支持",
         "export_noteBudget": "来源音符不能超过25000个"
       },
+      "patterns": {
+        "title": "图案",
+        "saved": "已保存图案",
+        "name": "图案名称",
+        "apply": "套用",
+        "delete": "删除图案",
+        "save_selection": "保存所选",
+        "short_flick": "1 Tick 金色划键滑条",
+        "place": "放置图案",
+        "invalid_pattern": "图案不可用",
+        "outside_stage": "超出轨道范围",
+        "order_conflict": "节点会越过未选节点",
+        "storage_failed": "无法访问本地图案",
+        "name_required": "请填写图案名称",
+        "select_line": "选中连接器",
+        "compress": "压缩时间",
+        "compress_first": "压缩至首端",
+        "compress_last": "压缩至末端"
+      },
       "collections": {
         "title": "分组与图层",
         "groups": "分组",

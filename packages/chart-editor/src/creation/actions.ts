@@ -67,6 +67,27 @@ export function nudgeChartSelectionOnGrid(
   return result;
 }
 
+/** Pack distinct selected times one tick apart, retaining simultaneous notes and connector order. */
+export function compressChartSelection(project: Project, ids: ReadonlySet<string>, anchor: "first" | "last"): Project {
+  assertValidProject(project);
+  const ticks = [...new Set(chartSelectionNodes(project).filter(({ note }) => ids.has(note.id)).map(({ note }) => note.tick))].sort((a, b) => a - b);
+  if (ticks.length < 2) return structuredCloneValue(project);
+  const start = anchor === "first" ? ticks[0]! : ticks.at(-1)! - ticks.length + 1;
+  const positions = new Map(ticks.map((tick, index) => [tick, start + index]));
+  const result = structuredCloneValue(project);
+  for (const note of [...result.singles, ...result.lines.flatMap(line => line.points)])
+    if (ids.has(note.id)) note.tick = positions.get(note.tick)!;
+  for (const line of result.lines) {
+    if (!line.points.some(point => ids.has(point.id))) continue;
+    for (let index = 1; index < line.points.length; index++)
+      if (line.points[index]!.tick < line.points[index - 1]!.tick) throw new RangeError("line_time_order");
+  }
+  clearAutoCache(result, ids);
+  assertValidProject(result);
+  assertEditedChartSpans(project, result);
+  return result;
+}
+
 export interface NoteBrush {
   size?: number;
   type?: NoteType;

@@ -348,21 +348,21 @@ export function copyAuthorSelection(project: Project, selection: ReadonlySet<str
     sourceExtensions: Object.fromEntries(Object.entries(project.extensions).filter(([key]) => key !== COLLECTIONS_KEY)),
   } as AuthorClipboard);
 }
-export function pasteAuthorSelection(project: Project, clipboard: AuthorClipboard, tick: number) {
+export function pasteAuthorSelection(project: Project, clipboard: AuthorClipboard, tick: number, laneShift = 0) {
   if (
     clipboard.schema !== "haneoka.authoring.clipboard" ||
     clipboard.version !== 1 ||
     !Number.isSafeInteger(tick) ||
-    tick < 0
+    tick < 0 || !Number.isFinite(laneShift)
   )
     throw new Error("invalid_authoring_clipboard");
   if (clipboard.resolution !== project.resolution || !Number.isFinite(clipboard.laneBasis) || clipboard.laneBasis <= 0)
     throw new Error("clipboard_basis_conversion_required");
-  if (clipboard.laneBasis !== project.laneBasis) {
+  if (clipboard.laneBasis !== project.laneBasis || laneShift) {
     const ratio = project.laneBasis / clipboard.laneBasis;
     clipboard = structuredCloneValue(clipboard);
     for (const note of [...clipboard.entities.singles, ...clipboard.entities.lines.flatMap((line) => line.points)]) {
-      if (typeof note.lane === "number") note.lane *= ratio;
+      if (typeof note.lane === "number") note.lane = note.lane * ratio + laneShift;
       note.size *= ratio;
       if ("ease" in note) {
         delete note.resolvedLane;

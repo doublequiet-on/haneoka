@@ -29,6 +29,14 @@ between ticks. The site names subdivisions per whole note: `1/1920` is one
 tick, while the authoring helpers retain per-beat defaults and accept
 `4` as their final `beatsPerUnit` argument for whole-note grids. Snapping,
 selection nudging, and generated line points share the same grid basis.
+`compressChartSelection` packs distinct selected times into consecutive ticks,
+preserving simultaneous notes and rejecting connector reordering across
+unselected points. `pasteAuthorSelection` accepts an optional horizontal
+lane shift; the host can stage its returned project before committing it.
+`resizeChartSelectionByDelta` applies one width delta to the selection while
+keeping each note's opposite edge fixed and retaining width differences.
+Stage bounds limit the whole group; automatic points resolve from the unchanged
+source before resizing. The host provides its lane grid for boundary clamping.
 
 The host provides the user interface, files, storage, and audio decoding.
 Conversion warnings must be shown to the user.

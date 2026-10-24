@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面编辑、拍数／分数到整数 Tick 的精确输入、全音符细分、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面编辑、选区边缘批量调宽、精确 Tick 输入、图案复用与放置、节点时间压缩、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
 // Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -28,6 +28,7 @@ import {
 import { TempoMap, snapTick, parseBeatTick, type SnapMode } from "../../packages/chart-editor/src/timing";
 import { importChart } from "../../packages/chart-editor/src/formats/detect";
 import { assertValidProject } from "../../packages/chart-editor/src/validation";
+import { ChartPatternStore, type ChartPattern } from "../lib/chart-creation/patterns";
 import { CreationStore, type CreationDocument, type CreationRevision } from "../lib/chart-creation/storage";
 import { createExampleAudio, decodeCreationAudio, type CreationAudio } from "../lib/chart-creation/audio";
 import { MediaClock } from "@haneoka/cassiopeia-host-web";
@@ -65,9 +66,10 @@ import { loadingState } from "./ui/state";
 import { modal } from "./ui/modal";
 
 import { assertEditedChartSpans, authoredSpanInBounds, authoredSpanViewport, authoredWidthBounds, constrainLaneValue, viewportXToAuthoredLane, authoredLaneToViewportX } from "../../packages/chart-editor/src/creation/span";
-import { createAuthoredNote, resizeChartSelection } from "../../packages/chart-editor/src/creation/authoring";
+import { createAuthoredNote, resizeChartSelection, resizeChartSelectionByDelta } from "../../packages/chart-editor/src/creation/authoring";
 import {
   brushChartSelection,
+  compressChartSelection,
   flipChartSelection,
   generateLinePoints,
   nudgeChartSelectionOnGrid,
@@ -139,6 +141,18 @@ interface EditAudioTransport {
   seek(seconds: number): void;
   dispose(): void;
 }
+interface PastePlacement {
+  base: Project;
+  clipboard: AuthorClipboard;
+  candidate?: Project;
+  ids: string[];
+  tick: number;
+  laneShift: number;
+  left: number;
+  width: number;
+  pointer?: number;
+  error: string;
+}
 interface SelectionGesture {
   pointer: number;
   base: Project;
@@ -154,7 +168,7 @@ interface SelectionGesture {
   lane: number;
   kind: "move" | "box" | "resize-left" | "resize-right" | "brush";
   error?: string;
-  resizeWidth?: number;
+  resizeDelta?: number;
   resizeId?: string;
   laneStart: number;
   laneSpan: number;
@@ -199,6 +213,13 @@ export class ChartCreationWorkspace extends LitElement {
     relativeSnap: { state: true },
     canvasLoading: { state: true },
     canvasFailed: { state: true },
+    pastePlacement: { state: true },
+    patternOpen: { state: true },
+    patternBusy: { state: true },
+    patterns: { state: true },
+    patternName: { state: true },
+    selectedPattern: { state: true },
+    patternError: { state: true },
   };
   declare locale: string;
   declare private collectionScope: ChartCollectionScope;
@@ -206,7 +227,7 @@ export class ChartCreationWorkspace extends LitElement {
   private scopeSnapshot?: { project: Project; scope: ChartCollectionScope; ids: Set<string> };
   private editingSnapshot?: { project: Project; scope: ChartCollectionScope; view: Project };
   private readonly collectionOperation = (operation: AuthorCollectionOperation) => {
-    if (this.busy || this.gesture) return false;
+    if (this.busy || this.gesture || this.pastePlacement) return false;
     try { return this.commitProject(applyAuthorCollectionOperation(this.chart, operation).project); }
     catch { this.error = this.t("creation.invalid_edit"); return false; }
   };
@@ -247,6 +268,14 @@ export class ChartCreationWorkspace extends LitElement {
   private projectExpanded = true;
   private toolExpanded = true;
   private store = new CreationStore();
+  private patternStore = new ChartPatternStore();
+  declare private pastePlacement: PastePlacement | undefined;
+  declare private patternOpen: boolean;
+  declare private patternBusy: boolean;
+  declare private patterns: ChartPattern[];
+  declare private patternName: string;
+  declare private selectedPattern: string;
+  declare private patternError: string;
   private autosaveTimer?: ReturnType<typeof setTimeout>;
   private audio?: CreationAudio;
   private preview?: EditAudioTransport;
@@ -327,12 +356,19 @@ export class ChartCreationWorkspace extends LitElement {
   private readonly toolbarOwner = `chart-creation-${++chartCreationOwnerSequence}`;
   private mediaChanged = () => {
     this.narrow = this.panelMedia?.matches ?? false;
-    this.leftOpen = this.stageMode === "edit" && !this.narrow && innerWidth >= 1280;
-    this.rightOpen = this.stageMode === "edit" && !this.narrow;
+    this.leftOpen = this.stageMode === "edit" && !this.pastePlacement && !this.narrow && innerWidth >= 1280;
+    this.rightOpen = this.stageMode === "edit" && !this.pastePlacement && !this.narrow;
   };
   constructor() {
     super();
     this.locale = "en";
+    this.pastePlacement = undefined;
+    this.patternOpen = false;
+    this.patternBusy = false;
+    this.patterns = [];
+    this.patternName = "";
+    this.selectedPattern = "one-tick-flick";
+    this.patternError = "";
     this.collectionScope = {}; this.deletingProject = false;
     this.defaultWidth = 4;
     this.fullscreen = false;
@@ -491,15 +527,16 @@ export class ChartCreationWorkspace extends LitElement {
     this.observer?.disconnect();
     this.unlocale?.();
     void this.operation.then(() => this.store.close()).catch(() => {});
+    void this.patternStore.close().catch(() => {});
     super.disconnectedCallback();
   }
   private statusShown = "";
   protected updated() {
     if (!this.isConnected) return;
-    if (this.dirty && this.audio && !this.busy && !this.conflict && !this.autosaveTimer) {
+    if (this.dirty && this.audio && !this.busy && !this.pastePlacement && !this.conflict && !this.autosaveTimer) {
       this.autosaveTimer = setTimeout(() => {
         this.autosaveTimer = undefined;
-        if (this.isConnected && !this.busy && !this.gesture && !this.widthSession && !this.conflict) {
+        if (this.isConnected && !this.busy && !this.gesture && !this.pastePlacement && !this.widthSession && !this.conflict) {
           const focused = document.activeElement;
           void this.run(() => this.save(true)).then(async () => {
             await this.updateComplete;
@@ -520,6 +557,13 @@ export class ChartCreationWorkspace extends LitElement {
       this.releasePanelFocus?.();
       this.focusedPanel = panel ?? undefined;
       this.releasePanelFocus = panel ? trapFocus(panel, { onDismiss: () => this.closePanels() }) : undefined;
+    }
+    const picker = this.querySelector<HTMLElementTagNameMap["md-outlined-select"]>("[data-pattern-picker]");
+    if (picker) {
+      const value = this.selectedPattern;
+      void Promise.all([picker.updateComplete, ...[...picker.querySelectorAll("md-select-option")].map(option => option.updateComplete)]).then(() => {
+        if (this.isConnected && this.patternOpen && this.selectedPattern === value && (picker.value !== value || !picker.displayText)) picker.select(value);
+      });
     }
     // Material resolves newly rendered version options after its own update.
     for (const [selector, value] of [["[data-version]", String(this.activeRevision)], ["[data-project]", this.head ? this.projectId : ""]]) {
@@ -614,7 +658,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.revisions = await this.store.versions(this.projectId);
   }
   private edit(updater: (draft: Project) => void) {
-    if (this.busy || this.gesture) return;
+    if (this.busy || this.gesture || this.pastePlacement) return;
     this.cancelWidth();
     try {
       const draft = structuredClone(this.chart);
@@ -625,6 +669,7 @@ export class ChartCreationWorkspace extends LitElement {
     }
   }
   private rebuildPreview(position = this.seconds) {
+    if (this.pastePlacement && this.pastePlacement.base !== this.chart) this.cancelPaste();
     if (this.viewProjectId !== this.projectId) {
       this.viewProjectId = this.projectId;
       this.laneStart = (this.chart.laneBasis - this.laneSpan()) / 2;
@@ -1083,6 +1128,19 @@ export class ChartCreationWorkspace extends LitElement {
       return;
     if ([" ", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)
       && path.some(node => node instanceof HTMLElement && node.matches("button,a[href],[role=button],[role=radio],[role=checkbox]"))) return;
+    if (this.pastePlacement) {
+      const placement = this.pastePlacement;
+      if (event.key === "Escape" || (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") this.cancelPaste();
+      else if (event.key === "Enter") this.confirmPaste();
+      else if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        const direction = event.key === "ArrowUp" || event.key === "ArrowRight" ? 1 : -1;
+        const time = event.key === "ArrowUp" || event.key === "ArrowDown";
+        const tick = time ? Math.max(0, placement.tick + direction * (event.altKey ? 1 : Math.max(1, Math.round(this.chart.resolution * 4 / this.snap)))) : placement.tick;
+        this.updatePaste(tick, placement.laneShift + (time ? 0 : direction * (event.altKey ? 0.25 : 1)));
+      } else return;
+      event.preventDefault();
+      return;
+    }
     if (event.altKey && !["ArrowUp", "ArrowDown"].includes(event.key)) return;
     if (this.stageMode === "preview") {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
@@ -1258,6 +1316,7 @@ export class ChartCreationWorkspace extends LitElement {
     if (!this.gesture && !this.pan) this.clearCursor();
   }
   private panMove(event: PointerEvent) {
+    if (this.pastePlacement) { if (event.isPrimary) this.movePasteToClient(event); return; }
     this.trackCursor(event);
     if (this.gesture?.pointer === event.pointerId) {
       this.moveGesture(event);
@@ -1280,6 +1339,12 @@ export class ChartCreationWorkspace extends LitElement {
     );
   }
   private panEnd(event: PointerEvent) {
+    if (this.pastePlacement) {
+      const canvas = event.currentTarget as HTMLCanvasElement;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      this.pastePlacement.pointer = undefined;
+      return;
+    }
     const captured = this.gesture?.pointer === event.pointerId || this.pan?.pointer === event.pointerId;
     if (event.type === "pointercancel" || (event.type === "lostpointercapture" && captured) || event.pointerType === "touch") this.clearCursor();
     else if (event.type === "pointerup") this.trackCursor(event);
@@ -1296,6 +1361,12 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.busy || !this.audio || this.canvasLoading || !this.canvasTheme || this.gesture || this.pan || event.button !== 0 || !event.isPrimary) return;
     const canvas = event.currentTarget as HTMLCanvasElement;
     canvas.focus();
+    if (this.pastePlacement) {
+      this.pastePlacement.pointer = event.pointerId;
+      canvas.setPointerCapture(event.pointerId);
+      this.movePasteToClient(event);
+      return;
+    }
     this.trackCursor(event);
     if (this.tool === "pan") {
       this.pan = {
@@ -1376,7 +1447,6 @@ export class ChartCreationWorkspace extends LitElement {
         tick: map.secondsToTick(seconds),
         lane: pointerLane,
         kind: this.tool === "brush" ? "brush" : nearby ? (resizeEdge ?? "move") : "box",
-        resizeWidth: hitNode?.size,
         resizeId: nearby?.id,
         ids: new Set(this.selectedIds),
         previous,
@@ -1467,22 +1537,18 @@ export class ChartCreationWorkspace extends LitElement {
       this.setSelection(g.additive ? [...new Set([...g.previous, ...ids])] : ids);
     } else if (g.kind === "resize-left" || g.kind === "resize-right") {
       const delta = Math.round((lane - g.lane) * 4) / 4;
-      const size = Math.max(0, (g.resizeWidth ?? 0) + (g.kind === "resize-left" ? -delta : delta));
-      try {
-        const item = this.selectionNodes(g.base).find(item => item.note.id === (g.resizeId ?? g.primary));
-        if (!item) return;
-        const anchor = g.kind === "resize-left" ? "right" : "left";
-        const bounds = authoredWidthBounds(item.lane, item.size, g.base.laneBasis, anchor, item.placement);
-        if (!bounds) throw new RangeError("authored_span_outside_stage");
-        const width = authoredSpanInBounds(item.lane, item.size, g.base.laneBasis, item.placement)
-          ? constrainLaneValue(size, bounds, { step: 0.25 }) : size;
-        g.candidate = resizeChartSelection(g.base, new Set([g.resizeId ?? g.primary]), width, {
-          anchor, placement: "overlap", resolveAutoLane: true,
-        });
-        g.error = "";
-      } catch {
-        g.candidate = undefined;
-        g.error = this.t("creation.invalid_edit");
+      if (!g.candidate || g.resizeDelta !== delta) {
+        try {
+          const anchor = g.kind === "resize-left" ? "right" : "left";
+          g.candidate = resizeChartSelectionByDelta(g.base, g.ids, g.kind === "resize-left" ? -delta : delta, {
+            anchor, grid: { step: 0.25 },
+          });
+          g.resizeDelta = delta;
+          g.error = "";
+        } catch {
+          g.candidate = undefined;
+          g.error = this.t("creation.invalid_edit");
+        }
       }
     } else {
       const anchor = this.selectionNodes(g.base).find((item) => item.note.id === (g.resizeId ?? g.primary));
@@ -1511,6 +1577,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.paint();
   }
   private cancelGesture() {
+    this.cancelPaste();
     const g = this.gesture;
     if (!g) return;
     cancelAnimationFrame(this.gestureFrame);
@@ -1609,7 +1676,7 @@ export class ChartCreationWorkspace extends LitElement {
     if (!ctx || !width || !height) return;
     const style = getComputedStyle(this),
       color = (name: string) => style.getPropertyValue(`--md-sys-color-${name}`).trim();
-    const chart = this.gesture?.candidate ?? this.widthSession?.candidate ?? this.chart,
+    const chart = this.pastePlacement?.candidate ?? this.gesture?.candidate ?? this.widthSession?.candidate ?? this.chart,
       map = this.map(),
       laneSpan = this.laneSpan(chart),
       x = (lane: number) => authoredLaneToViewportX(lane, width, this.laneView(chart)),
@@ -1668,7 +1735,7 @@ export class ChartCreationWorkspace extends LitElement {
     ctx.globalAlpha = 1;
     const previewing = chart !== this.chart;
     const display = this.editingProject(chart);
-    const projection=this.flatProjection(this.editingProject(this.chart));
+    const projection=this.flatProjection(display);
     const baseNodes = previewing ? new Map(this.selectionNodes(this.chart).map(item => [item.note.id, item])) : undefined;
     const changed = new Set(previewing ? this.selectionNodes(chart).filter(item => {
       const old = baseNodes?.get(item.note.id);
@@ -1680,9 +1747,10 @@ export class ChartCreationWorkspace extends LitElement {
     const scale=skin?.scaleForFlatNoteBodyHeight(fullStageWidth,18)??1;
     if(skin&&projection){
       ctx.save();
-      if (previewing) ctx.globalAlpha = 0.4;
+      const changedNative = new Set([...changed].flatMap(id => projection.sourceMap.notesForCanonical(id)));
       const native=projection.chart, byId=new Map(native.notes.map(note=>[note.id,note]));
       for(const line of native.lines){
+        ctx.globalAlpha = previewing && !line.noteIds.some(id => changedNative.has(id)) ? 0.4 : 1;
         const points=line.noteIds.map(id=>byId.get(id)).filter((note):note is ChartNote=>Boolean(note)&&note!.indexInLine!==null).sort((a,b)=>a.timeMs-b.timeMs||a.id-b.id);
         if(points.length<2)continue;
         const top=nativeY(points.at(-1)!.timeMs),lineHeight=nativeY(points[0].timeMs)-top;
@@ -1698,12 +1766,13 @@ export class ChartCreationWorkspace extends LitElement {
       }
       for(const note of native.notes){
         const at=nativeY(note.timeMs);if(!note.visible||at < -32 || at > height+32)continue;
+        ctx.globalAlpha = previewing && !changedNative.has(note.id) ? 0.4 : 1;
         const appearance=ourNotesCreationCanvasNoteAppearance(note);
         skin.drawFlatNote(ctx,{kind:appearance.kind,direction:appearance.direction,centerX:x((note.pos+note.size/2)/24*chart.laneBasis),centerY:at,width:Math.max(.5,w(note.size/24*chart.laneBasis)),laneSpan:note.size,stageWidth:fullStageWidth,scale});
       }
       ctx.restore();
     }
-    if (previewing) {
+    if (previewing && !projection) {
       ctx.save();
       ctx.strokeStyle = this.canvasTheme?.assets.palette.outsideLine ?? color("primary");
       ctx.lineWidth = 1.5;ctx.setLineDash([5, 5]);
@@ -1721,7 +1790,7 @@ export class ChartCreationWorkspace extends LitElement {
     }
     const overlay=(n:SingleNote|LinePoint,lane:number,size:number,kind:RenderNoteKind="tap")=>{
       const at=y(n.tick);if(at < -24 || at > height+24)return;
-      if(skin&&(!projection||changed.has(n.id))&&n.visible)skin.drawFlatNote(ctx,{kind:n.type==="flick"?(n.direction==="left"?"flick-left":n.direction==="right"?"flick-right":"flick"):n.type==="trace"?"trace":kind,direction:n.direction,centerX:x(lane+size/2),centerY:at,width:Math.max(.5,w(size)),laneSpan:size/chart.laneBasis*24,stageWidth:fullStageWidth,scale});
+      if(skin&&!projection&&n.visible)skin.drawFlatNote(ctx,{kind:n.type==="flick"?(n.direction==="left"?"flick-left":n.direction==="right"?"flick-right":"flick"):n.type==="trace"?"trace":kind,direction:n.direction,centerX:x(lane+size/2),centerY:at,width:Math.max(.5,w(size)),laneSpan:size/chart.laneBasis*24,stageWidth:fullStageWidth,scale});
       if(!n.visible){ctx.save();ctx.strokeStyle=this.canvasTheme?.assets.palette.outsideLine??color("on-surface-variant");ctx.globalAlpha=.5;ctx.setLineDash([3,3]);ctx.strokeRect(x(lane),at-7,Math.max(2,w(size)),14);ctx.restore();}
       if(this.selectedIds.has(n.id)){
         ctx.strokeStyle=this.canvasTheme?.assets.palette.outsideLine??color("on-surface");ctx.lineWidth=2;ctx.strokeRect(x(lane)-1,at-12,Math.max(2,w(size))+2,24);
@@ -1756,7 +1825,7 @@ export class ChartCreationWorkspace extends LitElement {
     const rect = canvas.getBoundingClientRect();
     const cursorX = this.cursor ? this.cursor.clientX - rect.left : -1;
     const cursorY = this.cursor ? this.cursor.clientY - rect.top : -1;
-    const showCursor = Boolean(this.cursor && this.stageMode === "edit" && !this.busy && this.canvasTheme &&
+    const showCursor = Boolean(!this.pastePlacement && this.cursor && this.stageMode === "edit" && !this.busy && this.canvasTheme &&
       cursorX >= 0 && cursorX <= width && cursorY >= 0 && cursorY <= height);
     if (cursorOutput) cursorOutput.hidden = !showCursor;
     if (showCursor) {
@@ -1798,6 +1867,21 @@ export class ChartCreationWorkspace extends LitElement {
       canvas.style.cursor = this.tool === "pan" ? (this.pan ? "grabbing" : "grab") :
         this.tool === "select" && nearby ? "ew-resize" : "crosshair";
     } else canvas.style.cursor = this.tool === "pan" ? "grab" : "crosshair";
+    if (this.pastePlacement) {
+      const placement = this.pastePlacement;
+      canvas.style.cursor = placement.error ? "not-allowed" : "copy";
+      const ids = new Set(placement.ids);
+      ctx.strokeStyle = color(placement.error ? "error" : "primary");
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      for (const node of chartSelectionNodes(chart).filter(item => ids.has(item.note.id)))
+        ctx.strokeRect(x(node.lane) - 2, y(node.note.tick) - 14, Math.max(2, w(node.size)) + 4, 28);
+      ctx.setLineDash([]);
+      if (cursorOutput) {
+        cursorOutput.hidden = false;
+        cursorOutput.textContent = placement.error || `${this.t("beat")} ${placement.tick / chart.resolution} · ${this.t("tick")} ${placement.tick}`;
+      }
+    }
     if (this.pending) {
       ctx.strokeStyle = color("tertiary");
       ctx.lineWidth = 3;
@@ -1815,7 +1899,7 @@ export class ChartCreationWorkspace extends LitElement {
     }
   }
   private commitProject(candidate: Project, mergeKey?: string): boolean {
-    if (this.busy || this.gesture) return false;
+    if (this.busy || this.gesture || this.pastePlacement) return false;
     this.cancelWidth();
     try {
       candidate = reconcileAuthorEdit(this.chart, candidate);
@@ -1855,9 +1939,160 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.commitProject(candidate)) this.clipboard = clipboard;
   }
   private pasteSelection() {
-    if (!this.clipboard || this.busy || this.gesture) return;
-    try { const value = pasteAuthorSelection(this.chart, this.clipboard, Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds)))); if (this.commitProject(value.project)) this.setSelection(value.ids); }
-    catch { this.error = this.t("creation.invalid_edit"); }
+    if (this.clipboard) this.beginPaste(this.clipboard);
+  }
+  private beginPaste(clipboard: AuthorClipboard) {
+    if (this.busy || !this.audio || this.stageMode !== "edit") return;
+    this.cancelGesture();
+    this.cancelWidth();
+    this.pausePlayback();
+    this.closePanels();
+    this.clearCursor();
+    const tick = Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds)));
+    try {
+      const pasted = pasteAuthorSelection(this.chart, clipboard, tick);
+      const ids = new Set(pasted.ids), nodes = chartSelectionNodes(pasted.project).filter(item => ids.has(item.note.id));
+      if (!nodes.length) return;
+      const left = Math.min(...nodes.map(item => item.lane));
+      const width = Math.max(...nodes.map(item => item.lane + item.size)) - left;
+      this.pastePlacement = { base: this.chart, clipboard, tick, laneShift: 0, left, width, ids: pasted.ids, candidate: pasted.project, error: "" };
+      this.updatePaste(tick, 0);
+      void this.updateComplete.then(() => {
+        if (this.isConnected && this.pastePlacement) this.querySelector<HTMLElement>(".chart-creation__editor")?.focus({ preventScroll: true });
+      });
+    } catch { this.error = this.t("patterns.invalid_pattern"); }
+  }
+  private updatePaste(tick: number, laneShift: number) {
+    const placement = this.pastePlacement;
+    if (!placement) return;
+    const previousError = placement.error;
+    placement.tick = tick;
+    placement.laneShift = laneShift;
+    try {
+      const pasted = pasteAuthorSelection(placement.base, placement.clipboard, tick, laneShift);
+      placement.candidate = pasted.project;
+      placement.ids = pasted.ids;
+      assertEditedChartSpans(placement.base, pasted.project);
+      placement.error = "";
+    } catch { placement.error = this.t("patterns.outside_stage"); }
+    if (previousError !== placement.error) this.requestUpdate();
+    this.paint();
+  }
+  private movePasteToClient(point: { clientX: number; clientY: number }) {
+    const placement = this.pastePlacement, canvas = this.querySelector<HTMLCanvasElement>(".chart-creation__editor");
+    if (!placement || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const seconds = this.windowStart + (1 - (point.clientY - rect.top) / rect.height) * this.secondsPerScreen;
+    const lane = viewportXToAuthoredLane(point.clientX - rect.left, rect.width, this.laneView());
+    const tick = Math.max(0, this.gridTick(this.map().secondsToTick(seconds)));
+    const shift = Math.round((lane - placement.width / 2 - placement.left) * 4) / 4;
+    if (tick !== placement.tick || shift !== placement.laneShift) this.updatePaste(tick, shift);
+  }
+  private cancelPaste() {
+    if (!this.pastePlacement) return;
+    const canvas = this.querySelector<HTMLCanvasElement>(".chart-creation__editor");
+    const pointer = this.pastePlacement.pointer;
+    this.pastePlacement = undefined;
+    if (pointer !== undefined && canvas?.hasPointerCapture(pointer)) canvas.releasePointerCapture(pointer);
+    this.requestUpdate();
+    this.paint();
+  }
+  private confirmPaste() {
+    const placement = this.pastePlacement;
+    if (!placement?.candidate || placement.error || placement.base !== this.chart) return;
+    const candidate = placement.candidate;
+    const ids = new Set(placement.ids);
+    const notes = chartSelectionNodes(candidate).filter(item => ids.has(item.note.id)).map(item => item.note.id);
+    this.pastePlacement = undefined;
+    if (this.commitProject(candidate)) this.setSelection(notes);
+    this.requestUpdate();
+  }
+  private compressSelection(anchor: "first" | "last") {
+    if (this.busy || this.pastePlacement || this.gesture) return;
+    try { this.commitProject(compressChartSelection(this.chart, this.selectedIds, anchor)); }
+    catch { this.error = this.t("patterns.order_conflict"); }
+  }
+  private selectConnectors() {
+    const lines = this.selectedConnectorIds();
+    this.setSelection([...this.selectedIds, ...this.chart.lines.filter(line => lines.has(line.id)).flatMap(line => line.points.map(point => point.id))]);
+  }
+  private async showPatterns() {
+    if (this.busy || this.stageMode !== "edit") return;
+    this.cancelGesture();
+    this.cancelWidth();
+    this.closePanels();
+    this.patternOpen = true;
+    this.patternBusy = true;
+    this.patternError = "";
+    try { this.patterns = await this.patternStore.list(); }
+    catch { this.patternError = this.t("patterns.storage_failed"); }
+    finally { this.patternBusy = false; }
+  }
+  private async savePattern() {
+    const name = this.patternName.trim();
+    if (!name) { this.patternError = this.t("patterns.name_required"); return; }
+    if (this.patternBusy || !this.selectedIds.size) return;
+    this.patternBusy = true;
+    this.patternError = "";
+    try {
+      const pattern: ChartPattern = { id: crypto.randomUUID(), name, updatedAt: Date.now(), clipboard: copyAuthorSelection(this.chart, this.selectedIds) };
+      await this.patternStore.save(pattern);
+      this.patterns = await this.patternStore.list();
+      this.selectedPattern = pattern.id;
+      this.patternName = "";
+    } catch { this.patternError = this.t("patterns.storage_failed"); }
+    finally { this.patternBusy = false; }
+  }
+  private async deletePattern() {
+    if (this.patternBusy || this.selectedPattern === "one-tick-flick") return;
+    this.patternBusy = true;
+    this.patternError = "";
+    try {
+      await this.patternStore.delete(this.selectedPattern);
+      this.patterns = await this.patternStore.list();
+      this.selectedPattern = "one-tick-flick";
+    } catch { this.patternError = this.t("patterns.storage_failed"); }
+    finally { this.patternBusy = false; }
+  }
+  private applyPattern() {
+    let clipboard = this.patterns.find(pattern => pattern.id === this.selectedPattern)?.clipboard;
+    if (this.selectedPattern === "one-tick-flick") {
+      const project = createEmptyProject({ source: "authored" });
+      project.laneBasis = this.chart.laneBasis;
+      const points: LinePoint[] = [0, 1].map((tick, index) => ({
+        id: createProjectId("pattern-note"), tick, lane: 0, size: this.defaultWidth,
+        type: index ? "flick" : "tap", critical: index === 1, direction: index ? "up" : "none", visible: true,
+        ease: { left: "linear", right: "linear" },
+      }));
+      project.lines.push({ id: createProjectId("pattern-line"), kind: "long", points });
+      clipboard = copyAuthorSelection(project, new Set(points.map(point => point.id)));
+    }
+    if (clipboard) { this.patternOpen = false; this.beginPaste(clipboard); }
+  }
+  private renderPatterns() {
+    if (!this.patternOpen) return nothing;
+    return html`<dialog class="dialog chart-studio__patterns" aria-label=${this.t("patterns.title")}
+      ${modal(() => { this.patternOpen = false; })}>
+      <header class="dialog__header"><h2>${this.t("patterns.title")}</h2></header>
+      <div class="dialog__body stack">
+        <md-outlined-select data-pattern-picker label=${this.t("patterns.saved")} .value=${live(this.selectedPattern)}
+          ?disabled=${this.patternBusy} @change=${(event: Event) => { this.selectedPattern = (event.target as HTMLSelectElement).value; }}>
+          <md-select-option value="one-tick-flick" .selected=${this.selectedPattern === "one-tick-flick"}><div slot="headline">${this.t("patterns.short_flick")}</div></md-select-option>
+          ${this.patterns.map(pattern => html`<md-select-option value=${pattern.id} .selected=${this.selectedPattern === pattern.id}><div slot="headline">${pattern.name}</div></md-select-option>`)}
+        </md-outlined-select>
+        <div class="cluster">
+          <button class="button button--filled" type="button" ?disabled=${this.patternBusy || !this.audio} @click=${() => this.applyPattern()}>${this.t("patterns.apply")}</button>
+          <button class="button button--text" type="button" ?disabled=${this.patternBusy || this.selectedPattern === "one-tick-flick"} @click=${() => void this.deletePattern()}>${this.t("patterns.delete")}</button>
+        </div>
+        <md-outlined-text-field label=${this.t("patterns.name")} .value=${live(this.patternName)} maxlength="80"
+          ?disabled=${this.patternBusy} .error=${this.patternError === this.t("patterns.name_required")}
+          @input=${(event: Event) => { this.patternName = (event.target as HTMLInputElement).value; this.patternError = ""; }}></md-outlined-text-field>
+        <button class="button button--tonal" type="button" ?disabled=${this.patternBusy || !this.audio || !this.selectedIds.size} @click=${() => void this.savePattern()}>${this.t("patterns.save_selection")}</button>
+        <output class="chart-studio__pattern-status" role="status">${this.patternError}</output>
+      </div>
+      <footer class="dialog__actions"><button class="button button--text" type="button"
+        @click=${() => { this.patternOpen = false; }}>${this.c("close")}</button></footer>
+    </dialog>`;
   }
   private copyBrush() {
     if (this.busy || this.gesture || this.pan) return;
@@ -2128,6 +2363,10 @@ export class ChartCreationWorkspace extends LitElement {
     }
   }
   private renderAppActions() {
+    if (this.pastePlacement) return html`
+      <span data-app-bar-keep>${iconButton({ label: this.c("cancel"), icon: "close", onClick: () => this.cancelPaste() })}</span>
+      <button class="button button--filled" data-app-bar-keep type="button" ?disabled=${!!this.pastePlacement.error || !this.pastePlacement.candidate}
+        @click=${() => this.confirmPaste()}>${icon("check", 20)}${this.t("patterns.place")}</button>`;
     return html`
       <span class="chart-studio__wide-actions" ?hidden=${this.stageMode === "preview"}>
         ${iconButton({ label: this.t("project"), icon: "folder_open", toggle: true, pressed: this.leftOpen, onClick: () => this.togglePanel("left") })}
@@ -2135,7 +2374,7 @@ export class ChartCreationWorkspace extends LitElement {
           label: this.t("undo"),
           shortcut: "Ctrl/⌘+Z",
           icon: "undo",
-          disabled: this.busy || !this.history.canUndo,
+          disabled: this.busy || !!this.pastePlacement || !this.history.canUndo,
           onClick: () => {
             this.cancelGesture();
             this.history.undo();
@@ -2149,7 +2388,7 @@ export class ChartCreationWorkspace extends LitElement {
           label: this.t("redo"),
           shortcut: "Ctrl/⌘+Shift+Z",
           icon: "redo",
-          disabled: this.busy || !this.history.canRedo,
+          disabled: this.busy || !!this.pastePlacement || !this.history.canRedo,
           onClick: () => {
             this.cancelGesture();
             this.history.redo();
@@ -2162,6 +2401,7 @@ export class ChartCreationWorkspace extends LitElement {
         ${iconButton({ label: this.t("selection"), icon: "tune", toggle: true, pressed: this.rightOpen, onClick: () => this.togglePanel("right") })}
       </span>
       ${this.busy ? iconButton({ label: this.c("cancel"), icon: "close", onClick: () => this.cancelOperation() }) : nothing}
+      ${this.stageMode === "edit" ? iconButton({ label: this.t("patterns.title"), icon: "widgets", disabled: this.busy, onClick: () => void this.showPatterns() }) : nothing}
       ${iconButton({ label: this.t("creation.save"), shortcut: "Ctrl/⌘+S", className: "chart-studio__header-save", icon: "save", disabled: this.busy || !this.audio || !this.dirty, onClick: () => void this.run(() => this.save()) })}
       <button class="button button--text" type="button" ?disabled=${this.busy || !this.audio}
         @click=${() => void this.querySelector<ChartPublication>("chart-publication")?.show()}>
@@ -2359,6 +2599,12 @@ export class ChartCreationWorkspace extends LitElement {
                       ?disabled=${this.busy || !!this.gesture || !this.audio || (direction < 0 && selection.tick === 0)}
                       @click=${() => this.nudgeSelection(direction, true)}>${direction < 0 ? "−" : "+"}1 ${this.t("tick")}</button>
                   `)}
+                </div>
+                ${this.selectedConnectorIds(chart).size ? html`<button class="button button--text" type="button" ?disabled=${this.busy} @click=${() => this.selectConnectors()}>${this.t("patterns.select_line")}</button>` : nothing}
+                <div class="chart-studio__tick-actions" role="group" aria-label=${this.t("patterns.compress")}>
+                  ${(["first", "last"] as const).map(anchor => html`<button class="button button--text" type="button"
+                    ?disabled=${this.busy || new Set(this.selectionNodes(chart).filter(item => this.selectedIds.has(item.note.id)).map(item => item.note.tick)).size < 2}
+                    @click=${() => this.compressSelection(anchor)}>${this.t(`patterns.compress_${anchor}`)}</button>`)}
                 </div>
                 ${this.field(
                   "lane",
@@ -2924,6 +3170,7 @@ export class ChartCreationWorkspace extends LitElement {
           : nothing
       }
 
+      ${this.renderPatterns()}
       <chart-creation-library
         .pageData=${this.pageData}
         .locale=${this.locale as HaneokaLocale}
@@ -3028,7 +3275,7 @@ export class ChartCreationWorkspace extends LitElement {
           shortcut: "Ctrl/⌘+Z",
           icon: "undo",
           className: "chart-studio__history",
-          disabled: this.busy || !this.history.canUndo,
+          disabled: this.busy || !!this.pastePlacement || !this.history.canUndo,
           onClick: () => {
             this.cancelGesture();
             this.history.undo();
@@ -3043,7 +3290,7 @@ export class ChartCreationWorkspace extends LitElement {
           shortcut: "Ctrl/⌘+Shift+Z",
           icon: "redo",
           className: "chart-studio__history",
-          disabled: this.busy || !this.history.canRedo,
+          disabled: this.busy || !!this.pastePlacement || !this.history.canRedo,
           onClick: () => {
             this.cancelGesture();
             this.history.redo();
@@ -3140,7 +3387,7 @@ export class ChartCreationWorkspace extends LitElement {
               role="img"
               aria-label=${this.t("edit")}
               tabindex="0"
-              style=${["pan", "select", "brush"].includes(this.tool) ? "touch-action:none" : "touch-action:manipulation"}
+              style=${this.pastePlacement || ["pan", "select", "brush"].includes(this.tool) ? "touch-action:none" : "touch-action:manipulation"}
               @pointerdown=${this.hit}
               @pointermove=${this.panMove}
               @pointerleave=${this.leaveCursor}

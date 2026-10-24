@@ -130,6 +130,10 @@
   --icon-size: 20px;
 }
 @media (pointer: coarse) {
+  .button {
+    min-width: var(--md-comp-control-height-touch);
+    min-height: var(--md-comp-control-height-touch);
+  }
   .icon-button {
     --icon-button-size: var(--md-comp-control-height-touch);
   }

@@ -8,7 +8,17 @@ import {
   type NoteDirection,
 } from "../model";
 import { assertValidProject } from "../validation";
-import { assertAuthoredSpanOverlap, assertEditedChartSpans, type AuthoredPlacement } from "./span";
+import {
+  assertAuthoredSpanOverlap,
+  assertEditedChartSpans,
+  authoredSpanInBounds,
+  authoredSpanNodes,
+  authoredWidthBounds,
+  constrainLaneValue,
+  type AuthoredPlacement,
+  type LaneBounds,
+  type LaneGrid,
+} from "./span";
 
 export interface AuthoredNoteInput {
   tick: number;
@@ -106,5 +116,58 @@ export function resizeChartSelection(
   }
   if (placement === "overlap") assertEditedChartSpans(project, result);
   assertValidProject(result);
+  return result;
+}
+
+/** Resize by one common width delta, keeping each note's opposite edge and width differences. */
+export function resizeChartSelectionByDelta(
+  project: Project,
+  ids: ReadonlySet<string>,
+  delta: number,
+  options: { anchor?: WidthAnchor; grid?: LaneGrid } = {},
+): Project {
+  if (!Number.isFinite(delta)) throw new RangeError("invalid_note_width");
+  const selected = authoredSpanNodes(project).filter(({ note }) => ids.has(note.id));
+  if (!selected.length || !delta) return structuredCloneValue(project);
+  const anchor = options.anchor ?? "left";
+  let change = delta;
+  if (selected.every(({ lane, size, placement }) => authoredSpanInBounds(lane, size, project.laneBasis, placement))) {
+    const common: LaneBounds = { min: -Infinity, max: Infinity, minInclusive: false, maxInclusive: false };
+    for (const { lane, size, placement } of selected) {
+      const bounds = authoredWidthBounds(lane, size, project.laneBasis, anchor, placement)!;
+      const min = bounds.min - size, max = bounds.max - size;
+      if (min > common.min) { common.min = min; common.minInclusive = bounds.minInclusive; }
+      else if (min === common.min) common.minInclusive &&= bounds.minInclusive;
+      if (max < common.max) { common.max = max; common.maxInclusive = bounds.maxInclusive; }
+      else if (max === common.max) common.maxInclusive &&= bounds.maxInclusive;
+    }
+    change = constrainLaneValue(delta, common, options.grid);
+  }
+  if (!change) return structuredCloneValue(project);
+  const shapes = new Map(selected.map(entry => [entry.note.id, entry]));
+  const result = structuredCloneValue(project);
+  const resize = (note: SingleNote | Project["lines"][number]["points"][number]) => {
+    const shape = shapes.get(note.id);
+    if (!shape) return;
+    const size = width(project, shape.size + change, "overlap");
+    if (note.lane === "auto" && "ease" in note) {
+      delete note.autoSize;
+      delete note.resolvedLane;
+      delete note.resolvedSize;
+    }
+    note.lane = shape.lane + (anchor === "right" ? -change : anchor === "center" ? -change / 2 : 0);
+    note.size = size;
+  };
+  result.singles.forEach(resize);
+  for (const line of result.lines) {
+    if (!line.points.some(point => ids.has(point.id))) continue;
+    line.points.forEach(resize);
+    for (const point of line.points) if (point.lane === "auto") {
+      delete point.resolvedLane;
+      delete point.resolvedSize;
+    }
+  }
+  assertValidProject(result);
+  assertEditedChartSpans(project, result);
   return result;
 }

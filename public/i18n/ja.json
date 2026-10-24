@@ -3248,6 +3248,25 @@
         "export_ease": "未対応の補間設定です",
         "export_noteBudget": "元のノーツは25000個まで"
       },
+      "patterns": {
+        "title": "パターン",
+        "saved": "保存済みパターン",
+        "name": "パターン名",
+        "apply": "適用",
+        "delete": "パターンを削除",
+        "save_selection": "選択範囲を保存",
+        "short_flick": "タップ → クリティカルフリック · 1 Tick",
+        "place": "パターンを配置",
+        "invalid_pattern": "パターンを使用できません",
+        "outside_stage": "レーンの範囲外です",
+        "order_conflict": "未選択ノードを越えてしまいます",
+        "storage_failed": "ローカルパターンにアクセスできません",
+        "name_required": "パターン名を入力してください",
+        "select_line": "コネクターを選択",
+        "compress": "時間を圧縮",
+        "compress_first": "先頭に詰める",
+        "compress_last": "末尾に詰める"
+      },
       "collections": {
         "title": "グループとレイヤー",
         "groups": "グループ",

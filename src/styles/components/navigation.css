@@ -177,6 +177,10 @@
   background: var(--md-sys-color-surface-container-low);
   box-shadow: var(--md-sys-elevation-level2);
 }
+.menu[popover]:not(:popover-open) {
+  display: none;
+  pointer-events: none;
+}
 .menu-item {
   display: grid;
   min-height: 48px;

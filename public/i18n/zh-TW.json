@@ -3248,6 +3248,25 @@
         "export_ease": "緩動值不受支援",
         "export_noteBudget": "來源音符不能超過25000個"
       },
+      "patterns": {
+        "title": "圖案",
+        "saved": "已儲存圖案",
+        "name": "圖案名稱",
+        "apply": "套用",
+        "delete": "刪除圖案",
+        "save_selection": "儲存所選",
+        "short_flick": "1 Tick 金色划鍵滑條",
+        "place": "放置圖案",
+        "invalid_pattern": "圖案無法使用",
+        "outside_stage": "超出軌道範圍",
+        "order_conflict": "節點會越過未選節點",
+        "storage_failed": "無法存取本機圖案",
+        "name_required": "請填寫圖案名稱",
+        "select_line": "選取連接器",
+        "compress": "壓縮時間",
+        "compress_first": "壓縮至首端",
+        "compress_last": "壓縮至末端"
+      },
       "collections": {
         "title": "群組與圖層",
         "groups": "群組",

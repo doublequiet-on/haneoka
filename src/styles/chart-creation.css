@@ -427,3 +427,14 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+@layer pages {
+  .chart-studio__patterns {
+    inline-size: min(480px, calc(100vw - 32px));
+  }
+  .chart-studio__pattern-status {
+    min-block-size: 24px;
+    color: var(--md-sys-color-error);
+    font: var(--md-sys-typescale-body-small-weight) var(--md-sys-typescale-body-small-size)/var(--md-sys-typescale-body-small-line-height) var(--app-font);
+  }
+}

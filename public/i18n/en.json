@@ -3248,6 +3248,25 @@
         "export_ease": "Unsupported easing",
         "export_noteBudget": "At most 25000 source notes"
       },
+      "patterns": {
+        "title": "Patterns",
+        "saved": "Saved patterns",
+        "name": "Pattern name",
+        "apply": "Apply",
+        "delete": "Delete pattern",
+        "save_selection": "Save selection",
+        "short_flick": "Tap → Critical Flick · 1 Tick",
+        "place": "Place pattern",
+        "invalid_pattern": "Pattern is unavailable",
+        "outside_stage": "Outside the lanes",
+        "order_conflict": "Nodes would cross unselected nodes",
+        "storage_failed": "Local patterns are unavailable",
+        "name_required": "Enter a pattern name",
+        "select_line": "Select connectors",
+        "compress": "Compress timing",
+        "compress_first": "Pack to first",
+        "compress_last": "Pack to last"
+      },
       "collections": {
         "title": "Groups and layers",
         "groups": "Groups",
