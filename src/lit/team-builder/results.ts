@@ -112,10 +112,21 @@ export function resultSong(host: TeamBuilder, song: SongRef): TemplateResult {
   const catalog = host.catalog!;
   const attribute = Number(catalog.song(song.songId).musicType);
   const attributeIcon = catalog.attributeIcon(attribute);
+  const title = catalog.songTitle(song.songId);
+  const href = entityHref({
+    server: catalog.songIdentity(song.songId).server,
+    locale: host.locale as Locale,
+    kind: "songs",
+    id: String(song.songId),
+  });
   return html`
-    <div class="tb-result-song stack stack--tight">
-      <div class="row tb-result-song__heading">
-        ${
+    <div class="tb-result-song">
+      <a class="tb-result-song__cover" href=${href} aria-label=${title}>
+        ${tileMedia({ ...catalog.songOptions(song.songId, song.difficulty), marks: [], serverMark: undefined })}
+      </a>
+      <div class="stack stack--tight">
+        <div class="row tb-result-song__heading">
+          ${
           attributeIcon
             ? html`
                 <img
@@ -130,18 +141,15 @@ export function resultSong(host: TeamBuilder, song: SongRef): TemplateResult {
               `
             : nothing
         }
-        <a
-          href=${entityHref({ server: catalog.songIdentity(song.songId).server, locale: host.locale as Locale, kind: "songs", id: String(song.songId) })}
-        >
-          ${catalog.songTitle(song.songId)}
-        </a>
-      </div>
-      <div class="cluster tb-result-song__meta">
-        <span class="supporting-text">${catalog.difficultyLabel(song.songId, song.difficulty)}</span>
-        <span class="row tb-result-song__band">
-          ${songPerformerAdornment(catalog.songPerformer(song.songId))}
-          <span>${catalog.songArtist(song.songId)}</span>
-        </span>
+          <a href=${href}>${title}</a>
+        </div>
+        <div class="cluster tb-result-song__meta">
+          <span class="supporting-text">${catalog.difficultyLabel(song.songId, song.difficulty)}</span>
+          <span class="row tb-result-song__band">
+            ${songPerformerAdornment(catalog.songPerformer(song.songId))}
+            <span>${catalog.songArtist(song.songId)}</span>
+          </span>
+        </div>
       </div>
     </div>
   `;

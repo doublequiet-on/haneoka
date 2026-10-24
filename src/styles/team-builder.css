@@ -1780,10 +1780,27 @@
   }
   .team-builder .tb-result-song {
     display: grid;
-    gap: var(--md-sys-spacing-1);
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: start;
+    gap: var(--md-sys-spacing-3);
     padding: 0;
   }
-  .team-builder .tb-result-song a {
+  .team-builder .tb-result-song__cover {
+    display: block;
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: var(--md-sys-shape-corner-small);
+  }
+  .team-builder .tb-result-song__cover > .tile__media {
+    width: 100%;
+    height: 100%;
+  }
+  @media (max-width: 599px) {
+    .team-builder .tb-result-song {
+      grid-template-columns: 56px minmax(0, 1fr);
+    }
+  }
+  .team-builder .tb-result-song__heading a {
     font-size: var(--md-sys-typescale-title-medium-size);
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -2250,7 +2267,7 @@
   .team-builder .tb-hit__actions .button {
     white-space: normal;
   }
-  .team-builder .tb-result-song a {
+  .team-builder .tb-result-song__heading a {
     display: block;
     overflow: visible;
   }
