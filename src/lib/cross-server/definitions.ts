@@ -16,6 +16,7 @@ export const CROSS_CATALOG_DEFINITIONS = {
   stamps: { ids: ["stampId", "id"] },
   stickers: { ids: ["stickerId", "id"], rows: "entries" },
   backgrounds: { ids: ["backgroundId", "id"], rows: "entries" },
+  "chat-customizations": { ids: ["id"], rows: "entries", opaque: true },
   "band-items": { ids: ["bandItemId", "itemId", "id"], rows: "items" },
   items: { ids: ["itemId", "id"], rows: "items" },
   events: { ids: ["id"], rows: "entries" },
