@@ -23,7 +23,22 @@ def chat_customization(data: Any, resource_type: int, row: dict[str, Any]) -> di
         return data.asset(f"Assets/AddressableResources/{source}.png") if source else None
 
     icon = image("_iconAssetPath")
-    artwork = image("_previewAssetName") or image("_assetName")
+    preview = str(row.get("_previewAssetName") or "").strip("/")
+    artwork = data.asset(f"Assets/AddressableResources/{preview}/ChatSkin_Skin_Theme.png") if preview else None
+    artwork = artwork or image("_assetName")
+    if kind == "bubble":
+        atlas = f"Assets/AddressableResources/{row['_assetName']}"
+        for extension in ("spriteatlas", "spriteatlasv2"):
+            source = f"{atlas}.{extension}"
+            if source not in data.source_path_set:
+                continue
+            for output in data.source_descriptor(source).get("outputs", []):
+                path = str(output.get("path") or "")
+                if output.get("type") == "Sprite" and path.rsplit("/", 1)[-1].startswith("Chat_Windows_Me--"):
+                    artwork = data.runtime_url(path.removeprefix("runtime/"))
+                    break
+            if artwork:
+                break
     return {
         "id": f"{kind}-{identity}",
         "resourceType": resource_type,

@@ -49,7 +49,17 @@ def project(base, read_entry, staging):
         inputs = _ReleasedInputs(base, read_entry, Path(directory))
         catalog = inputs.json("api/v1/catalog/manifest.json")
         tables = {name: inputs.json(f"objects/master/{name}.json") for name in MASTER_TABLES}
-        data = PinnedMissionData(base["server"], tables, entries)
+        class RewardData(PinnedMissionData):
+            source_path_set = {path.removeprefix("metadata/sources/").removesuffix(".json")
+                               for path in entries if path.startswith("metadata/sources/")}
+
+            def source_descriptor(self, source):
+                return inputs.json(f"metadata/sources/{source}.json")
+
+            def runtime_url(self, path):
+                return f"/runtime/{self.server}/{path}" if f"runtime/{path}" in entries else None
+
+        data = RewardData(base["server"], tables, entries)
         documents = {"stories": inputs.json(catalog["resources"]["stories"]["index"])}
         chat = build_chat_customizations(data)
         for row in chat["entries"].values():
