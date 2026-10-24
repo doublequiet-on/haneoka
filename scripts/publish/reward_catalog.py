@@ -88,6 +88,9 @@ def project(base, read_entry, staging):
         updated = copy.deepcopy(catalog)
         descriptor, _ = _compile_resource("chat-customizations", chat, api)
         updated["resources"]["chat-customizations"] = descriptor
+        summary = inputs.json(catalog["summary"])
+        summary["resources"]["chat-customizations"] = {"count": len(chat["entries"]), "kind": descriptor["kind"]}
+        write_json(api / "summary.json", summary)
         for name in REWARD_CATALOGS:
             descriptor = catalog["resources"].get(name)
             if descriptor is None:
@@ -101,7 +104,7 @@ def project(base, read_entry, staging):
         selected = release_entries(staging)
         allowed_resources = set(REWARD_CATALOGS) | {"chat-customizations"}
         def allowed(path):
-            return path == "api/v1/catalog/manifest.json" or any(
+            return path in {"api/v1/catalog/manifest.json", "api/v1/catalog/summary.json"} or any(
                 path.startswith(f"api/v1/catalog/{name}/") for name in allowed_resources)
         if any(not allowed(row["path"]) for row in selected):
             raise ValueError("reward projection escaped its catalog scope")
