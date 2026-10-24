@@ -46,7 +46,14 @@ async function prepareAll(tasks: Array<() => Promise<unknown>>): Promise<void> {
   let cursor = 0;
   const results = await Promise.allSettled(
     Array.from({ length: Math.min(4, tasks.length) }, async () => {
-      while (cursor < tasks.length) await tasks[cursor++]!();
+      while (cursor < tasks.length) {
+        const index = cursor++, task = tasks[index]!;
+        try {
+          await task();
+        } catch (error) {
+          throw new Error(`Static input producer ${task.name || index} failed`, { cause: error });
+        }
+      }
     }),
   );
   const failed = results.find((result) => result.status === "rejected");

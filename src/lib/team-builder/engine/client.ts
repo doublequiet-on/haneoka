@@ -510,7 +510,7 @@ export class EngineClient {
         const valueOf = (hit: EngineHit) => request.rewardPhase?.kind === "other" ? hit.event?.otherMean ?? 0
           : request.rewardPhase?.kind === "score" ? hit.score?.mean ?? 0 : hit.key;
         const sampledRewards = request.goal.kind === "event" && request.goal.gekiso;
-        const workers = request.rewardPhase && !weightedLive ? this.pool.slice(0, 4) : this.pool;
+        const workers = this.pool;
         const count = sampledRewards
           ? (request.constraints.leader ? 1 : workers.length)
           : workers.length * SHARDS_PER_WORKER;

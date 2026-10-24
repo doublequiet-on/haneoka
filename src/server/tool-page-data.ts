@@ -42,18 +42,32 @@ export function sonolusHubPageData(): Promise<SonolusHubPageData> {
     const origin = process.env.STATIC_CATALOG_ORIGIN || "https://haneoka.org";
     const read = (resource: string) =>
       staticBuildJson(`sonolus:${resource}`, "public-data", async () => {
-        const response = await fetch(new URL(`/sonolus/${resource}`, origin), {
-          signal: AbortSignal.timeout(30_000),
-          headers: {
-            accept: "application/json",
-            ...(process.env.STATIC_CATALOG_TOKEN ? { "x-haneoka-build-token": process.env.STATIC_CATALOG_TOKEN } : {}),
-          },
-        });
-        if (!response.ok) throw new Error(`Sonolus public directory ${resource} returned ${response.status}`);
-        const value: unknown = await response.json();
-        if (!value || typeof value !== "object" || Array.isArray(value))
-          throw new Error(`Invalid Sonolus public directory ${resource}`);
-        return value as Record<string, unknown>;
+        for (let attempt = 0; ; attempt++) {
+          let retryable = true;
+          try {
+            const response = await fetch(new URL(`/sonolus/${resource}`, origin), {
+              signal: AbortSignal.timeout(30_000),
+              headers: {
+                accept: "application/json",
+                ...(process.env.STATIC_CATALOG_TOKEN ? { "x-haneoka-build-token": process.env.STATIC_CATALOG_TOKEN } : {}),
+              },
+            });
+            if (!response.ok) {
+              retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+              await response.body?.cancel();
+              throw new Error(`Sonolus public directory ${resource} returned ${response.status}`);
+            }
+            const value: unknown = await response.json();
+            retryable = false;
+            if (!value || typeof value !== "object" || Array.isArray(value))
+              throw new Error(`Invalid Sonolus public directory ${resource}`);
+            return value as Record<string, unknown>;
+          } catch (error) {
+            if (!retryable || attempt === 2)
+              throw new Error(`Sonolus public directory ${resource} request failed`, { cause: error });
+            await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+          }
+        }
       });
     const [info, levels, playlists] = await Promise.all([read("info"), read("levels/info"), read("playlists/info")]);
     return { schema: "haneoka-sonolus-hub-page-v1", info, levels, playlists };
