@@ -53,7 +53,8 @@
     overflow-x: auto;
     scrollbar-width: thin;
   }
-  .chart-studio__tools .chart-creation__actions {
+  .chart-studio__tools > .chart-creation__actions {
+    flex: 0 0 auto;
     flex-wrap: nowrap;
     margin: 0;
   }
@@ -410,4 +411,19 @@
   .chart-publication__cover { object-fit: cover; border-radius: var(--md-sys-shape-corner-medium); max-width: 100%; }
   .chart-publication .dialog__actions { flex-wrap: wrap; }
   .chart-publication textarea, .chart-publication select { width: 100%; min-height: 48px; }
+}
+
+@layer pages {
+  .chart-studio__tick-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .chart-studio__tick-actions > .button {
+    flex: 1;
+    min-block-size: 48px;
+  }
+  .chart-studio__grid-preset {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
 }

@@ -46,17 +46,20 @@ export function nudgeChartSelectionOnGrid(
   primaryId: string,
   direction: -1 | 1,
   subdivision: number,
+  beatsPerUnit = 1,
 ): Project {
   assertValidProject(project);
-  if ((direction !== -1 && direction !== 1) || !Number.isSafeInteger(subdivision) || subdivision < 1 || subdivision > project.resolution)
+  const gridResolution = project.resolution * beatsPerUnit;
+  if (!Number.isSafeInteger(gridResolution) || gridResolution < 1) throw new RangeError("invalid_division");
+  if ((direction !== -1 && direction !== 1) || !Number.isSafeInteger(subdivision) || subdivision < 1 || subdivision > gridResolution)
     throw new RangeError("invalid_division");
   const anchor = chartSelectionNodes(project).find(({ note }) => note.id === primaryId && ids.has(note.id));
   if (!anchor) return structuredCloneValue(project);
   const mode = direction > 0 ? "ceil" : "floor";
-  let target = snapTick(anchor.note.tick, subdivision, mode, project.resolution);
+  let target = snapTick(anchor.note.tick, subdivision, mode, gridResolution);
   if (target === anchor.note.tick) {
     if (!Number.isSafeInteger(anchor.note.tick + direction)) throw new RangeError("invalid_tick");
-    target = snapTick(anchor.note.tick + direction, subdivision, mode, project.resolution);
+    target = snapTick(anchor.note.tick + direction, subdivision, mode, gridResolution);
   }
   if (!Number.isSafeInteger(target)) throw new RangeError("invalid_tick");
   const result = moveChartSelection(project, ids, target - anchor.note.tick, 0, { placement: "overlap" });
@@ -134,8 +137,9 @@ export function cutChartSelection(project: Project, ids: ReadonlySet<string>) {
 }
 
 /** Generate authored automatic line nodes on musical subdivisions, skipping every existing tick. */
-export function generateLinePoints(project: Project, lineIds: ReadonlySet<string>, subdivision: number) {
-  if (!Number.isSafeInteger(subdivision) || subdivision < 1 || subdivision > project.resolution)
+export function generateLinePoints(project: Project, lineIds: ReadonlySet<string>, subdivision: number, beatsPerUnit = 1) {
+  const gridResolution = project.resolution * beatsPerUnit;
+  if (!Number.isSafeInteger(gridResolution) || gridResolution < 1 || !Number.isSafeInteger(subdivision) || subdivision < 1 || subdivision > gridResolution)
     throw new RangeError("invalid_division");
   const result = structuredCloneValue(project),
     created: string[] = [];
@@ -145,11 +149,11 @@ export function generateLinePoints(project: Project, lineIds: ReadonlySet<string
       start = line.points[0]!.tick,
       end = line.points.at(-1)!.tick;
     for (
-      let unit = Math.floor((start * subdivision) / result.resolution) + 1;
-      unit < (end * subdivision) / result.resolution;
+      let unit = Math.floor((start * subdivision) / gridResolution) + 1;
+      unit < (end * subdivision) / gridResolution;
       unit++
     ) {
-      const tick = Math.round((unit * result.resolution) / subdivision);
+      const tick = Math.round((unit * gridResolution) / subdivision);
       if (existing.has(tick)) continue;
       const parent = [...line.points].reverse().find((point) => point.tick < tick) ?? line.points[0]!;
       const id = createProjectId("node");

@@ -89,6 +89,23 @@ export class TempoMap {
   }
 }
 
+/** Parse decimal beats or sums of fractions into the native integer tick grid. */
+export const parseBeatTick = (input: string, resolution: number = PROJECT_RESOLUTION): number => {
+  if (!Number.isSafeInteger(resolution) || resolution <= 0) throw new RangeError("invalid_resolution");
+  const text = input.replace(/\s+/gu, "");
+  const number = String.raw`(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?`;
+  const terms = text.match(new RegExp(`[+-]?${number}(?:/${number})?`, "gi"));
+  if (!terms || terms.join("") !== text) throw new TypeError("invalid_beat");
+  const beats = terms.reduce((sum, term) => {
+    const [numerator, denominator = "1"] = term.split("/");
+    return sum + Number(numerator) / Number(denominator);
+  }, 0);
+  const raw = beats * resolution, tick = Math.round(raw);
+  if (!Number.isSafeInteger(tick) || raw < 0 || Math.abs(raw - tick) > 1e-7)
+    throw new RangeError("invalid_beat_tick");
+  return tick;
+};
+
 export type SnapMode = "nearest" | "floor" | "ceil";
 
 /** Snap a tick to a beat subdivision and always return an integer canonical tick. */
@@ -96,7 +113,7 @@ export const snapTick = (
   tick: number,
   subdivision = 4,
   mode: SnapMode = "nearest",
-  resolution = PROJECT_RESOLUTION,
+  resolution: number = PROJECT_RESOLUTION,
 ): number => {
   finite(tick, "Tick");
   if (!Number.isSafeInteger(subdivision) || subdivision <= 0) throw new RangeError("Subdivision must be positive");
@@ -110,7 +127,7 @@ export const snapBeat = (
   beat: number,
   subdivision = 4,
   mode: SnapMode = "nearest",
-  resolution = PROJECT_RESOLUTION,
+  resolution: number = PROJECT_RESOLUTION,
 ): number => snapTick(beat * resolution, subdivision, mode, resolution);
 
 export const projectDurationTick = (project: Project): number =>

@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面编辑、本地保存及社区发布；预览复用 chart-simulator 观看宿主。
+// Output: 谱面编辑、拍数／分数到整数 Tick 的精确输入、全音符细分、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
 // Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -25,7 +25,7 @@ import {
   type SingleNote,
   type LinePoint,
 } from "../../packages/chart-editor/src/model";
-import { TempoMap, snapTick } from "../../packages/chart-editor/src/timing";
+import { TempoMap, snapTick, parseBeatTick, type SnapMode } from "../../packages/chart-editor/src/timing";
 import { importChart } from "../../packages/chart-editor/src/formats/detect";
 import { assertValidProject } from "../../packages/chart-editor/src/validation";
 import { CreationStore, type CreationDocument, type CreationRevision } from "../lib/chart-creation/storage";
@@ -129,7 +129,8 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
 };
 
 const creationTools = ["select", "tap", "flick", "trace", "hold", "guide", "erase", "pan", "brush"] as const;
-const snapDivisions = [1, 2, 3, 4, 6, 8, 12, 16];
+const snapDivisions = [4, 8, 12, 16, 24, 32, 48, 64];
+const fineSnapDivisions = [96, 192, 384, 480, 960, 1920];
 
 interface EditAudioTransport {
   clock: MediaClock;
@@ -291,7 +292,7 @@ export class ChartCreationWorkspace extends LitElement {
   private laneBoundsSnapshot?: { project: Project; padding: number; bounds: ReturnType<typeof authoredSpanViewport> };
   private selectionSnapshot?: { project: Project; nodes: ReturnType<typeof chartSelectionNodes> };
   private critical = false;
-  private snap = 4;
+  private snap = 16;
   private secondsPerScreen = 4;
   private rate = 1;
   private exportFormat: ExportFormat = "project";
@@ -498,8 +499,14 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.dirty && this.audio && !this.busy && !this.conflict && !this.autosaveTimer) {
       this.autosaveTimer = setTimeout(() => {
         this.autosaveTimer = undefined;
-        if (this.isConnected && !this.busy && !this.gesture && !this.widthSession && !this.conflict)
-          void this.run(() => this.save(true));
+        if (this.isConnected && !this.busy && !this.gesture && !this.widthSession && !this.conflict) {
+          const focused = document.activeElement;
+          void this.run(() => this.save(true)).then(async () => {
+            await this.updateComplete;
+            if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
+              focused.focus({ preventScroll: true });
+          });
+        }
       }, 2000);
     }
     if (this.status !== this.statusShown) {
@@ -1307,7 +1314,7 @@ export class ChartCreationWorkspace extends LitElement {
     const seconds = this.windowStart + (1 - (event.clientY - rect.top) / rect.height) * this.secondsPerScreen;
     const laneSpan = this.laneSpan(chart);
     const pointerLane = viewportXToAuthoredLane(event.clientX - rect.left, rect.width, this.laneView(chart));
-    const tick = Math.max(0, snapTick(map.secondsToTick(seconds), this.snap)),
+    const tick = Math.max(0, this.gridTick(map.secondsToTick(seconds))),
       lane = Math.round(pointerLane);
     const edgeTolerance = ((event.pointerType === "touch" ? 14 : 8) / rect.width) * laneSpan;
     const selectedEdge = (item: ReturnType<typeof chartSelectionNodes>[number]) =>
@@ -1401,10 +1408,13 @@ export class ChartCreationWorkspace extends LitElement {
       this.selectedIds = new Set(unique);
     this.selected = this.selectedIds.has(primary) ? primary : (ids[0] ?? "");
   }
-  private nudgeSelection(direction: -1 | 1) {
+  private gridTick(tick: number, mode: SnapMode = "nearest") {
+    return snapTick(tick, this.snap, mode, this.chart.resolution * 4);
+  }
+  private nudgeSelection(direction: -1 | 1, oneTick = false) {
     if (this.busy || this.gesture || !this.audio || !this.selectedIds.size) return;
     this.cancelWidth();
-    try { this.commitProject(nudgeChartSelectionOnGrid(this.chart, this.selectedIds, this.selected, direction, this.snap)); }
+    try { this.commitProject(nudgeChartSelectionOnGrid(this.chart, this.selectedIds, this.selected, direction, oneTick ? this.chart.resolution * 4 : this.snap, 4)); }
     catch { this.error = this.t("creation.invalid_edit"); }
   }
   private pruneSelection() {
@@ -1478,8 +1488,8 @@ export class ChartCreationWorkspace extends LitElement {
       const anchor = this.selectionNodes(g.base).find((item) => item.note.id === (g.resizeId ?? g.primary));
       const anchorTick = anchor?.note.tick ?? g.tick;
       const deltaTick = this.relativeSnap
-        ? snapTick(tick - g.tick, this.snap)
-        : snapTick(anchorTick + tick - g.tick, this.snap) - anchorTick;
+        ? this.gridTick(tick - g.tick)
+        : this.gridTick(anchorTick + tick - g.tick) - anchorTick;
       const laneStep = 1,
         deltaLane = this.relativeSnap
           ? Math.round((lane - g.lane) / laneStep) * laneStep
@@ -1621,21 +1631,27 @@ export class ChartCreationWorkspace extends LitElement {
     ctx.strokeStyle=this.canvasTheme?.assets.palette.laneLine??color("outline-variant");ctx.lineWidth=1;
     const first = Math.max(0, Math.floor(map.secondsToBeat(this.windowStart)));
     const last = map.secondsToBeat(this.windowStart + this.secondsPerScreen);
-    const divisions = Number.isFinite(last) ? Math.min(256, Math.ceil((last - first) * this.snap)) : 0;
-    for (let i = 0; i <= divisions && divisions > 0; i++) {
-      const beat = first + i * Math.max(1 / this.snap, (last - first) / 256);
+    const drawGridLine = (beat: number, major: boolean) => {
       const at = y(beat * chart.resolution);
-      ctx.globalAlpha = beat % 1 ? 0.3 : 1;
+      ctx.globalAlpha = major ? 1 : 0.3;
       ctx.beginPath();
       ctx.moveTo(0, at);
       ctx.lineTo(width, at);
       ctx.stroke();
-      if (Math.abs(beat - Math.round(beat)) < 0.001) {
-        ctx.globalAlpha = 1;
+      if (major) {
         ctx.fillStyle = this.laneStart >= 0 && this.laneStart < chart.laneBasis ? (this.canvasTheme?.assets.palette.outsideLine ?? color("on-surface-variant")) : color("on-surface-variant");
         ctx.font = `11px ${style.getPropertyValue("--app-font").trim() || "sans-serif"}`;
-        ctx.fillText(String(Math.round(beat)), 4, at - 14);
+        ctx.fillText(String(beat), 4, at - 14);
       }
+    };
+    for (let beat = first; beat <= last; beat++) drawGridLine(beat, true);
+    const gridBeats = 4 / this.snap;
+    for (let unit = Math.ceil(first / gridBeats); unit * gridBeats <= last; unit++) {
+      const beat = unit * gridBeats;
+      if (Math.abs(beat - Math.round(beat)) < 1e-8) continue;
+      const at = y(beat * chart.resolution), next = y((beat + gridBeats) * chart.resolution);
+      if (Math.abs(next - at) < 8) break;
+      drawGridLine(beat, false);
     }
     ctx.globalAlpha = 0.3;
     ctx.fillStyle = this.canvasTheme?.assets.palette.outsideLine ?? color("secondary");
@@ -1748,7 +1764,7 @@ export class ChartCreationWorkspace extends LitElement {
       const action = this.gesture;
       const edited = action && ["move", "resize-left", "resize-right"].includes(action.kind)
         ? this.selectionNodes(chart).find(item => item.note.id === (action.resizeId ?? action.primary)) : undefined;
-      const tick = edited?.note.tick ?? Math.max(0, snapTick(map.secondsToTick(seconds), this.snap));
+      const tick = edited?.note.tick ?? Math.max(0, this.gridTick(map.secondsToTick(seconds)));
       const lane = edited?.lane ?? Math.round(viewportXToAuthoredLane(cursorX, width, this.laneView(chart)));
       const cursorLane = action?.kind === "resize-right" && edited ? lane + edited.size : lane;
       const at = y(tick);
@@ -1775,7 +1791,7 @@ export class ChartCreationWorkspace extends LitElement {
       ctx.setLineDash([4, 4]);
       ctx.beginPath();ctx.moveTo(0, at);ctx.lineTo(width, at);ctx.moveTo(x(cursorLane), 0);ctx.lineTo(x(cursorLane), height);ctx.stroke();
       ctx.restore();
-      if (cursorOutput) cursorOutput.textContent = `${map.tickToSeconds(tick).toFixed(3)} s · ${this.t("beat")} ${(tick / chart.resolution).toFixed(2)} · ${this.t("lane")} ${Number(lane.toFixed(2))}${edited ? ` · ${this.t("width")} ${Number(edited.size.toFixed(2))}` : ""}${lane < 0 || lane > chart.laneBasis ? ` · ${this.t("creation.outside_stage")}` : ""}${action?.error ? ` · ${action.error}` : ""}`;
+      if (cursorOutput) cursorOutput.textContent = `${map.tickToSeconds(tick).toFixed(3)} s · ${this.t("beat")} ${tick / chart.resolution} · ${this.t("lane")} ${Number(lane.toFixed(2))}${edited ? ` · ${this.t("width")} ${Number(edited.size.toFixed(2))}` : ""}${lane < 0 || lane > chart.laneBasis ? ` · ${this.t("creation.outside_stage")}` : ""}${action?.error ? ` · ${action.error}` : ""}`;
       const nearby = this.selectionNodes(chart).find(item => this.selectedIds.has(item.note.id) &&
         Math.abs(y(item.note.tick) - cursorY) <= 12 &&
         Math.min(Math.abs(x(item.lane) - cursorX), Math.abs(x(item.lane + item.size) - cursorX)) <= 8);
@@ -1840,7 +1856,7 @@ export class ChartCreationWorkspace extends LitElement {
   }
   private pasteSelection() {
     if (!this.clipboard || this.busy || this.gesture) return;
-    try { const value = pasteAuthorSelection(this.chart, this.clipboard, Math.max(0, snapTick(this.map().secondsToTick(this.seconds), this.snap))); if (this.commitProject(value.project)) this.setSelection(value.ids); }
+    try { const value = pasteAuthorSelection(this.chart, this.clipboard, Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds)))); if (this.commitProject(value.project)) this.setSelection(value.ids); }
     catch { this.error = this.t("creation.invalid_edit"); }
   }
   private copyBrush() {
@@ -1867,7 +1883,7 @@ export class ChartCreationWorkspace extends LitElement {
           .filter((line) => line.points.some((note) => this.selectedIds.has(note.id)))
           .map((line) => line.id),
       );
-    const result = generateLinePoints(project, lines, this.snap);
+    const result = generateLinePoints(project, lines, this.snap, 4);
     if (this.commitProject(result.project)) this.setSelection(result.created);
     this.requestUpdate();
   }
@@ -2090,6 +2106,16 @@ export class ChartCreationWorkspace extends LitElement {
     this.cancelWidth();
     this.leftOpen = this.rightOpen = false;
   }
+  private async openGridSettings() {
+    this.cancelGesture();
+    this.cancelWidth();
+    this.rightOpen = true;
+    if (this.narrow) this.leftOpen = false;
+    await this.updateComplete;
+    const field = this.querySelector<HTMLElement>("[data-grid-division]");
+    field?.scrollIntoView({ block: "nearest" });
+    field?.focus();
+  }
   private togglePanel(side: "left" | "right") {
     this.cancelGesture();
     this.cancelWidth();
@@ -2160,18 +2186,27 @@ export class ChartCreationWorkspace extends LitElement {
       </fieldset>
     `;
   }
-  private field(key: string, value: string | number, changed: (value: string) => void, numeric = false) {
+  private beatField(tick: number, changed: (tick: number) => void) {
+    return this.field("beat", tick / this.chart.resolution, value => {
+      try {
+        const tick = parseBeatTick(value, this.chart.resolution);
+        this.error = "";
+        changed(tick);
+      } catch { this.error = this.t("creation.invalid_position"); }
+    });
+  }
+  private field(key: string, value: string | number, changed: (value: string) => void, numeric = false, step = "any") {
     return html`
       <md-outlined-text-field
         label=${this.t(key)}
-        step=${numeric ? "any" : nothing}
+        step=${numeric ? step : nothing}
         type=${numeric ? "number" : "text"}
         .value=${live(String(value))}
         ?disabled=${this.busy || !this.audio}
         @change=${(e: Event) => changed((e.currentTarget as HTMLInputElement).value)}
         @focusout=${(e: FocusEvent) => {
           const input = e.composedPath().find(node => node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement);
-          if (input) changed(input.value);
+          if (input && input.value !== String(value)) changed(input.value);
         }}
       ></md-outlined-text-field>
     `;
@@ -2311,15 +2346,20 @@ export class ChartCreationWorkspace extends LitElement {
                   ${this.t("deleteSelection")}
                 </button>
 
-                ${this.field(
-                  "beat",
-                  selection.tick / chart.resolution,
-                  (value) =>
-                    selectedUpdate((n) => {
-                      n.tick = Math.round(Number(value) * chart.resolution);
-                    }),
-                  true,
-                )}
+                ${this.beatField(selection.tick, tick => selectedUpdate(note => { note.tick = tick; }))}
+                ${this.field("tick", selection.tick, value => {
+                  const tick = Number(value);
+                  if (value.trim() && Number.isSafeInteger(tick) && tick >= 0)
+                    selectedUpdate(note => { note.tick = tick; });
+                  else this.error = this.t("creation.invalid_position");
+                }, true, "1")}
+                <div class="chart-studio__tick-actions" role="group" aria-label=${this.t("creation.tick_nudge")}>
+                  ${([-1, 1] as const).map(direction => html`
+                    <button class="button button--tonal" type="button"
+                      ?disabled=${this.busy || !!this.gesture || !this.audio || (direction < 0 && selection.tick === 0)}
+                      @click=${() => this.nudgeSelection(direction, true)}>${direction < 0 ? "−" : "+"}1 ${this.t("tick")}</button>
+                  `)}
+                </div>
                 ${this.field(
                   "lane",
                   selection.lane,
@@ -2535,7 +2575,7 @@ export class ChartCreationWorkspace extends LitElement {
             <button
               class="button"
               ?disabled=${this.busy || !this.audio || ["select", "erase", "pan", "brush"].includes(this.tool)}
-              @click=${() => this.place(Math.max(0, snapTick(this.map().secondsToTick(this.seconds), this.snap)), this.insertLane)}
+              @click=${() => this.place(Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds))), this.insertLane)}
             >
               ${this.t("creation.add_note")}
             </button>
@@ -2593,7 +2633,7 @@ export class ChartCreationWorkspace extends LitElement {
             ?disabled=${this.busy || !this.audio}
             @click=${() =>
               this.edit((p) => {
-                const tick = Math.max(0, snapTick(this.map().secondsToTick(this.seconds), this.snap));
+                const tick = Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds)));
                 if (!p.tempos.some((t) => t.tick === tick))
                   p.tempos.push({ id: createProjectId("tempo"), tick, bpm: this.map().bpmAtTick(tick) });
                 p.tempos.sort((a, b) => a.tick - b.tick);
@@ -2605,16 +2645,10 @@ export class ChartCreationWorkspace extends LitElement {
         ${chart.tempos.slice(1).map(
           (tempo) => html`
             <div class="chart-creation__form">
-              ${this.field(
-                "beat",
-                tempo.tick / chart.resolution,
-                (value) =>
-                  this.edit((p) => {
-                    p.tempos.find((t) => t.id === tempo.id)!.tick = Math.round(Number(value) * chart.resolution);
-                    p.tempos.sort((a, b) => a.tick - b.tick);
-                  }),
-                true,
-              )}
+              ${this.beatField(tempo.tick, tick => this.edit(project => {
+                project.tempos.find(event => event.id === tempo.id)!.tick = tick;
+                project.tempos.sort((a, b) => a.tick - b.tick);
+              }))}
               ${this.field(
                 "creation.bpm",
                 tempo.bpm,
@@ -2643,7 +2677,7 @@ export class ChartCreationWorkspace extends LitElement {
           ?disabled=${this.busy || !this.audio}
           @click=${() =>
             this.edit((p) => {
-              const tick = Math.max(0, snapTick(this.map().secondsToTick(this.seconds), this.snap));
+              const tick = Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds)));
               if (!p.timeScales.some((t) => t.tick === tick))
                 p.timeScales.push({ id: createProjectId("speed"), tick, scale: 1 });
               p.timeScales.sort((a, b) => a.tick - b.tick);
@@ -2654,16 +2688,10 @@ export class ChartCreationWorkspace extends LitElement {
         ${chart.timeScales.map(
           (scale) => html`
             <div class="chart-creation__form">
-              ${this.field(
-                "beat",
-                scale.tick / chart.resolution,
-                (value) =>
-                  this.edit((p) => {
-                    p.timeScales.find((t) => t.id === scale.id)!.tick = Math.round(Number(value) * chart.resolution);
-                    p.timeScales.sort((a, b) => a.tick - b.tick);
-                  }),
-                true,
-              )}
+              ${this.beatField(scale.tick, tick => this.edit(project => {
+                project.timeScales.find(event => event.id === scale.id)!.tick = tick;
+                project.timeScales.sort((a, b) => a.tick - b.tick);
+              }))}
               ${this.field(
                 "timeScale",
                 scale.scale,
@@ -2763,13 +2791,14 @@ export class ChartCreationWorkspace extends LitElement {
           label=${this.t("creation.custom_division")}
           type="number"
           min="1"
-          max=${chart.resolution}
+          max=${chart.resolution * 4}
           step="1"
+          data-grid-division
           .value=${live(String(this.snap))}
           ?disabled=${this.busy}
           @change=${(event: Event) => {
             const value = Number((event.target as HTMLInputElement).value);
-            if (Number.isSafeInteger(value) && value >= 1 && value <= chart.resolution) {
+            if (Number.isSafeInteger(value) && value >= 1 && value <= chart.resolution * 4) {
               this.snap = value;
               this.error = "";
               this.requestUpdate();
@@ -2799,7 +2828,7 @@ export class ChartCreationWorkspace extends LitElement {
             this.requestUpdate();
           }}
         >
-          ${[...new Set([...snapDivisions, this.snap])]
+          ${[...new Set([...snapDivisions, ...fineSnapDivisions, this.snap])]
             .sort((a, b) => a - b)
             .map(
               (value) => html`
@@ -2945,6 +2974,9 @@ export class ChartCreationWorkspace extends LitElement {
             ${iconButton({ icon: "add", label: `${this.t("creation.zoom_y")} +`, disabled: this.busy || !this.audio || Boolean(this.gesture) || this.secondsPerScreen <= 0.5,
               onClick: () => this.setVerticalZoom(this.secondsPerScreen / 2) })}
           </div>
+          <button class="chip chart-studio__grid-preset" type="button" ?disabled=${this.busy}
+            aria-label=${`${this.t("creation.custom_division")} 1/${this.snap}`}
+            @click=${() => void this.openGridSettings()}>1/${this.snap}</button>
           <div class="chart-studio__tools">
             <div class="chart-creation__actions">
               ${segmented({
@@ -3191,15 +3223,9 @@ export class ChartCreationWorkspace extends LitElement {
               ${
                 html`
                       ${selectionPanel}${defaultsPanel}${viewControls}
-                      ${this.field(
-                "beat",
-                Math.round(this.map().secondsToBeat(this.seconds) * 100) / 100,
-                (value) => {
-                  if (Number.isFinite(Number(value)))
-                    this.seekPlayback(Math.max(0, this.map().beatToSeconds(Number(value))));
-                },
-                true,
-              )}
+                      ${this.beatField(Math.round(this.map().secondsToTick(this.seconds)), tick => {
+                this.seekPlayback(this.map().tickToSeconds(tick));
+              })}
                       <button
                         class="button button--text"
                         type="button"
