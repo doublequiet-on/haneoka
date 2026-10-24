@@ -2523,7 +2523,7 @@
       "automaticTeam": "자동 편성",
       "manualAllCards": "전체 카드, 미보유 카드는 최대 육성",
       "manualGrowth": "보유 카드: 입력한 육성 상태",
-      "reachOrders": "달성 순서",
+      "rankReachRate": "달성률",
       "perChartTeams": "채보별 편성",
       "manualTeam": "수동 편성",
       "makeLeader": "리더",

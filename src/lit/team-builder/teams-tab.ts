@@ -12,6 +12,7 @@ import { specList } from "../ui/spec";
 import { sectionHeading } from "./catalog";
 import { saveTeam } from "./results";
 import { renderSongComparison } from "./song-comparison-view";
+import { toolLayout } from "./tool-layout";
 import { eventSection, gekisoSamplesControl, playConditions, songList } from "./build-tab";
 import { segmented } from "../ui/controls";
 import { clock } from "../../lib/team-builder/engine/execution";
@@ -497,65 +498,54 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
       }
     </section>
   `;
-  if (comparison)
+  if (mode === "manual")
     return html`
-      ${renderSongComparison(host, editor)}${slotPicker(host)}
-    `;
-  return html`
-    <div class="tb-teams stack stack--loose">
-      ${
-        mode !== "teams"
-          ? html`
-              <div class=${comparison ? "stack" : "tb-build tb-manual"}>
-                <div class="tb-results-column stack">${editor}</div>
-                ${
-                  !comparison
-                    ? html`
-                        <aside class="tb-config stack">
-                          <section class="surface stack">
-                            ${sectionHeading({ icon: "flag", label: host.t("goal", "Goal") })}
-                            ${segmented({
-                              label: host.t("goal", "Goal"),
-                              value: host.settings.manualScoreMode,
-                              options: [
-                                { value: "score", label: host.t("goalScore", "Live score") },
-                                { value: "gekiso", label: host.t("goalGekiso", "Gekiso score") },
-                              ],
-                              onSelect: (manualScoreMode) => host.updateSettings({ manualScoreMode }),
-                            })}
-                          </section>
-                          <section class="surface stack">
-                            ${sectionHeading({ icon: "library_music", label: host.t("songs", "Songs"), count: host.manualGoal().songs.length || undefined })}
-                            ${songList(
-                              host,
-                              host.settings.songs,
-                              (songs) => host.updateSettings({ songs }),
-                              false,
-                              showSkipScore && host.settings.challengeRules && host.settings.eventId !== null
-                                ? catalog.challengeSongs(host.settings.eventId).map((row) => row.liveMusicId)
-                                : undefined,
-                            )}
-                          </section>
-                          <section class="surface stack">
-                            ${sectionHeading({ icon: "piano", label: host.t("farm.conditions", "Play and account conditions") })}
-                            ${playConditions(host, { ...host.searchSettings, goal: showSkipScore ? "score" : "gekiso" })}
-                            ${
-                              showSkipScore
-                                ? html`
-                                    <label class="tb-check">
-                                      <md-checkbox
-                                        touch-target="wrapper"
-                                        .checked=${live(host.settings.challengeRules)}
-                                        @change=${(event: Event) => host.updateSettings({ challengeRules: (event.target as HTMLInputElement).checked })}
-                                      ></md-checkbox>
-                                      <span>
-                                        ${host.t("challengeRules", "Challenge live rules (event parameter bonus)")}
-                                      </span>
-                                    </label>
-                                    ${host.settings.challengeRules ? eventSection(host, { ...host.settings, goal: "score" }) : nothing}
-                                  `
-                                : html`
-                                    ${segmented({
+      <div class="tb-teams stack stack--loose">
+        ${toolLayout(
+          host,
+          html`
+            <section class="surface stack">
+              ${sectionHeading({ icon: "flag", label: host.t("goal", "Goal") })}
+              ${segmented({
+              label: host.t("goal", "Goal"),
+              value: host.settings.manualScoreMode,
+              options: [
+                { value: "score", label: host.t("goalScore", "Live score") },
+                { value: "gekiso", label: host.t("goalGekiso", "Gekiso score") },
+              ],
+              onSelect: (manualScoreMode) => host.updateSettings({ manualScoreMode }),
+            })}
+            </section>
+            <section class="surface stack">
+              ${sectionHeading({ icon: "library_music", label: host.t("songs", "Songs"), count: host.manualGoal().songs.length || undefined })}
+              ${songList(
+              host,
+              host.settings.songs,
+              (songs) => host.updateSettings({ songs }),
+              false,
+              showSkipScore && host.settings.challengeRules && host.settings.eventId !== null
+                ? catalog.challengeSongs(host.settings.eventId).map((row) => row.liveMusicId)
+                : undefined,
+            )}
+            </section>
+            <section class="surface stack">
+              ${sectionHeading({ icon: "piano", label: host.t("farm.conditions", "Play and account conditions") })}
+              ${playConditions(host, { ...host.searchSettings, goal: showSkipScore ? "score" : "gekiso" })}
+              ${
+              showSkipScore
+                ? html`
+                    <label class="tb-check">
+                      <md-checkbox
+                        touch-target="wrapper"
+                        .checked=${live(host.settings.challengeRules)}
+                        @change=${(event: Event) => host.updateSettings({ challengeRules: (event.target as HTMLInputElement).checked })}
+                      ></md-checkbox>
+                      <span>${host.t("challengeRules", "Challenge live rules (event parameter bonus)")}</span>
+                    </label>
+                    ${host.settings.challengeRules ? eventSection(host, { ...host.settings, goal: "score" }) : nothing}
+                  `
+                : html`
+                    ${segmented({
                                       label: host.t("gekisoRank", "Placement in each range"),
                                       value: String(host.settings.gekisoRank),
                                       options: [1, 2, 3, 4, 5].map((rank) => ({
@@ -564,61 +554,60 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                                       })),
                                       onSelect: (value) => host.updateSettings({ gekisoRank: Number(value) }),
                                     })}
-                                    ${gekisoSamplesControl(host)}
-                                  `
-                            }
-                            <span class="tb-field__label">${host.t("unknownPolicy", "Growth not entered")}</span>
-                            ${segmented({
-                              label: host.t("unknownPolicy", "Growth not entered"),
-                              value: host.settings.unknownPolicy,
-                              options: [
-                                { value: "max", label: host.t("unknownMax", "Count as max") },
-                                { value: "min", label: host.t("unknownMin", "Count as minimum") },
-                              ],
-                              onSelect: (unknownPolicy) => host.updateSettings({ unknownPolicy }),
-                            })}
-                            <button
-                              class="button tb-run__button"
-                              type="button"
-                              ?disabled=${!calculating && (!manualReady(host) || duplicate || !host.manualGoal().songs.length || host.running || (showSkipScore && host.settings.challengeRules && host.settings.eventId === null))}
-                              @click=${() => (calculating ? host.cancel() : void evaluate(host))}
-                            >
-                              ${calculating ? icon("close", 18) : icon("calculate", 18)}${calculating ? host.common("common.actions.cancel", "Cancel") : host.t("evaluateTeam", "Evaluate on the chosen songs")}
-                            </button>
-                            <div class="tb-manual__progress">
-                              ${
-                                calculating
-                                  ? html`
-                                      <md-linear-progress
-                                        indeterminate
-                                        aria-label=${host.t("evaluating", "Evaluating")}
-                                      ></md-linear-progress>
-                                    `
-                                  : nothing
-                              }
-                            </div>
-                          </section>
-                        </aside>
-                      `
-                    : nothing
-                }
+                    ${gekisoSamplesControl(host)}
+                  `
+            }
+              <span class="tb-field__label">${host.t("unknownPolicy", "Growth not entered")}</span>
+              ${segmented({
+              label: host.t("unknownPolicy", "Growth not entered"),
+              value: host.settings.unknownPolicy,
+              options: [
+                { value: "max", label: host.t("unknownMax", "Count as max") },
+                { value: "min", label: host.t("unknownMin", "Count as minimum") },
+              ],
+              onSelect: (unknownPolicy) => host.updateSettings({ unknownPolicy }),
+            })}
+            </section>
+          `,
+          html`
+            <div class="tb-run">
+              <button
+                class="button tb-run__button"
+                type="button"
+                ?disabled=${!calculating && (!manualReady(host) || duplicate || !host.manualGoal().songs.length || host.running || (showSkipScore && host.settings.challengeRules && host.settings.eventId === null))}
+                @click=${() => (calculating ? host.cancel() : void evaluate(host))}
+              >
+                ${calculating ? icon("close", 18) : icon("calculate", 18)}${calculating ? host.common("common.actions.cancel", "Cancel") : host.t("evaluateTeam", "Evaluate on the chosen songs")}
+              </button>
+              <div class="tb-manual__progress">
                 ${
-                  !comparison
-                    ? html`
-                        <section class="surface stack tb-manual__scores">
-                          ${sectionHeading({ icon: "query_stats", label: showSkipScore ? host.t("goalScore", "Live score") : host.t("goalGekiso", "Gekiso score"), count: rows.length || undefined })}
-                          <ul class="tb-eval-mobile">
-                            ${rows.map(
-                              ({ song, row }) => html`
-                                <li class="card card--outlined">
-                                  <div class="card__body stack">
-                                    <div>
-                                      <strong>${catalog.songTitle(song.songId)}</strong>
-                                      <div class="card__supporting">
-                                        ${catalog.difficultyLabel(song.songId, song.difficulty)}
-                                      </div>
-                                    </div>
-                                    ${specList(
+                calculating
+                  ? html`
+                      <md-linear-progress
+                        indeterminate
+                        aria-label=${host.t("evaluating", "Evaluating")}
+                      ></md-linear-progress>
+                    `
+                  : nothing
+              }
+              </div>
+            </div>
+          `,
+          html`
+            <div class="stack stack--loose">
+              ${editor}
+              <section class="surface stack tb-manual__scores">
+                ${sectionHeading({ icon: "query_stats", label: showSkipScore ? host.t("goalScore", "Live score") : host.t("goalGekiso", "Gekiso score"), count: rows.length || undefined })}
+                <ul class="tb-eval-mobile">
+                  ${rows.map(
+                  ({ song, row }) => html`
+                    <li class="card card--outlined">
+                      <div class="card__body stack">
+                        <div>
+                          <strong>${catalog.songTitle(song.songId)}</strong>
+                          <div class="card__supporting">${catalog.difficultyLabel(song.songId, song.difficulty)}</div>
+                        </div>
+                        ${specList(
                                       [
                                         { label: host.t("power", "Power"), value: row ? format(host, row.power) : "—" },
                                         {
@@ -640,67 +629,72 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                                       ],
                                       { numeric: true },
                                     )}
-                                  </div>
-                                </li>
-                              `,
-                            )}
-                          </ul>
-                          <div
-                            class="table-scroll tb-eval-desktop"
-                            role="region"
-                            tabindex="0"
-                            aria-label=${showSkipScore ? host.t("goalScore", "Live score") : host.t("goalGekiso", "Gekiso score")}
-                          >
-                            <table class="data-table tb-eval">
-                              <thead>
-                                <tr>
-                                  <th scope="col">${host.t("song", "Song")}</th>
-                                  <th scope="col" class="is-numeric">${host.t("power", "Power")}</th>
-                                  <th scope="col" class="is-numeric">${host.t("expectedScore", "Expected score")}</th>
-                                  <th scope="col" class="is-numeric">${host.t("scoreRange", "Range")}</th>
-                                  ${
-                                    showSkipScore
-                                      ? html`
-                                          <th scope="col" class="is-numeric">${host.t("skipScore", "Skip score")}</th>
-                                        `
-                                      : nothing
-                                  }
-                                </tr>
-                              </thead>
-                              <tbody>
-                                ${rows.map(
-                                  ({ song, row }) => html`
-                                    <tr>
-                                      <th scope="row">
-                                        ${catalog.songTitle(song.songId)}
-                                        <small>${catalog.difficultyLabel(song.songId, song.difficulty)}</small>
-                                      </th>
-                                      <td class="is-numeric">${row ? format(host, row.power) : "—"}</td>
-                                      <td class="is-numeric">${row ? format(host, row.score.mean) : "—"}</td>
-                                      <td class="is-numeric">
-                                        ${row ? `${format(host, row.score.min)} – ${format(host, row.score.max)}` : "—"}
-                                      </td>
-                                      ${
+                      </div>
+                    </li>
+                  `,
+                )}
+                </ul>
+                <div
+                  class="table-scroll tb-eval-desktop"
+                  role="region"
+                  tabindex="0"
+                  aria-label=${showSkipScore ? host.t("goalScore", "Live score") : host.t("goalGekiso", "Gekiso score")}
+                >
+                  <table class="data-table tb-eval">
+                    <thead>
+                      <tr>
+                        <th scope="col">${host.t("song", "Song")}</th>
+                        <th scope="col" class="is-numeric">${host.t("power", "Power")}</th>
+                        <th scope="col" class="is-numeric">${host.t("expectedScore", "Expected score")}</th>
+                        <th scope="col" class="is-numeric">${host.t("scoreRange", "Range")}</th>
+                        ${
+                        showSkipScore
+                          ? html`
+                              <th scope="col" class="is-numeric">${host.t("skipScore", "Skip score")}</th>
+                            `
+                          : nothing
+                      }
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rows.map(
+                      ({ song, row }) => html`
+                        <tr>
+                          <th scope="row">
+                            ${catalog.songTitle(song.songId)}
+                            <small>${catalog.difficultyLabel(song.songId, song.difficulty)}</small>
+                          </th>
+                          <td class="is-numeric">${row ? format(host, row.power) : "—"}</td>
+                          <td class="is-numeric">${row ? format(host, row.score.mean) : "—"}</td>
+                          <td class="is-numeric">
+                            ${row ? `${format(host, row.score.min)} – ${format(host, row.score.max)}` : "—"}
+                          </td>
+                          ${
                                         showSkipScore
                                           ? html`
                                               <td class="is-numeric">${row ? format(host, row.skipScore) : "—"}</td>
                                             `
                                           : nothing
                                       }
-                                    </tr>
-                                  `,
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        </section>
-                      `
-                    : nothing
-                }
-              </div>
-            `
-          : nothing
-      }
+                        </tr>
+                      `,
+                    )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          `,
+        )}
+        ${slotPicker(host)}
+      </div>
+    `;
+  if (comparison)
+    return html`
+      <div class="tb-teams stack stack--loose">${renderSongComparison(host, editor)}${slotPicker(host)}</div>
+    `;
+  return html`
+    <div class="tb-teams stack stack--loose">
       ${comparison ? renderSongComparison(host) : nothing}
       ${
         mode === "teams"

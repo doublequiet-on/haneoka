@@ -434,7 +434,6 @@ export function renderSongComparison(host: TeamBuilder, editor?: unknown) {
   return toolLayout(
     host,
     html`
-      ${editor}
       <section class="surface stack">
         ${sectionHeading({ icon: "tune", label: t("conditions") })}
         <button
@@ -552,106 +551,89 @@ export function renderSongComparison(host: TeamBuilder, editor?: unknown) {
       </div>
     `,
     html`
-      <section id="sc-results" class="surface stack">
-        ${sectionHeading({ icon: "music_note", label: t("title") })}
-        ${
-          rows.length
-            ? html`
-                <div class="cluster">
-                  <span class="chip chip--static">
-                    ${c.stale ? host.t("stale", "Conditions changed") : t("conditions")}
-                  </span>
-                  <span class="chip chip--static">
-                    ${result.mode ? t(result.mode) : t("select")}${host.hasMission("JustCount", result.songs) ? ` · JUST ${result.just ?? "—"}%` : ""}
-                  </span>
-                  <span class="chip chip--static">${t("placement", { rank: result.rank ?? "—" })}</span>
-                  <span class="chip chip--static">${result.players} · ${result.target}</span>
-                </div>
-                <div class="cluster">
-                  <span class="chip chip--static">
-                    GREAT ${result.mode === "ap" ? 0 : (result.great ?? "—")}% · MISS
-                    ${result.mode === "ap" ? 0 : (result.missEvery ?? "—")}
-                  </span>
-                  <span class="chip chip--static">${t("noAssist")}</span>
-                </div>
-                <div class="row row--wrap">
-                  <span role="status" class="tabular">
-                    ${c.running ? `${host.computationStatus()} · ` : ""}${t("coverage", { done, total: rows.length })}
-                  </span>
-                </div>
-                <md-linear-progress
-                  .value=${rows.length ? done / rows.length : 0}
-                  aria-label=${t("coverage", { done, total: rows.length })}
-                ></md-linear-progress>
-                ${select(
-                  "sc-sort",
-                  t("sort"),
-                  s.sort,
-                  [
-                    { value: "contribution", label: t("contribution") },
-                    { value: "score", label: t("score") },
-                    { value: "remaining", label: t("remaining") },
-                  ],
-                  (value) => c.update({ sort: value as typeof s.sort }),
-                )}
-              `
-            : nothing
-        }
-        ${
-          rows.length
-            ? html`
-                ${mobileResults()}
-                <div class="table-scroll sc-desktop" role="region" tabindex="0" aria-label=${t("title")}>
-                  <table class="data-table sc-results">
-                    <thead>
-                      <tr>
-                        <th>${t("song")}</th>
-                        <th>${t("difficulty")}</th>
-                        ${headers}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${repeat(
-                        c.groups(),
-                        (group) => group.id,
-                        (group) => {
-                          const row = group.representative,
-                            open = c.expanded.has(group.id),
-                            completed = group.charts.filter((chart) => chart.status === "complete").length;
+      <div class="stack stack--loose">
+        ${editor}
+        <section id="sc-results" class="surface stack">
+          ${sectionHeading({ icon: "music_note", label: t("title") })}
+          ${
+            rows.length
+              ? html`
+                  <div class="row row--wrap">
+                    <span role="status" class="tabular">${t("coverage", { done, total: rows.length })}</span>
+                  </div>
+                  <md-linear-progress
+                    .value=${rows.length ? done / rows.length : 0}
+                    aria-label=${t("coverage", { done, total: rows.length })}
+                  ></md-linear-progress>
+                  ${select(
+                    "sc-sort",
+                    t("sort"),
+                    s.sort,
+                    [
+                      { value: "contribution", label: t("contribution") },
+                      { value: "score", label: t("score") },
+                      { value: "remaining", label: t("remaining") },
+                    ],
+                    (value) => c.update({ sort: value as typeof s.sort }),
+                  )}
+                `
+              : nothing
+          }
+          ${
+            rows.length
+              ? html`
+                  ${mobileResults()}
+                  <div class="table-scroll sc-desktop" role="region" tabindex="0" aria-label=${t("title")}>
+                    <table class="data-table sc-results">
+                      <thead>
+                        <tr>
+                          <th>${t("song")}</th>
+                          <th>${t("difficulty")}</th>
+                          ${headers}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${repeat(
+                          c.groups(),
+                          (group) => group.id,
+                          (group) => {
+                            const row = group.representative,
+                              open = c.expanded.has(group.id),
+                              completed = group.charts.filter((chart) => chart.status === "complete").length;
 
-                          return html`
-                            <tr data-sc-song=${group.id}>
-                              <th scope="row">
-                                ${resultSong(host, row?.song ?? group.charts[0]!.song)}
-                                <button
-                                  class="button button--text"
-                                  type="button"
-                                  aria-expanded=${String(open)}
-                                  aria-controls=${`sc-chart-${group.id}`}
-                                  @click=${() => {
+                            return html`
+                              <tr data-sc-song=${group.id}>
+                                <th scope="row">
+                                  ${resultSong(host, row?.song ?? group.charts[0]!.song)}
+                                  <button
+                                    class="button button--text"
+                                    type="button"
+                                    aria-expanded=${String(open)}
+                                    aria-controls=${`sc-chart-${group.id}`}
+                                    @click=${() => {
                                     if (open) c.expanded.delete(group.id);
                                     else c.expanded.add(group.id);
                                     host.requestUpdate();
                                   }}
-                                >
-                                  ${t("coverage", { done: completed, total: group.charts.length })}
-                                </button>
-                              </th>
-                              <td>${row ? catalog.difficultyLabel(group.id, row.song.difficulty) : "—"}</td>
-                              ${metricsCells(row)}
-                            </tr>
-                            <tr id=${`sc-chart-${group.id}`} ?hidden=${!open}>
-                              <td colspan="5">
-                                <table class="data-table">
-                                  <thead>
-                                    <tr>
-                                      <th>${t("difficulty")}</th>
-                                      ${headers}
-                                      <th>${t("details")}</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    ${group.charts.map((chart) => {
+                                  >
+                                    ${t("coverage", { done: completed, total: group.charts.length })}
+                                  </button>
+                                </th>
+                                <td>${row ? catalog.difficultyLabel(group.id, row.song.difficulty) : "—"}</td>
+                                ${metricsCells(row)}
+                              </tr>
+                              <tr id=${`sc-chart-${group.id}`} ?hidden=${!open}>
+                                <td colspan="5">
+                                  <table class="data-table">
+                                    <thead>
+                                      <tr>
+                                        <th>${t("difficulty")}</th>
+                                        ${headers}
+                                        <th>${t("details")}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      ${group.charts.map((chart) => {
                                       const metrics = chart.hit?.score
                                         ? songMetrics(host.master!, chart.song, result, chart.hit.score.mean)
                                         : null;
@@ -704,25 +686,26 @@ export function renderSongComparison(host: TeamBuilder, editor?: unknown) {
                                         </tr>
                                       `;
                                     })}
-                                  </tbody>
-                                </table>
-                              </td>
-                            </tr>
-                          `;
-                        },
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              `
-            : html`
-                <div class="state">
-                  <p class="state__title">${t("empty")}</p>
-                  <button class="button button--tonal" @click=${() => c.choose()}>${t("choose")}</button>
-                </div>
-              `
-        }
-      </section>
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            `;
+                          },
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                `
+              : html`
+                  <div class="state">
+                    <p class="state__title">${t("empty")}</p>
+                    <button class="button button--tonal" @click=${() => c.choose()}>${t("choose")}</button>
+                  </div>
+                `
+          }
+        </section>
+      </div>
     `,
   );
 }

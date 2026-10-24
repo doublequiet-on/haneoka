@@ -1,5 +1,5 @@
 import { cache } from "lit/directives/cache.js";
-import { resultMetric, chartDuration } from "./result-metric";
+import { resultMetric } from "./result-metric";
 import { repeat } from "lit/directives/repeat.js";
 import { actionMenu } from "../ui/action-menu";
 import { improvementPercent } from "../../lib/team-builder/engine/execution";
@@ -10,15 +10,13 @@ import { cardIdOf } from "../../lib/team-builder/sync/box-view";
 import { downloadBlob } from "../../lib/canvas-capture";
 import { renderTeamResultImage, type ResultImageCard } from "../shared/team-result-image";
 import { cardRarityName } from "../shared/rarity-icon";
-import { songChartSummary } from "../ui/song-summary";
-import { songMissions } from "../../lib/catalog-filters";
-import { missionSummary } from "./workspace-state";
 import { accordion } from "../ui/accordion";
 import { collectionList } from "../ui/collection-view";
 import { skillTimeline } from "../shared/skill-timeline";
 import { ORDERS } from "../../lib/team-builder/engine/order-equivalence";
 import { icon } from "../ui/icon";
 import { tileMedia } from "../ui/tile";
+import { songPerformerAdornment } from "../shared/song-performer-adornment";
 import { sectionHeading } from "./catalog";
 import type { TeamBuilder } from "../team-builder";
 import type { BuildSettings } from "./types";
@@ -110,35 +108,40 @@ function conditionLines(host: TeamBuilder, hit: EngineHit): string[] {
   ];
 }
 
-export function resultSong(host: TeamBuilder, song: SongRef, gekiso = true): TemplateResult {
+export function resultSong(host: TeamBuilder, song: SongRef): TemplateResult {
   const catalog = host.catalog!;
-  catalog.loadSongMetadata([song.songId]);
-  const metadata = catalog.chartMetadata(song),
-    options = catalog.songOptions(song.songId, song.difficulty);
-  const seconds = metadata?.time;
-  const time = chartDuration(seconds);
-  const missions = songMissions(catalog.song(song.songId));
-  const task = missionSummary(missions);
+  const attribute = Number(catalog.song(song.songId).musicType);
+  const attributeIcon = catalog.attributeIcon(attribute);
   return html`
-    <div class="tb-result-song">
-      <div class="tb-result-song__image">${tileMedia({ ...options, marks: [] })}</div>
-      <div class="stack">
+    <div class="tb-result-song stack stack--tight">
+      <div class="row tb-result-song__heading">
+        ${
+          attributeIcon
+            ? html`
+                <img
+                  class="tb-result-song__attribute"
+                  src=${attributeIcon}
+                  width="24"
+                  height="24"
+                  alt=${catalog.attributeName(attribute)}
+                  title=${catalog.attributeName(attribute)}
+                  decoding="async"
+                />
+              `
+            : nothing
+        }
         <a
           href=${entityHref({ server: catalog.songIdentity(song.songId).server, locale: host.locale as Locale, kind: "songs", id: String(song.songId) })}
         >
           ${catalog.songTitle(song.songId)}
         </a>
-        <span>${catalog.difficultyLabel(song.songId, song.difficulty)} · ${time}</span>
-        <span>
-          ${catalog.attributeName(Number(catalog.song(song.songId).musicType))} · ${catalog.songArtist(song.songId)}
+      </div>
+      <div class="cluster tb-result-song__meta">
+        <span class="supporting-text">${catalog.difficultyLabel(song.songId, song.difficulty)}</span>
+        <span class="row tb-result-song__band">
+          ${songPerformerAdornment(catalog.songPerformer(song.songId))}
+          <span>${catalog.songArtist(song.songId)}</span>
         </span>
-        ${
-          gekiso && task
-            ? html`
-                <span>${task}</span>
-              `
-            : nothing
-        }
       </div>
     </div>
   `;
@@ -222,10 +225,8 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
       rankLabel = RANK_NAMES[top[0]] ?? top[0];
       out.push(
         chip(
-          s.goal === "score" ? `${rankLabel} ${host.t("reachOrders", "Orders reaching rank")}` : rankLabel,
-          s.goal === "score"
-            ? `${top[1]}/${Object.values(hit.score.ranks).reduce((sum, count) => sum + count, 0)}`
-            : `${format(host, (top[1] / Object.values(hit.score.ranks).reduce((sum, count) => sum + count, 0)) * 100, top[1] === Object.values(hit.score.ranks).reduce((sum, count) => sum + count, 0) ? 0 : 1)}%`,
+          s.goal === "score" ? `${rankLabel} ${host.t("rankReachRate", "Clear rate")}` : rankLabel,
+          `${format(host, (top[1] / Object.values(hit.score.ranks).reduce((sum, count) => sum + count, 0)) * 100, top[1] === Object.values(hit.score.ranks).reduce((sum, count) => sum + count, 0) ? 0 : 1)}%`,
           icon("workspace_premium", 16),
         ),
       );
@@ -262,10 +263,10 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
       out.push(chip(host.t("cpPerPlay", "Challenge points per play"), format(host, hit.event.challengePoints, 1)));
   }
   const placements =
-    s.goal === "gekiso"
-      ? (host.results?.results.find(
+    s.goal === "gekiso" && s.gekisoPlacementMode === "opponents"
+      ? host.results?.results.find(
           (result) => result.song?.songId === hit.song?.songId && result.song?.difficulty === hit.song?.difficulty,
-        )?.placements ?? (s.gekisoPlacementMode === "rank" ? [s.gekisoRank, s.gekisoRank, s.gekisoRank] : undefined))
+        )?.placements
       : undefined;
   if (placements)
     out.push(chip(host.t("gekisoPlacements", "Placements"), placements.join(" · "), icon("leaderboard", 16)));
@@ -288,9 +289,7 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
         : [
             host.t("power", "Power"),
             host.t("scoreRange", "Range"),
-            ...(s.goal === "score" && rankLabel
-              ? [`${rankLabel} ${host.t("reachOrders", "Orders reaching rank")}`]
-              : []),
+            ...(s.goal === "score" && rankLabel ? [`${rankLabel} ${host.t("rankReachRate", "Clear rate")}`] : []),
           ];
   return [
     ...selected.flatMap((label) => out.filter((item) => labels.get(item) === label)),
@@ -328,13 +327,7 @@ export function formation(host: TeamBuilder, hit: EngineHit): TemplateResult {
                 host.requestUpdate();
               }}
             >
-              ${memberOptions ? tileMedia(memberOptions) : nothing}${
-                index === 0
-                  ? html`
-                      <span class="tb-slot__leader">${host.t("leader", "Leader")}</span>
-                    `
-                  : nothing
-              }
+              ${memberOptions ? tileMedia(memberOptions) : nothing}
             </button>
             <button
               class="tb-slot__snap"
@@ -966,13 +959,12 @@ export function renderHit(
   const stale = options.stale ?? host.stale;
   const analysisHref = songMetaHref(host, hit);
   const main = primary(host, hit);
-  const catalog = host.catalog!;
   return html`
     <article
       class=${`card card--outlined tb-hit${index === 0 ? " is-best" : ""}`}
       aria-label=${`${options.subtitle ?? `#${index + 1}`} · ${main.label} ${main.value}`}
     >
-      ${hit.song ? resultSong(host, hit.song, resultSettings(host, hit).goal === "gekiso" || (resultSettings(host, hit).goal === "event" && resultSettings(host, hit).ptMode === "gekiso")) : nothing}
+      ${hit.song ? resultSong(host, hit.song) : nothing}
       <header class="tb-hit__header">
         <div class="tb-hit__main">
           <span class="tb-hit__label">
@@ -1078,14 +1070,6 @@ export function renderHit(
                       : nothing
                   }
                   <div class="cluster">${chips(host, hit)}</div>
-                  <div class="cluster">
-                    ${conditionLines(host, hit).map(
-                      (line) => html`
-                        <span class="tb-chip">${line}</span>
-                      `,
-                    )}
-                  </div>
-                  ${hit.song ? songChartSummary({ title: catalog.songTitle(hit.song.songId), difficulty: catalog.difficultyLabel(hit.song.songId, hit.song.difficulty), metrics: [{ label: host.common("media.chartPlayer.notes", "Notes"), value: host.master?.songs.get(hit.song.songId)?.difficulties.find((row) => row.difficulty === hit.song!.difficulty)?.noteCount ?? "—" }, ...["time", "bpm", "nps"].map((key) => ({ label: key === "time" ? host.common("common.fields.duration", "Duration") : key === "bpm" ? host.t("initialBpm", "Initial BPM") : host.t("averageNps", "Average NPS"), value: key === "time" ? chartDuration(catalog.chartMetadata(hit.song!)?.time) : (catalog.chartMetadata(hit.song!)?.[key === "bpm" ? "firstBpm" : key] ?? "—") }))] }) : nothing}
                   ${distribution(host, hit, hit.song)} ${powerNeeded(host, hit, hit.song)} ${skillOrderView(host, hit)}
                 </div>
               `
@@ -1206,19 +1190,21 @@ export function renderResults(host: TeamBuilder): TemplateResult {
       : results.results;
   const proven = groups.length > 0 && groups.every((result) => result.proven);
   const gap = proven ? null : improvementPercent(groups);
-  const stats = results.results.reduce((total, result) => total + result.stats.exact, 0);
   return html`
     <section class="tb-results stack">
       <div class="row row--wrap row--between tb-results__summary">
         <span class=${`tb-proof${proven ? " is-proven" : ""}`}>
-          ${icon(proven ? "verified" : "hourglass_bottom", 18)}${scoreProof(host, proven)}${
-            gap === null
-              ? nothing
-              : html`
-                  · ${host.t("improvementBound", "Up to {percent}% improvement", { percent: format(host, gap, 1) })}
-                `
-          }
+          ${icon(proven ? "verified" : "hourglass_bottom", 18)}${scoreProof(host, proven)}
         </span>
+        ${
+          gap === null
+            ? nothing
+            : html`
+                <span class="tb-results__meta">
+                  ${host.t("improvementBound", "Up to {percent}% improvement", { percent: format(host, gap, 1) })}
+                </span>
+              `
+        }
         ${
           multi
             ? html`
@@ -1293,54 +1279,6 @@ export function renderResults(host: TeamBuilder): TemplateResult {
                   </span>
                 </div>
               </section>
-            `
-          : nothing
-      }
-      <div class="tb-results__conditions">
-        ${
-          stale
-            ? html`
-                <strong role="status">${host.t("stale", "Conditions changed")}</strong>
-              `
-            : nothing
-        }
-        <span class="tb-chip">
-          ${resultSettings(host).scope === "theoretical" ? host.t("scopeAll", "All cards, full growth") : host.t("scopeBox", "My cards")}
-        </span>
-        <span class="tb-chip">
-          ${host.t("unknownPolicy", "Growth not entered")}: ${growthPolicyLabel(host, resultSettings(host))}
-        </span>
-        ${
-          multi
-            ? html`
-                <span class="tb-chip">
-                  ${host.t("chartCount", "{count} charts", { count: results.results.length })} ·
-                  ${host.t("perChartTeams", "Separate team per chart")}
-                </span>
-              `
-            : nothing
-        }
-      </div>
-      ${
-        stale
-          ? html`
-              <details class="tb-calculation-detail">
-                <summary>${host.t("originalConditions", "Original result conditions")}</summary>
-                <div class="stack">
-                  <span>
-                    ${stats > 0 ? host.t("resultMeta", "{ms} ms · {exact} teams simulated exactly", { ms: format(host, results.elapsedMs), exact: stats }) : host.t("resultElapsed", "{ms} ms", { ms: format(host, results.elapsedMs) })}
-                  </span>
-                  ${
-                    shown[0]
-                      ? conditionLines(host, shown[0]).map(
-                          (line) => html`
-                            <span>${line}</span>
-                          `,
-                        )
-                      : nothing
-                  }
-                </div>
-              </details>
             `
           : nothing
       }

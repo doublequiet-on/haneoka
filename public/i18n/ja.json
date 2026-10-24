@@ -2523,7 +2523,7 @@
       "automaticTeam": "自動編成",
       "manualAllCards": "全カード（未所持は最大育成）",
       "manualGrowth": "所持カード：入力した育成状態",
-      "reachOrders": "到達する順序",
+      "rankReachRate": "達成率",
       "perChartTeams": "譜面ごとに編成",
       "manualTeam": "手動で編成",
       "makeLeader": "リーダー",

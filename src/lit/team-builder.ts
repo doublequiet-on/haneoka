@@ -994,7 +994,10 @@ export class TeamBuilder extends LitElement {
     return issues;
   }
   async focusInput(field: string) {
-    await this.ensureConditionsVisible();
+    if (this.querySelector(`#${field}`)?.closest(".tb-results-column")) {
+      if (this.conditionsOpen) this.closeConditions();
+      await this.updateComplete;
+    } else await this.ensureConditionsVisible();
     const target = this.querySelector<HTMLElement>(`#${field}`);
     for (let parent = target?.parentElement; parent && parent !== this; parent = parent.parentElement)
       if (parent instanceof HTMLDetailsElement) parent.open = true;
