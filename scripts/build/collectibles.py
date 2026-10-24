@@ -59,7 +59,7 @@ def build_chat_customizations(data: Any) -> dict[str, Any]:
         entry["id"]: entry
         for resource_type, (_, table) in CHAT_CUSTOMIZATIONS.items()
         for row in data.rows(table)
-        if int(row.get("_id") or 0) > 0
+        if int(row.get("_id") or 0) > 0 and row.get("_iconAssetPath")
         for entry in [chat_customization(data, resource_type, row)]
     }}
 
