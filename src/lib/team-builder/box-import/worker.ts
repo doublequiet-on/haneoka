@@ -1,4 +1,5 @@
-import { BoxImportError, parseBoxFiles, parseBoxText } from "@haneoka/game-data-exporter";
+import { BoxImportError } from "@haneoka/game-data-exporter";
+import { parseBoxFiles, parseBoxText } from "./parser";
 self.onmessage = async (event: MessageEvent<{ id: string; files?: Blob[]; text?: string }>) => {
   const { id, files, text } = event.data;
   try {

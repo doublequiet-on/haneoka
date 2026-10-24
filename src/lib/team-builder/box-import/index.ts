@@ -1,4 +1,4 @@
-export { parseBoxFiles, parseBoxText } from "@haneoka/game-data-exporter";
+export { parseBoxFiles, parseBoxText } from "./parser";
 export { parseBoxLocally } from "./client";
 export { previewBoxImport } from "./preview";
 export { applyConfirmedBoxImport } from "./merge";
