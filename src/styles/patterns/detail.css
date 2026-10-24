@@ -141,13 +141,19 @@
   align-items: center;
 }
 .spec-list--split:has(> div) {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--spec-column-min, 150px)), 1fr));
   gap: 20px 24px;
 }
 .spec-list--split > div {
   grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   align-content: start;
+}
+.spec-list--rewards {
+  --spec-column-min: 300px;
+}
+.spec-list--rewards > div {
+  gap: 8px;
 }
 .spec-list__wide {
   grid-column: 1 / -1;

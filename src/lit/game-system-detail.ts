@@ -693,7 +693,7 @@ function renderLoginDays(c: Controller, rewards: Item[]) {
   return html`
     <section class="detail-section">
       ${renderDetailSectionHeading(c.label("dailyRewards", "Daily rewards"), "rewards", { count: days.size })}
-      <dl class="spec-list spec-list--split">
+      <dl class="spec-list spec-list--split spec-list--rewards">
         ${[...days.entries()]
           .sort((left, right) => left[0] - right[0])
           .map(
@@ -856,7 +856,7 @@ function renderPassLevels(c: Controller, levels: Item[]) {
   return html`
     <section class="detail-section">
       ${renderDetailSectionHeading(c.label("levelRewards", "Level rewards"), "rewards", { count: grouped.size })}
-      <dl class="spec-list spec-list--split">
+      <dl class="spec-list spec-list--split spec-list--rewards">
         ${[...grouped.entries()]
           .sort((left, right) => left[0] - right[0])
           .map(
