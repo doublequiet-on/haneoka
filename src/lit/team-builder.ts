@@ -215,6 +215,7 @@ export class TeamBuilder extends LitElement {
     facets: {},
   };
   filtersOpen = false;
+  boxQuickEntry = false;
   selection = new Set<string>();
   editing: { kind: "members" | "snaps"; cardId: number } | null = null;
   songPicker: SongPickerState | null = null;
@@ -393,6 +394,7 @@ export class TeamBuilder extends LitElement {
     this.restoreShell();
     clearAppBarActions(SYNC_OWNER);
     clearAppBarActions("team-builder-resources");
+    clearAppBarActions("team-builder-quick-entry");
     this.releaseSearch?.();
     this.releaseSearch = undefined;
     this.dataController?.abort();
@@ -722,6 +724,7 @@ export class TeamBuilder extends LitElement {
   setTab(tab: Tab) {
     if (this.tab === tab) return;
     this.saveScroll();
+    this.boxQuickEntry = false;
     if (["build", "pt", "song-comparison"].includes(tab)) this.lastTaskTab = tab;
     this.tab = tab;
     this.submitted = false;
@@ -1444,6 +1447,12 @@ export class TeamBuilder extends LitElement {
   /** Sync status lives in the app bar; the box search uses the app-bar search field. */
   private syncAppBar() {
     this.syncShell();
+    if (this.tab === "box") setAppBarActions("team-builder-quick-entry", html`
+      <button class="button button--tonal" type="button" aria-pressed=${this.boxQuickEntry} data-app-bar-keep
+        @click=${() => { this.boxQuickEntry = !this.boxQuickEntry; this.editing = null; this.requestUpdate(); }}>
+        ${this.boxQuickEntry ? this.t("finishQuickEntry", "Finish adding") : this.t("quickEntry", "Quick add")}
+      </button>`, this);
+    else clearAppBarActions("team-builder-quick-entry");
     setAppBarActions(
       "team-builder-resources",
       html`
@@ -1468,7 +1477,7 @@ export class TeamBuilder extends LitElement {
     setAppBarActions(
       SYNC_OWNER,
       html`
-        <span class=${`tb-sync tb-sync--${status}`} data-app-bar-keep>
+        <span class=${`tb-sync tb-sync--${status}`} ?data-app-bar-keep=${this.tab !== "box" || !signedOut}>
           ${
             signedOut
               ? html`
@@ -1583,7 +1592,7 @@ export class TeamBuilder extends LitElement {
                 ? renderSongComparisonTab(this)
                 : renderTeamsTab(this);
     return html`
-      <div class="team-builder tb">
+      <div class=${`team-builder tb${this.tab === "box" && this.boxQuickEntry ? " tb--quick-entry" : ""}`}>
         <nav class="cluster tb-resource-links" aria-label=${this.t("resources", "Resources")}>
           ${this.resourceLinks()}
         </nav>
