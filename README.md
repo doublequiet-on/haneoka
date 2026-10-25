@@ -30,7 +30,27 @@ artwork to toggle ownership while keeping the filtered list in place. Finish
 adding returns to growth editing; existing growth and search settings are preserved.
 
 The chart editor saves local revisions automatically and reopens the latest local
-project. Its Publish dialog selects audio and cover independently: upload your
+project. Select Slide node (`0`) and click a Hold or Guide body to insert a middle
+point; the selected connector's inspector also provides Insert middle node.
+Node types are visible, hidden and automatic; Fill nodes on grid remains the
+separate batch operation. Paused beat positions retain their exact input precision.
+Selected tail/head pairs can join slides; a selected middle point can split one.
+Mirror paste and duplicate commands share placement previews. Slide tools repeat
+a selected path and generate Trace notes along native curves; timing tools
+interpolate selected speed changes. Patterns support renaming and JSON file exchange.
+Keyboard shortcuts support multiple bindings per command, conflict checks and
+restoring defaults; tooltips follow the saved local bindings. Named waypoints
+save with the project and support exact beat editing and previous/next navigation.
+Editor statistics report authored objects and the native viewer COMBO count.
+The timing panel edits meter changes. Editor audio has separate music, note and
+metronome volumes, native sound sets and local settings. Editing keeps the current
+media clock; focused text drafts survive playback-follow updates.
+Game events edit skill triggers, FEVER sections and CALL rhythms. The timeline
+extends beyond audio, and playback speed accepts custom values from 0.25 to 4.
+Selected slide segments can be copied independently, with automatic endpoints
+resolved on the original curve. Files support SUS export and MMW binary project
+exchange; export diagnostics identify format limits before writing.
+Its Publish dialog selects audio and cover independently: upload your
 own files or reuse Our Notes and Bestdori song resources. Our Notes references
 retain their release identity. Reused audio and covers are copied into deduplicated
 community snapshots, so release cleanup does not break published charts. Uploaded audio is prepared as stereo PCM WAV;

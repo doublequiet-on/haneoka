@@ -1,3 +1,4 @@
+import { importMmws, isMmws } from "./mmws";
 import { importProjectJson } from "./project-json";
 import { ChartFormatError, isRecord, textInput, type ChartFormat, type ImportResult } from "./shared";
 import { importSs } from "./ss";
@@ -19,6 +20,7 @@ const parseJsonForDetection = (input: string | Uint8Array | unknown): unknown =>
 };
 
 export const detectChartFormat = (input: ChartInput): ChartFormat => {
+  if (isMmws(input)) return "mmws";
   if (typeof input === "string" || input instanceof Uint8Array) {
     const text = textInput(input).trimStart();
     if (
@@ -84,6 +86,7 @@ export const detectChartFormat = (input: ChartInput): ChartFormat => {
 /** Import any editable chart format. Sonolus LevelData is deployment-only and is intentionally not reversed. */
 export const importChart = (input: ChartInput, options: { bestdori?: BestdoriImportOptions } = {}): ImportResult => {
   const format = detectChartFormat(input);
+  if (format === "mmws" && input instanceof Uint8Array) return importMmws(input);
   if (format === "project") return importProjectJson(input);
   if (format === "ss") return importSs(input);
   if (format === "usc") return importUsc(input);

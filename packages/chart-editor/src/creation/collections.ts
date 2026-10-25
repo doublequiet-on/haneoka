@@ -1,5 +1,6 @@
-import { createProjectId, createEmptyProject, structuredCloneValue, type Project, type JsonValue } from "../model";
+import { createProjectId, createEmptyProject, resolveLinePointShape, structuredCloneValue, type Project, type JsonValue } from "../model";
 import { assertValidProject } from "../validation";
+import { mirrorSelectionNote } from "./selection";
 
 export const COLLECTIONS_KEY = "authoringCollections";
 export interface AuthorGroup {
@@ -348,6 +349,56 @@ export function copyAuthorSelection(project: Project, selection: ReadonlySet<str
     sourceExtensions: Object.fromEntries(Object.entries(project.extensions).filter(([key]) => key !== COLLECTIONS_KEY)),
   } as AuthorClipboard);
 }
+/** Copy selected connector spans, resolving new automatic endpoints against the source. */
+export function copyAuthorSegments(project: Project, selection: ReadonlySet<string>): AuthorClipboard {
+  const clipboard = copyAuthorSelection(project, selection);
+  clipboard.entities.lines = clipboard.entities.lines.flatMap(line => {
+    if (selection.has(line.id)) return [line];
+    const source = project.lines.find(item => item.id === line.id)!;
+    const selected = line.points.filter(point => selection.has(point.id));
+    if (selected.length < 2) return [];
+    for (const point of [selected[0]!, selected.at(-1)!]) {
+      if (point.lane !== "auto") continue;
+      const shape = resolveLinePointShape(source.points, source.points.findIndex(item => item.id === point.id));
+      point.lane = shape.lane; point.size = shape.size; delete point.autoSize;
+      delete point.resolvedLane; delete point.resolvedSize;
+    }
+    return [{ ...line, points: selected }];
+  });
+  const entities = clipboard.entities;
+  const ids = new Set([
+    ...entities.singles.map(note => note.id), ...entities.lines.flatMap(line => [line.id, ...line.points.map(point => point.id)]),
+    ...entities.tempos.map(event => event.id), ...entities.meters.map(event => event.id), ...entities.timeScales.map(event => event.id),
+  ]);
+  clipboard.sourceOrder = clipboard.sourceOrder.filter(id => ids.has(id));
+  for (const id of Object.keys(clipboard.collections.members)) if (!ids.has(id)) delete clipboard.collections.members[id];
+  assertAuthorClipboard(clipboard);
+  return clipboard;
+}
+export function mirrorAuthorClipboard(clipboard: AuthorClipboard): AuthorClipboard {
+  const result = structuredCloneValue(clipboard);
+  for (const note of [...result.entities.singles, ...result.entities.lines.flatMap(line => line.points)])
+    mirrorSelectionNote(note, result.laneBasis);
+  return result;
+}
+export function assertAuthorClipboard(clipboard: AuthorClipboard) {
+  if (clipboard.schema !== "haneoka.authoring.clipboard" || clipboard.version !== 1
+    || clipboard.resolution !== 480 || !Number.isFinite(clipboard.laneBasis) || clipboard.laneBasis <= 0
+    || !Array.isArray(clipboard.sourceOrder) || !record(clipboard.sourceExtensions))
+    throw new Error("invalid_authoring_clipboard");
+  const carrier = createEmptyProject();
+  carrier.laneBasis = clipboard.laneBasis;
+  carrier.singles = structuredCloneValue(clipboard.entities.singles);
+  carrier.lines = structuredCloneValue(clipboard.entities.lines);
+  carrier.timeScales = structuredCloneValue(clipboard.entities.timeScales);
+  carrier.tempos = structuredCloneValue(clipboard.entities.tempos);
+  if (!carrier.tempos.some(item => item.tick === 0))
+    carrier.tempos.push({ id: createProjectId("clipboard-origin"), tick: 0, bpm: 120 });
+  carrier.meters = clipboard.entities.meters.length ? structuredCloneValue(clipboard.entities.meters) : carrier.meters;
+  carrier.extensions[COLLECTIONS_KEY] = structuredCloneValue(clipboard.collections) as unknown as JsonValue;
+  assertValidProject(carrier);
+  readAuthorCollections(carrier);
+}
 export function pasteAuthorSelection(project: Project, clipboard: AuthorClipboard, tick: number, laneShift = 0) {
   if (
     clipboard.schema !== "haneoka.authoring.clipboard" ||
@@ -371,18 +422,7 @@ export function pasteAuthorSelection(project: Project, clipboard: AuthorClipboar
     }
     clipboard.laneBasis = project.laneBasis;
   }
-  const carrier = createEmptyProject();
-  carrier.laneBasis = clipboard.laneBasis;
-  carrier.singles = structuredCloneValue(clipboard.entities.singles);
-  carrier.lines = structuredCloneValue(clipboard.entities.lines);
-  carrier.timeScales = structuredCloneValue(clipboard.entities.timeScales);
-  carrier.tempos = structuredCloneValue(clipboard.entities.tempos);
-  if (!carrier.tempos.some((item) => item.tick === 0))
-    carrier.tempos.push({ id: createProjectId("clipboard-origin"), tick: 0, bpm: 120 });
-  carrier.meters = clipboard.entities.meters.length ? structuredCloneValue(clipboard.entities.meters) : carrier.meters;
-  carrier.extensions[COLLECTIONS_KEY] = structuredCloneValue(clipboard.collections) as unknown as JsonValue;
-  assertValidProject(carrier);
-  readAuthorCollections(carrier);
+  assertAuthorClipboard(clipboard);
   const result = structuredCloneValue(project),
     state = readAuthorCollections(project),
     idMap: Record<string, string> = Object.create(null),

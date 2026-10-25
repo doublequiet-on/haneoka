@@ -192,7 +192,7 @@ export const validateProject = (value: unknown): ProjectValidationResult => {
       if (
         !Number.isSafeInteger(meter.denominator) ||
         (meter.denominator as number) <= 0 ||
-        ((meter.denominator as number) & ((meter.denominator as number) - 1)) !== 0
+        2 ** Math.round(Math.log2(meter.denominator as number)) !== meter.denominator
       ) {
         add("error", "meter.denominator", `${path}.denominator`, "Meter denominator must be a positive power of two");
       }
@@ -319,6 +319,16 @@ export const validateProject = (value: unknown): ProjectValidationResult => {
       )
     ) {
       add("error", "markers.call", "$.markers.call", "Call markers must contain a tick and finite timing values");
+    }
+  }
+  if (value.waypoints !== undefined) {
+    if (!Array.isArray(value.waypoints)) add("error", "waypoints.type", "$.waypoints", "Waypoints must be an array");
+    else for (const [index, waypoint] of value.waypoints.entries()) {
+      const path = `$.waypoints[${index}]`;
+      if (!record(waypoint)) { add("error", "waypoint.type", path, "Waypoint must be an object"); continue; }
+      checkId(waypoint.id, `${path}.id`);
+      checkTick(waypoint.tick, `${path}.tick`);
+      if (typeof waypoint.name !== "string") add("error", "waypoint.name", `${path}.name`, "Waypoint name must be a string");
     }
   }
   if (!record(value.extensions)) add("error", "extensions.type", "$.extensions", "Extensions must be a JSON object");

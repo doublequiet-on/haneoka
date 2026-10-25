@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地谱面工程、音频、发布配置及备份 ZIP。
-// Output: CAS 本地历史与带音频／封面的可移植工程备份。
+// Output: CAS 本地历史与带音频／封面的可移植工程备份；MMW 原始字节保留 binary 编码标记。
 // Pos: [Map](../L2-2.md)；谱面创作的 IndexedDB 与文件持久化边界。
 // Effects/Dependencies: IndexedDB 连接生命周期、ZIP、哈希；导出云端封面时按当前账户读取素材，导入移除云端写入身份。
 import { zip, unzip } from "fflate";
@@ -30,7 +30,7 @@ export interface CreationDocument {
   updatedAt: number;
   original: Project;
   originalAudio: AudioRef;
-  source?: { name: string; text: string };
+  source?: { name: string; text: string; encoding?: "binary" };
 }
 const request = <T>(value: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {
@@ -309,7 +309,8 @@ export class CreationStore {
       (!source ||
         typeof source.name !== "string" ||
         typeof source.text !== "string" ||
-        source.text.length > 2 * 1024 * 1024)
+        source.text.length > 2 * 1024 * 1024 ||
+        (source.encoding !== undefined && source.encoding !== "binary"))
     )
       throw new Error("archive_invalid");
     const id = crypto.randomUUID(),

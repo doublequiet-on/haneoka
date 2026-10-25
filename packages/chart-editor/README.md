@@ -10,7 +10,8 @@ Supported formats:
 | Haneoka Project JSON | Yes | Yes |
 | SS JSON | Yes | Yes |
 | Universal Sekai Chart | Yes | Yes |
-| SUS | Yes | No |
+| SUS | Yes | Yes |
+| MMWS / CCMMWS / UCMMWS | Native-compatible features | CCMMWS v6 |
 | Sonolus `LevelData` | Detect only | No |
 
 ```ts
@@ -33,10 +34,47 @@ selection nudging, and generated line points share the same grid basis.
 preserving simultaneous notes and rejecting connector reordering across
 unselected points. `pasteAuthorSelection` accepts an optional horizontal
 lane shift; the host can stage its returned project before committing it.
+`copyAuthorSegments` copies spans of at least two selected connector points,
+resolving new automatic endpoints against the unchanged source.
+`mirrorAuthorClipboard` reflects lanes, flick directions and both easing edges
+while retaining automatic controls and clipboard provenance.
+`splitNoteLine` creates two connectors at one interior control; `joinNoteLines`
+joins selected tail/head pairs of the same kind, merging coincident boundaries.
+`repeatLinePattern` repeats a selected path of at least three controls forward
+inside its connector while keeping the authored tail. `lineTraces` samples a
+connector at the requested whole-note division, optionally keeping the source.
+The host may provide its native curve sampler. Both generators retain ownership
+and limit each transaction to 100,000 generated notes.
+`interpolateChartTimeScales` fills intervals between selected speed events on
+the whole-note grid, updating existing events at generated ticks.
+Structural edits retain group/layer ownership and source records. Different forced note
+speeds reject the join. The host may supply native resolved geometry for a split.
 `resizeChartSelectionByDelta` applies one width delta to the selection while
 keeping each note's opposite edge fixed and retaining width differences.
 Stage bounds limit the whole group; automatic points resolve from the unchanged
 source before resizing. The host provides its lane grid for boundary clamping.
+`insertLinePoint` inserts a single visible, hidden or automatic middle control,
+preserving endpoints, same-tick controls and connector group/layer ownership.
+`setLinePointMode` changes selected interior controls using their resolved source
+geometry. Automatic controls keep the authored interpolation marker.
+
+Project JSON optionally carries `waypoints` with stable IDs, names and integer
+ticks. Older projects without waypoints remain valid. These author navigation
+markers are separate from gameplay skill, fever and call events.
+
+SUS export retains integer ticks, BPM, measure-boundary meters, speed changes,
+skills and FEVER ranges. It rejects fractional SUS lane geometry and asymmetric
+easing instead of rounding. Conversion diagnostics identify omitted CALL rhythms,
+waypoints and resolved automatic controls.
+
+MMW project import accepts MMWS 1–4, CCMMWS 1–6 and UCMMWS 1–4.
+The adapter reads binary data directly and retains layers, waypoints, skills and
+FEVER. Incompatible gameplay extensions reject the import. CCMMWS v6 export
+retains fractional geometry using the format's float32 precision; its diagnostics
+identify unsupported groups and CALL rhythms. Referenced media paths are metadata
+and are never opened by the adapter. The binary layout follows the upstream
+[CC serializer](https://github.com/GuanYixuan/MikuMikuWorld4CC/blob/1abf551c05ec889bd51443536cf2e62068952f2e/MikuMikuWorld/Score.cpp)
+and [UC serializer](https://github.com/UntitledCharts/MikuMikuWorld4UC/blob/917f155b4343ebb4aa7dac0c482256e9b8db5a35/MikuMikuWorld/NativeScoreSerializer.cpp).
 
 The host provides the user interface, files, storage, and audio decoding.
 Conversion warnings must be shown to the user.

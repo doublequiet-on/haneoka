@@ -197,7 +197,7 @@ export class ChartCreationCollections extends LitElement {
                 }}></md-checkbox>
               ${this.t("force_speed")}
             </label>
-            <md-slider class="md3-slider" labeled aria-label=${`${item.name} ${this.c("chartPlayer.noteSpeed")}`}
+            <md-slider class="md3-slider" labeled aria-label=${`${item.name} ${this.c("media.chartPlayer.noteSpeed")}`}
               min="1" max="14" step="0.1" .value=${item.forceNoteSpeed ?? this.globalNoteSpeed}
               ?disabled=${this.busy || item.forceNoteSpeed === undefined || item.forceNoteSpeed < 1 || item.forceNoteSpeed > 14}
               @change=${async (event: Event) => {
@@ -209,7 +209,7 @@ export class ChartCreationCollections extends LitElement {
                 }
               }}></md-slider>
             <md-outlined-text-field type="number" min="1" max="14" step="0.1"
-              label=${`${item.name} ${this.c("chartPlayer.noteSpeed")}`} .value=${live(String(item.forceNoteSpeed ?? this.globalNoteSpeed))}
+              label=${`${item.name} ${this.c("media.chartPlayer.noteSpeed")}`} .value=${live(String(item.forceNoteSpeed ?? this.globalNoteSpeed))}
               ?disabled=${this.busy || item.forceNoteSpeed === undefined}
               @change=${(event: Event) => {
                 const field = event.target as HTMLInputElement, speed = Number(field.value);
