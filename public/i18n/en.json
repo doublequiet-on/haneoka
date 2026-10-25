@@ -3158,6 +3158,12 @@
       "enabled": "Enabled",
       "disabled": "Off",
       "creation": {
+        "paste_mirrored": "Paste mirrored",
+        "duplicate": "Duplicate",
+        "duplicate_mirrored": "Duplicate mirrored",
+        "join_lines": "Join slides",
+        "split_line": "Split slide",
+        "join_speed_conflict": "Slides have different note speeds",
         "copy": "Copy",
         "paste": "Paste",
         "zoom": "Visible time span",

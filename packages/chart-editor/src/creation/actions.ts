@@ -15,7 +15,7 @@ import {
 import { assertValidProject } from "../validation";
 import { snapTick } from "../timing";
 import { resizeChartSelection } from "./authoring";
-import { chartSelectionNodes, copyChartSelectionGroup, deleteChartSelectionGroup, moveChartSelection } from "./selection";
+import { chartSelectionNodes, copyChartSelectionGroup, deleteChartSelectionGroup, mirrorSelectionNote, moveChartSelection } from "./selection";
 import { assertEditedChartSpans } from "./span";
 import { COLLECTIONS_KEY, readAuthorCollections, reconcileAuthorEdit } from "./collections";
 
@@ -215,10 +215,7 @@ export function flipChartSelection(project: Project, ids: ReadonlySet<string>): 
   const result = structuredCloneValue(project);
   const flip = (note: SingleNote | LinePoint) => {
     if (!ids.has(note.id)) return;
-    if (typeof note.lane === "number") note.lane = result.laneBasis - note.lane - note.size;
-    if (note.direction === "left") note.direction = "right";
-    else if (note.direction === "right") note.direction = "left";
-    if ("ease" in note) note.ease = { left: note.ease.right, right: note.ease.left };
+    mirrorSelectionNote(note, result.laneBasis);
   };
   result.singles.forEach(flip);
   result.lines.forEach((line) => line.points.forEach(flip));

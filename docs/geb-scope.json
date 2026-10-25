@@ -209,6 +209,7 @@
     "src/lib/chart-creation/community.ts",
     "src/lib/chart-creation/storage.ts",
     "src/lib/chart-creation/patterns.ts",
+    "packages/chart-editor/src/creation/connectors.ts",
     "src/lit/chart-publication.ts",
     "src/lit/community-charts.ts",
     "src/lit/ui/song-actions.ts",

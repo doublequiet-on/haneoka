@@ -18,6 +18,16 @@ import {
 export function chartSelectionNodes(project: Project) {
   return authoredSpanNodes(project);
 }
+export function mirrorSelectionNote(note: SingleNote | LinePoint, laneBasis: number) {
+  if (typeof note.lane === "number") note.lane = laneBasis - note.lane - note.size;
+  if (note.direction === "left") note.direction = "right";
+  else if (note.direction === "right") note.direction = "left";
+  if ("ease" in note) {
+    note.ease = { left: note.ease.right, right: note.ease.left };
+    delete note.resolvedLane;
+    delete note.resolvedSize;
+  }
+}
 export function chartSelectionInBox(
   project: Project,
   tickA: number,

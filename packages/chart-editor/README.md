@@ -33,6 +33,12 @@ selection nudging, and generated line points share the same grid basis.
 preserving simultaneous notes and rejecting connector reordering across
 unselected points. `pasteAuthorSelection` accepts an optional horizontal
 lane shift; the host can stage its returned project before committing it.
+`mirrorAuthorClipboard` reflects lanes, flick directions and both easing edges
+while retaining automatic controls and clipboard provenance.
+`splitNoteLine` creates two connectors at one interior control; `joinNoteLines`
+joins selected tail/head pairs of the same kind, merging coincident boundaries.
+Both retain group/layer ownership and source records. Different forced note
+speeds reject the join. The host may supply native resolved geometry for a split.
 `resizeChartSelectionByDelta` applies one width delta to the selection while
 keeping each note's opposite edge fixed and retaining width differences.
 Stage bounds limit the whole group; automatic points resolve from the unchanged

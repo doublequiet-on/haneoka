@@ -3158,6 +3158,12 @@
       "enabled": "有効",
       "disabled": "オフ",
       "creation": {
+        "paste_mirrored": "左右反転して貼り付け",
+        "duplicate": "複製",
+        "duplicate_mirrored": "左右反転して複製",
+        "join_lines": "スライドを結合",
+        "split_line": "スライドを分割",
+        "join_speed_conflict": "スライドのノーツ速度が異なります",
         "copy": "コピー",
         "paste": "貼り付け",
         "zoom": "表示する時間",

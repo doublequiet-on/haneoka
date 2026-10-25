@@ -1,5 +1,6 @@
 import { createProjectId, createEmptyProject, structuredCloneValue, type Project, type JsonValue } from "../model";
 import { assertValidProject } from "../validation";
+import { mirrorSelectionNote } from "./selection";
 
 export const COLLECTIONS_KEY = "authoringCollections";
 export interface AuthorGroup {
@@ -347,6 +348,12 @@ export function copyAuthorSelection(project: Project, selection: ReadonlySet<str
     },
     sourceExtensions: Object.fromEntries(Object.entries(project.extensions).filter(([key]) => key !== COLLECTIONS_KEY)),
   } as AuthorClipboard);
+}
+export function mirrorAuthorClipboard(clipboard: AuthorClipboard): AuthorClipboard {
+  const result = structuredCloneValue(clipboard);
+  for (const note of [...result.entities.singles, ...result.entities.lines.flatMap(line => line.points)])
+    mirrorSelectionNote(note, result.laneBasis);
+  return result;
 }
 export function pasteAuthorSelection(project: Project, clipboard: AuthorClipboard, tick: number, laneShift = 0) {
   if (

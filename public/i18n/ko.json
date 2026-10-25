@@ -3158,6 +3158,12 @@
       "enabled": "사용",
       "disabled": "끔",
       "creation": {
+        "paste_mirrored": "좌우 반전하여 붙여넣기",
+        "duplicate": "복제",
+        "duplicate_mirrored": "좌우 반전하여 복제",
+        "join_lines": "슬라이드 연결",
+        "split_line": "슬라이드 분할",
+        "join_speed_conflict": "슬라이드의 노트 속도가 다릅니다",
         "copy": "복사",
         "paste": "붙여넣기",
         "zoom": "표시 시간 범위",

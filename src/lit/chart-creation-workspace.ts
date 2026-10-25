@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面编辑、滑条本体单点插入及节点模式、选区边缘批量调宽、精确 Tick 输入、图案复用与放置、节点时间压缩、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面编辑、滑条单点插入／合并／拆分、选区批量调宽、精确 Tick 输入、图案复用、镜像粘贴／复制、节点时间压缩、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
 // Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -48,7 +48,8 @@ import { loadCommunityChart, readChartCloudDraft, saveChartCloudDraft } from "..
 import { communityChartPath, type ChartMediaRef } from "../lib/chart-creation/community-types";
 import "./chart-creation-collections";
 import type { ChartCollectionScope } from "./chart-creation-collections";
-import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
+import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, mirrorAuthorClipboard, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
+import { joinNoteLines, lineJoinTargets, lineSplitTarget, splitNoteLine } from "../../packages/chart-editor/src/creation/connectors";
 import { applyAuthorCollectionOperation, type AuthorCollectionOperation } from "../../packages/chart-editor/src/creation/collections-history";
 import type { ChartCreationLibrary, PublicChartImport, CreationLibraryProvider } from "./chart-creation-library";
 import { isBestdoriServer } from "../../packages/bestdori/src/transport";
@@ -1200,7 +1201,8 @@ export class ChartCreationWorkspace extends LitElement {
     } else if (modifier && event.key.toLowerCase() === "c") {
       this.clipboard = copyAuthorSelection(this.chart, this.selectedIds);
       this.requestUpdate();
-    } else if (modifier && event.key.toLowerCase() === "v" && this.hasClipboard) this.pasteSelection();
+    } else if (modifier && event.key.toLowerCase() === "v" && this.hasClipboard) this.pasteSelection(event.shiftKey);
+    else if (modifier && event.key.toLowerCase() === "d") this.duplicateSelection(event.shiftKey);
     else if (!modifier && event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown"))
       this.nudgeSelection(event.key === "ArrowUp" ? 1 : -1);
     else if (event.key === "Delete" || event.key === "Backspace")
@@ -1966,8 +1968,29 @@ export class ChartCreationWorkspace extends LitElement {
     deleteChartSelectionGroup(candidate, this.selectedIds);
     if (this.commitProject(candidate)) this.clipboard = clipboard;
   }
-  private pasteSelection() {
-    if (this.clipboard) this.beginPaste(this.clipboard);
+  private pasteSelection(mirrored = false) {
+    if (this.clipboard) this.beginPaste(mirrored ? mirrorAuthorClipboard(this.clipboard) : this.clipboard);
+  }
+  private duplicateSelection(mirrored = false) {
+    if (!this.selectedIds.size || this.busy || this.gesture) return;
+    const clipboard = copyAuthorSelection(this.chart, this.selectedIds);
+    this.beginPaste(mirrored ? mirrorAuthorClipboard(clipboard) : clipboard);
+  }
+  private joinLines() {
+    try {
+      const result = joinNoteLines(this.chart, this.selectedIds);
+      if (this.commitProject(result.project)) this.setSelection(result.ids);
+    } catch (error) {
+      snackbar(this.t(error instanceof Error && error.message === "connector_speed_conflict"
+        ? "creation.join_speed_conflict" : "creation.invalid_edit"));
+    }
+  }
+  private splitLine() {
+    try {
+      const shape = this.selectionNodes().find(item => this.selectedIds.has(item.note.id));
+      const result = splitNoteLine(this.chart, this.selectedIds, shape);
+      if (this.commitProject(result.project)) this.setSelection(result.ids);
+    } catch { snackbar(this.t("creation.invalid_edit")); }
   }
   private beginPaste(clipboard: AuthorClipboard) {
     if (this.busy || !this.audio || this.stageMode !== "edit") return;
@@ -2663,6 +2686,12 @@ export class ChartCreationWorkspace extends LitElement {
                 >
                   ${this.t("creation.copy")}
                 </button>
+                <div class="chart-creation__actions">
+                  <button class="button button--text" type="button" ?disabled=${this.busy}
+                    @click=${() => this.duplicateSelection()}>${this.t("creation.duplicate")}</button>
+                  <button class="button button--text" type="button" ?disabled=${this.busy}
+                    @click=${() => this.duplicateSelection(true)}>${this.t("creation.duplicate_mirrored")}</button>
+                </div>
                 <button
                   class="button"
                   ?disabled=${this.busy}
@@ -2688,6 +2717,12 @@ export class ChartCreationWorkspace extends LitElement {
                 ${this.selectedConnectorIds(chart).size ? html`<button class="button button--text" type="button" ?disabled=${this.busy} @click=${() => this.selectConnectors()}>${this.t("patterns.select_line")}</button>` : nothing}
                 ${this.selectedConnectorIds(chart).size ? html`<button class="button button--tonal" type="button" ?disabled=${this.busy}
                   @click=${() => this.activateNodeTool()}>${icon("add", 20)}${this.t("creation.insert_node")}</button>` : nothing}
+                ${this.selectedConnectorIds(chart).size ? html`<div class="chart-creation__actions">
+                  <button class="button button--text" type="button" ?disabled=${this.busy || !lineJoinTargets(chart, this.selectedIds)}
+                    @click=${() => this.joinLines()}>${this.t("creation.join_lines")}</button>
+                  <button class="button button--text" type="button" ?disabled=${this.busy || !lineSplitTarget(chart, this.selectedIds)}
+                    @click=${() => this.splitLine()}>${this.t("creation.split_line")}</button>
+                </div>` : nothing}
                 <div class="chart-studio__tick-actions" role="group" aria-label=${this.t("patterns.compress")}>
                   ${(["first", "last"] as const).map(anchor => html`<button class="button button--text" type="button"
                     ?disabled=${this.busy || new Set(this.selectionNodes(chart).filter(item => this.selectedIds.has(item.note.id)).map(item => item.note.tick)).size < 2}
@@ -3404,6 +3439,9 @@ export class ChartCreationWorkspace extends LitElement {
             >
               ${this.t("creation.paste")}
             </button>
+            <button class="button button--text" type="button"
+              ?disabled=${this.busy || !this.hasClipboard || !this.audio}
+              @click=${() => this.pasteSelection(true)}>${this.t("creation.paste_mirrored")}</button>
           </div>
           <button
             class="icon-button chart-studio__drawer-button"

@@ -3158,6 +3158,12 @@
       "enabled": "启用",
       "disabled": "关闭",
       "creation": {
+        "paste_mirrored": "镜像粘贴",
+        "duplicate": "复制选区",
+        "duplicate_mirrored": "镜像复制选区",
+        "join_lines": "合并滑条",
+        "split_line": "拆分滑条",
+        "join_speed_conflict": "滑条的音符速度不同",
         "copy": "复制",
         "paste": "粘贴",
         "zoom": "可见时间范围",
