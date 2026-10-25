@@ -3158,6 +3158,13 @@
       "enabled": "Enabled",
       "disabled": "Off",
       "creation": {
+        "select_all_speeds": "Select all speeds",
+        "interpolate_speeds": "Interpolate speeds",
+        "line_tools": "Slide tools",
+        "repeat_nodes": "Repeat middle nodes",
+        "generate_traces": "Generate traces",
+        "convert_traces": "Convert to traces",
+        "generation_limit": "Reduce the subdivision or selection",
         "paste_mirrored": "Paste mirrored",
         "duplicate": "Duplicate",
         "duplicate_mirrored": "Duplicate mirrored",
@@ -3264,6 +3271,8 @@
         "export_noteBudget": "At most 25000 source notes"
       },
       "patterns": {
+        "import": "Import pattern",
+        "rename": "Rename pattern",
         "title": "Patterns",
         "saved": "Saved patterns",
         "name": "Pattern name",

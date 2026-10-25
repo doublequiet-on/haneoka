@@ -3158,6 +3158,13 @@
       "enabled": "啟用",
       "disabled": "關閉",
       "creation": {
+        "select_all_speeds": "選擇全部變速",
+        "interpolate_speeds": "變速插值",
+        "line_tools": "滑條工具",
+        "repeat_nodes": "重複中間節點",
+        "generate_traces": "產生 Trace",
+        "convert_traces": "轉換為 Trace",
+        "generation_limit": "請降低細分或縮小選區",
         "paste_mirrored": "鏡像貼上",
         "duplicate": "複製選區",
         "duplicate_mirrored": "鏡像複製選區",
@@ -3264,6 +3271,8 @@
         "export_noteBudget": "來源音符不能超過25000個"
       },
       "patterns": {
+        "import": "匯入圖案",
+        "rename": "重新命名圖案",
         "title": "圖案",
         "saved": "已儲存圖案",
         "name": "圖案名稱",

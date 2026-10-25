@@ -37,7 +37,14 @@ lane shift; the host can stage its returned project before committing it.
 while retaining automatic controls and clipboard provenance.
 `splitNoteLine` creates two connectors at one interior control; `joinNoteLines`
 joins selected tail/head pairs of the same kind, merging coincident boundaries.
-Both retain group/layer ownership and source records. Different forced note
+`repeatLinePattern` repeats a selected path of at least three controls forward
+inside its connector while keeping the authored tail. `lineTraces` samples a
+connector at the requested whole-note division, optionally keeping the source.
+The host may provide its native curve sampler. Both generators retain ownership
+and limit each transaction to 100,000 generated notes.
+`interpolateChartTimeScales` fills intervals between selected speed events on
+the whole-note grid, updating existing events at generated ticks.
+Structural edits retain group/layer ownership and source records. Different forced note
 speeds reject the join. The host may supply native resolved geometry for a split.
 `resizeChartSelectionByDelta` applies one width delta to the selection while
 keeping each note's opposite edge fixed and retaining width differences.

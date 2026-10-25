@@ -3158,6 +3158,13 @@
       "enabled": "有効",
       "disabled": "オフ",
       "creation": {
+        "select_all_speeds": "速度変化をすべて選択",
+        "interpolate_speeds": "速度を補間",
+        "line_tools": "スライド操作",
+        "repeat_nodes": "中継点を繰り返す",
+        "generate_traces": "トレースを生成",
+        "convert_traces": "トレースに変換",
+        "generation_limit": "分割数または選択範囲を減らしてください",
         "paste_mirrored": "左右反転して貼り付け",
         "duplicate": "複製",
         "duplicate_mirrored": "左右反転して複製",
@@ -3264,6 +3271,8 @@
         "export_noteBudget": "元のノーツは25000個まで"
       },
       "patterns": {
+        "import": "パターンを読み込む",
+        "rename": "パターン名を変更",
         "title": "パターン",
         "saved": "保存済みパターン",
         "name": "パターン名",

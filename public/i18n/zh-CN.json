@@ -3158,6 +3158,13 @@
       "enabled": "启用",
       "disabled": "关闭",
       "creation": {
+        "select_all_speeds": "选择全部变速",
+        "interpolate_speeds": "变速插值",
+        "line_tools": "滑条工具",
+        "repeat_nodes": "重复中间节点",
+        "generate_traces": "生成 Trace",
+        "convert_traces": "转换为 Trace",
+        "generation_limit": "请降低细分或缩小选区",
         "paste_mirrored": "镜像粘贴",
         "duplicate": "复制选区",
         "duplicate_mirrored": "镜像复制选区",
@@ -3264,6 +3271,8 @@
         "export_noteBudget": "来源音符不能超过25000个"
       },
       "patterns": {
+        "import": "导入图案",
+        "rename": "重命名图案",
         "title": "图案",
         "saved": "已保存图案",
         "name": "图案名称",

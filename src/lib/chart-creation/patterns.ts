@@ -1,15 +1,26 @@
 // L3 — GEB
 // Input: 已选谱面的完整剪贴板与图案名称。
-// Output: 跨工程的本地图案保存、列表和删除。
+// Output: 跨工程图案保存／重命名、列表、删除及可移植 JSON 导入导出。
 // Pos: [Map](../L2-2.md)；编辑器图案库持久化。
 // Effects/Dependencies: 独立 IndexedDB；不升级工程数据库，不保存音频或账户凭据。
-import type { AuthorClipboard } from "../../../packages/chart-editor/src/creation/collections";
+import { assertAuthorClipboard, type AuthorClipboard } from "../../../packages/chart-editor/src/creation/collections";
 
 export interface ChartPattern {
   id: string;
   name: string;
   updatedAt: number;
   clipboard: AuthorClipboard;
+}
+export function parseChartPattern(text: string): ChartPattern {
+  const value = JSON.parse(text);
+  if (value?.schema !== "haneoka.chart-pattern" || value.version !== 1
+    || typeof value.name !== "string" || !value.name.trim() || value.name.length > 80)
+    throw new Error("invalid_chart_pattern");
+  assertAuthorClipboard(value.clipboard);
+  return { id: crypto.randomUUID(), name: value.name.trim(), updatedAt: Date.now(), clipboard: value.clipboard };
+}
+export function serializeChartPattern(pattern: ChartPattern): string {
+  return JSON.stringify({ schema: "haneoka.chart-pattern", version: 1, name: pattern.name, clipboard: pattern.clipboard }, null, 2);
 }
 export class ChartPatternStore {
   private database?: Promise<IDBDatabase>;

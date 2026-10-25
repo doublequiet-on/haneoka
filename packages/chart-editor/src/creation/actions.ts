@@ -274,3 +274,33 @@ export function generateLinePoints(project: Project, lineIds: ReadonlySet<string
   assertValidProject(result);
   return { project: result, created };
 }
+
+export function interpolateChartTimeScales(project: Project, ids: ReadonlySet<string>, subdivision: number) {
+  if (!Number.isSafeInteger(subdivision) || subdivision < 1 || subdivision > project.resolution * 4)
+    throw new Error("invalid_division");
+  const selected = project.timeScales.filter(event => ids.has(event.id)).sort((a, b) => a.tick - b.tick);
+  if (selected.length < 2) throw new Error("invalid_speed_selection");
+  if ((selected.at(-1)!.tick - selected[0]!.tick) * subdivision / (project.resolution * 4) > 100_000)
+    throw new Error("too_many_generated_notes");
+  const result = structuredCloneValue(project), byTick = new Map(result.timeScales.map(event => [event.tick, event]));
+  for (let index = 1; index < selected.length; index++) {
+    const first = selected[index - 1]!, last = selected[index]!;
+    if (first.tick === last.tick) throw new Error("invalid_speed_selection");
+    for (let unit = Math.floor(first.tick / (project.resolution * 4) * subdivision) + 1; ; unit++) {
+      const tick = Math.round(unit * project.resolution * 4 / subdivision);
+      if (tick >= last.tick) break;
+      if (tick <= first.tick) continue;
+      const scale = first.scale + (last.scale - first.scale) * ((tick - first.tick) / (last.tick - first.tick));
+      const existing = byTick.get(tick);
+      if (existing) existing.scale = scale;
+      else {
+        const event = { id: createProjectId("speed"), tick, scale };
+        result.timeScales.push(event);
+        byTick.set(tick, event);
+      }
+    }
+  }
+  result.timeScales.sort((a, b) => a.tick - b.tick);
+  assertValidProject(result);
+  return result;
+}

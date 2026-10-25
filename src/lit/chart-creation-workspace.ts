@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面编辑、滑条单点插入／合并／拆分、选区批量调宽、精确 Tick 输入、图案复用、镜像粘贴／复制、节点时间压缩、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面编辑、滑条单点插入／合并／拆分、选区批量调宽、精确 Tick 输入、图案文件交换、镜像粘贴／复制、节点重复与 Trace 生成、变速插值、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
 // Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -24,11 +24,12 @@ import {
   type Project,
   type SingleNote,
   type LinePoint,
+  type NoteLine,
 } from "../../packages/chart-editor/src/model";
 import { TempoMap, snapTick, parseBeatTick, type SnapMode } from "../../packages/chart-editor/src/timing";
 import { importChart } from "../../packages/chart-editor/src/formats/detect";
 import { assertValidProject } from "../../packages/chart-editor/src/validation";
-import { ChartPatternStore, type ChartPattern } from "../lib/chart-creation/patterns";
+import { ChartPatternStore, parseChartPattern, serializeChartPattern, type ChartPattern } from "../lib/chart-creation/patterns";
 import { CreationStore, type CreationDocument, type CreationRevision } from "../lib/chart-creation/storage";
 import { createExampleAudio, decodeCreationAudio, type CreationAudio } from "../lib/chart-creation/audio";
 import { MediaClock } from "@haneoka/cassiopeia-host-web";
@@ -49,7 +50,7 @@ import { communityChartPath, type ChartMediaRef } from "../lib/chart-creation/co
 import "./chart-creation-collections";
 import type { ChartCollectionScope } from "./chart-creation-collections";
 import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, mirrorAuthorClipboard, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
-import { joinNoteLines, lineJoinTargets, lineSplitTarget, splitNoteLine } from "../../packages/chart-editor/src/creation/connectors";
+import { joinNoteLines, lineJoinTargets, linePatternTarget, lineSplitTarget, lineTraces, repeatLinePattern, splitNoteLine } from "../../packages/chart-editor/src/creation/connectors";
 import { applyAuthorCollectionOperation, type AuthorCollectionOperation } from "../../packages/chart-editor/src/creation/collections-history";
 import type { ChartCreationLibrary, PublicChartImport, CreationLibraryProvider } from "./chart-creation-library";
 import { isBestdoriServer } from "../../packages/bestdori/src/transport";
@@ -74,6 +75,7 @@ import {
   flipChartSelection,
   generateLinePoints,
   insertLinePoint,
+  interpolateChartTimeScales,
   nudgeChartSelectionOnGrid,
   removableLinePointIds,
   removeLineControlPoints,
@@ -333,6 +335,8 @@ export class ChartCreationWorkspace extends LitElement {
   private snap = 16;
   private secondsPerScreen = 4;
   private rate = 1;
+  private selectedSpeeds = new Set<string>();
+  private lineToolsOpen = false;
   private exportFormat: ExportFormat = "project";
   private clipboard?: AuthorClipboard;
   private get hasClipboard() { return Boolean(this.clipboard && (this.clipboard.entities.singles.length || this.clipboard.entities.lines.length || this.clipboard.entities.tempos.length || this.clipboard.entities.meters.length || this.clipboard.entities.timeScales.length || this.clipboard.collections.groups.length || this.clipboard.collections.layers.length)); }
@@ -686,6 +690,7 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.viewProjectId !== this.projectId) {
       this.viewProjectId = this.projectId;
       this.preciseSeekSeconds = undefined;
+      this.selectedSpeeds.clear();
       this.laneStart = (this.chart.laneBasis - this.laneSpan()) / 2;
     }
     this.laneStart = this.clampLaneStart(this.laneStart);
@@ -2105,6 +2110,39 @@ export class ChartCreationWorkspace extends LitElement {
     } catch { this.patternError = this.t("patterns.storage_failed"); }
     finally { this.patternBusy = false; }
   }
+  private async renamePattern() {
+    const pattern = this.patterns.find(pattern => pattern.id === this.selectedPattern), name = this.patternName.trim();
+    if (!pattern || !name || this.patternBusy) return;
+    this.patternBusy = true;
+    this.patternError = "";
+    try {
+      await this.patternStore.save({ ...pattern, name, updatedAt: Date.now() });
+      this.patterns = await this.patternStore.list();
+      this.patternName = "";
+    } catch { this.patternError = this.t("patterns.storage_failed"); }
+    finally { this.patternBusy = false; }
+  }
+  private async importPattern(event: Event) {
+    const input = event.target as HTMLInputElement, file = input.files?.[0];
+    input.value = "";
+    if (!file || this.patternBusy) return;
+    this.patternBusy = true;
+    this.patternError = "";
+    try {
+      if (file.size > 4 * 1024 * 1024) throw new Error("pattern_size");
+      const pattern = parseChartPattern(await file.text());
+      await this.patternStore.save(pattern);
+      this.patterns = await this.patternStore.list();
+      this.selectedPattern = pattern.id;
+      this.patternName = "";
+    } catch { this.patternError = this.t("patterns.invalid_pattern"); }
+    finally { this.patternBusy = false; }
+  }
+  private exportPattern() {
+    const pattern = this.patterns.find(pattern => pattern.id === this.selectedPattern);
+    if (!pattern) return;
+    downloadBlob(new Blob([serializeChartPattern(pattern)], { type: "application/json" }), "chart-pattern.json");
+  }
   private applyPattern() {
     let clipboard = this.patterns.find(pattern => pattern.id === this.selectedPattern)?.clipboard;
     if (this.selectedPattern === "one-tick-flick") {
@@ -2134,11 +2172,16 @@ export class ChartCreationWorkspace extends LitElement {
         <div class="cluster">
           <button class="button button--filled" type="button" ?disabled=${this.patternBusy || !this.audio} @click=${() => this.applyPattern()}>${this.t("patterns.apply")}</button>
           <button class="button button--text" type="button" ?disabled=${this.patternBusy || this.selectedPattern === "one-tick-flick"} @click=${() => void this.deletePattern()}>${this.t("patterns.delete")}</button>
+          <button class="button button--text" type="button" ?disabled=${this.patternBusy || this.selectedPattern === "one-tick-flick"} @click=${() => this.exportPattern()}>${this.c("export")}</button>
+          <button class="button button--text" type="button" ?disabled=${this.patternBusy} @click=${() => this.pick("[data-pattern-import]")}>${this.t("patterns.import")}</button>
+          <input type="file" accept=".json,application/json" hidden data-pattern-import @change=${(event: Event) => void this.importPattern(event)}>
         </div>
         <md-outlined-text-field label=${this.t("patterns.name")} .value=${live(this.patternName)} maxlength="80"
           ?disabled=${this.patternBusy} .error=${this.patternError === this.t("patterns.name_required")}
           @input=${(event: Event) => { this.patternName = (event.target as HTMLInputElement).value; this.patternError = ""; }}></md-outlined-text-field>
         <button class="button button--tonal" type="button" ?disabled=${this.patternBusy || !this.audio || !this.selectedIds.size} @click=${() => void this.savePattern()}>${this.t("patterns.save_selection")}</button>
+        <button class="button button--text" type="button" ?disabled=${this.patternBusy || this.selectedPattern === "one-tick-flick" || !this.patternName.trim()}
+          @click=${() => void this.renamePattern()}>${this.t("patterns.rename")}</button>
         <output class="chart-studio__pattern-status" role="status">${this.patternError}</output>
       </div>
       <footer class="dialog__actions"><button class="button button--text" type="button"
@@ -2173,25 +2216,56 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.commitProject(result.project)) this.setSelection(result.created);
     this.requestUpdate();
   }
+  private repeatNodes() {
+    try {
+      const result = repeatLinePattern(this.chart, this.selectedIds);
+      if (this.commitProject(result.project)) this.setSelection(result.ids);
+    } catch (error) { this.lineToolError(error); }
+  }
+  private createLineTraces(keepLines: boolean) {
+    try {
+      const result = lineTraces(this.chart, this.selectedConnectorIds(), this.snap, { keepLines, sample: this.lineSampler(this.chart) });
+      if (this.commitProject(result.project)) this.setSelection(result.ids);
+    } catch (error) { this.lineToolError(error); }
+  }
+  private lineToolError(error: unknown) {
+    snackbar(this.t(error instanceof Error && error.message === "too_many_generated_notes"
+      ? "creation.generation_limit" : "creation.invalid_edit"));
+  }
+  private interpolateSpeeds() {
+    try { this.commitProject(interpolateChartTimeScales(this.chart, this.selectedSpeeds, this.snap)); }
+    catch (error) { this.lineToolError(error); }
+  }
+  private lineSampler(project: Project) {
+    const projection = this.flatProjection(project), map = this.map();
+    const nativeNotes = new Map(projection?.chart.notes.map(note => [note.id, note]));
+    const lines = new Map(project.lines.map(line => {
+      const ids = projection?.sourceMap.linesForCanonical(line.id);
+      const native = projection?.chart.lines.find(native => ids?.includes(native.id));
+      const points = native?.noteIds.map(id => nativeNotes.get(id))
+        .filter((note): note is ChartNote => !!note && note.indexInLine !== null).sort((a, b) => a.timeMs - b.timeMs);
+      return [line.id, points] as const;
+    }));
+    return (line: NoteLine, tick: number) => {
+      const shape = sampleLineSpan(line, tick);
+      if (!shape) return;
+      const points = lines.get(line.id), at = (map.tickToSeconds(tick) - project.audioOffset) * 1000;
+      const index = points?.findIndex(point => point.timeMs >= at) ?? -1;
+      if (points && index >= 0) {
+        const head = points[Math.max(0, index - 1)]!, tail = points[index]!;
+        const resolved = head === tail || head.timeMs === tail.timeMs ? { pos: tail.pos, size: tail.size } : interpolateNoteLine(head, tail, at);
+        return { lane: resolved.pos / 24 * project.laneBasis, size: resolved.size / 24 * project.laneBasis };
+      }
+      return shape;
+    };
+  }
   private nodeTarget(tick: number, lane?: number, tolerance = 0) {
     const project = this.chart, selected = this.selectedConnectorIds();
-    const display = this.editingProject(project), projection = this.flatProjection(display);
-    const nativeNotes = projection ? new Map(projection.chart.notes.map(note => [note.id, note])) : undefined;
-    const at = (this.map().tickToSeconds(tick) - project.audioOffset) * 1000;
+    const display = this.editingProject(project), sample = this.lineSampler(display);
     const candidates: { lineId: string; lane: number; size: number }[] = [];
     for (const line of display.lines) {
-      let shape = sampleLineSpan(line, tick);
+      const shape = sample(line, tick);
       if (!shape || lane === undefined && !selected.has(line.id)) continue;
-      if (projection && nativeNotes) {
-        const nativeLine = projection.chart.lines.find(native => projection.sourceMap.linesForCanonical(line.id).includes(native.id));
-        const points = nativeLine?.noteIds.map(id => nativeNotes.get(id)).filter((note): note is ChartNote => !!note && note.indexInLine !== null).sort((a, b) => a.timeMs - b.timeMs);
-        const index = points?.findIndex(point => point.timeMs >= at) ?? -1;
-        if (points && index >= 0) {
-          const head = points[Math.max(0, index - 1)]!, tail = points[index]!;
-          const resolved = head === tail || head.timeMs === tail.timeMs ? { pos: tail.pos, size: tail.size } : interpolateNoteLine(head, tail, at);
-          shape = { lane: resolved.pos / 24 * project.laneBasis, size: resolved.size / 24 * project.laneBasis };
-        }
-      }
       if (lane !== undefined && (lane < shape.lane - tolerance || lane > shape.lane + shape.size + tolerance)) continue;
       candidates.push({ lineId: line.id, ...shape });
     }
@@ -2723,6 +2797,15 @@ export class ChartCreationWorkspace extends LitElement {
                   <button class="button button--text" type="button" ?disabled=${this.busy || !lineSplitTarget(chart, this.selectedIds)}
                     @click=${() => this.splitLine()}>${this.t("creation.split_line")}</button>
                 </div>` : nothing}
+                ${this.selectedConnectorIds(chart).size ? accordion({ id: "chart-line-tools", label: this.t("creation.line_tools"),
+                  expanded: this.lineToolsOpen, onExpandedChange: expanded => { this.lineToolsOpen = expanded; this.requestUpdate(); }, content: html`<div class="chart-creation__form">
+                  <button class="button button--text" type="button" ?disabled=${this.busy || !linePatternTarget(chart, this.selectedIds)}
+                    @click=${() => this.repeatNodes()}>${this.t("creation.repeat_nodes")}</button>
+                  <button class="button button--text" type="button" ?disabled=${this.busy}
+                    @click=${() => this.createLineTraces(true)}>${this.t("creation.generate_traces")}</button>
+                  <button class="button button--text" type="button" ?disabled=${this.busy}
+                    @click=${() => this.createLineTraces(false)}>${this.t("creation.convert_traces")}</button>
+                </div>` }) : nothing}
                 <div class="chart-studio__tick-actions" role="group" aria-label=${this.t("patterns.compress")}>
                   ${(["first", "last"] as const).map(anchor => html`<button class="button button--text" type="button"
                     ?disabled=${this.busy || new Set(this.selectionNodes(chart).filter(item => this.selectedIds.has(item.note.id)).map(item => item.note.tick)).size < 2}
@@ -3048,6 +3131,12 @@ export class ChartCreationWorkspace extends LitElement {
         )}
       </section>
       <section aria-label=${this.t("timeScale")}>
+        <div class="chart-creation__actions">
+          <button class="button button--text" type="button" ?disabled=${this.busy || !chart.timeScales.length}
+            @click=${() => { this.selectedSpeeds = new Set(chart.timeScales.map(event => event.id)); this.requestUpdate(); }}>${this.t("creation.select_all_speeds")}</button>
+          <button class="button button--text" type="button" ?disabled=${this.busy || chart.timeScales.filter(event => this.selectedSpeeds.has(event.id)).length < 2}
+            @click=${() => this.interpolateSpeeds()}>${this.t("creation.interpolate_speeds")}</button>
+        </div>
         <button
           class="button"
           ?disabled=${this.busy || !this.audio}
@@ -3064,6 +3153,14 @@ export class ChartCreationWorkspace extends LitElement {
         ${chart.timeScales.map(
           (scale) => html`
             <div class="chart-creation__form">
+              <label class="cluster">
+                <md-checkbox .checked=${this.selectedSpeeds.has(scale.id)} ?disabled=${this.busy}
+                  @change=${(event: Event) => {
+                    if ((event.target as HTMLInputElement).checked) this.selectedSpeeds.add(scale.id);
+                    else this.selectedSpeeds.delete(scale.id);
+                    this.requestUpdate();
+                  }}></md-checkbox>${this.t("selection")} · ${scale.tick / chart.resolution}
+              </label>
               ${this.beatField(scale.tick, tick => this.edit(project => {
                 project.timeScales.find(event => event.id === scale.id)!.tick = tick;
                 project.timeScales.sort((a, b) => a.tick - b.tick);

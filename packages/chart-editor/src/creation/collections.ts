@@ -355,6 +355,24 @@ export function mirrorAuthorClipboard(clipboard: AuthorClipboard): AuthorClipboa
     mirrorSelectionNote(note, result.laneBasis);
   return result;
 }
+export function assertAuthorClipboard(clipboard: AuthorClipboard) {
+  if (clipboard.schema !== "haneoka.authoring.clipboard" || clipboard.version !== 1
+    || clipboard.resolution !== 480 || !Number.isFinite(clipboard.laneBasis) || clipboard.laneBasis <= 0
+    || !Array.isArray(clipboard.sourceOrder) || !record(clipboard.sourceExtensions))
+    throw new Error("invalid_authoring_clipboard");
+  const carrier = createEmptyProject();
+  carrier.laneBasis = clipboard.laneBasis;
+  carrier.singles = structuredCloneValue(clipboard.entities.singles);
+  carrier.lines = structuredCloneValue(clipboard.entities.lines);
+  carrier.timeScales = structuredCloneValue(clipboard.entities.timeScales);
+  carrier.tempos = structuredCloneValue(clipboard.entities.tempos);
+  if (!carrier.tempos.some(item => item.tick === 0))
+    carrier.tempos.push({ id: createProjectId("clipboard-origin"), tick: 0, bpm: 120 });
+  carrier.meters = clipboard.entities.meters.length ? structuredCloneValue(clipboard.entities.meters) : carrier.meters;
+  carrier.extensions[COLLECTIONS_KEY] = structuredCloneValue(clipboard.collections) as unknown as JsonValue;
+  assertValidProject(carrier);
+  readAuthorCollections(carrier);
+}
 export function pasteAuthorSelection(project: Project, clipboard: AuthorClipboard, tick: number, laneShift = 0) {
   if (
     clipboard.schema !== "haneoka.authoring.clipboard" ||
@@ -378,18 +396,7 @@ export function pasteAuthorSelection(project: Project, clipboard: AuthorClipboar
     }
     clipboard.laneBasis = project.laneBasis;
   }
-  const carrier = createEmptyProject();
-  carrier.laneBasis = clipboard.laneBasis;
-  carrier.singles = structuredCloneValue(clipboard.entities.singles);
-  carrier.lines = structuredCloneValue(clipboard.entities.lines);
-  carrier.timeScales = structuredCloneValue(clipboard.entities.timeScales);
-  carrier.tempos = structuredCloneValue(clipboard.entities.tempos);
-  if (!carrier.tempos.some((item) => item.tick === 0))
-    carrier.tempos.push({ id: createProjectId("clipboard-origin"), tick: 0, bpm: 120 });
-  carrier.meters = clipboard.entities.meters.length ? structuredCloneValue(clipboard.entities.meters) : carrier.meters;
-  carrier.extensions[COLLECTIONS_KEY] = structuredCloneValue(clipboard.collections) as unknown as JsonValue;
-  assertValidProject(carrier);
-  readAuthorCollections(carrier);
+  assertAuthorClipboard(clipboard);
   const result = structuredCloneValue(project),
     state = readAuthorCollections(project),
     idMap: Record<string, string> = Object.create(null),
