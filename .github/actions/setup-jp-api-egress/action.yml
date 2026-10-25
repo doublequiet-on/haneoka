@@ -50,6 +50,7 @@ runs:
               "https://www.gstatic.com/generate_204"; then
             echo "JP API egress proxy ready (attempt $attempt)"
             echo "JP_VERSION_PROXY=http://127.0.0.1:7899" >> "$GITHUB_ENV"
+            echo "RESOURCE_CDN_PROXY=http://127.0.0.1:7899" >> "$GITHUB_ENV"
             exit 0
           fi
           sleep 2
