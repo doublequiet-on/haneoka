@@ -39,7 +39,9 @@ Mirror paste and duplicate commands share placement previews. Slide tools repeat
 a selected path and generate Trace notes along native curves; timing tools
 interpolate selected speed changes. Patterns support renaming and JSON file exchange.
 Keyboard shortcuts support multiple bindings per command, conflict checks and
-restoring defaults; tooltips follow the saved local bindings.
+restoring defaults; tooltips follow the saved local bindings. Named waypoints
+save with the project and support exact beat editing and previous/next navigation.
+Editor statistics report authored objects and the native viewer COMBO count.
 Its Publish dialog selects audio and cover independently: upload your
 own files or reuse Our Notes and Bestdori song resources. Our Notes references
 retain their release identity. Reused audio and covers are copied into deduplicated

@@ -3158,6 +3158,15 @@
       "enabled": "사용",
       "disabled": "끔",
       "creation": {
+        "export_waypointsUnsupported": "책갈피는 포함되지 않습니다",
+        "waypoints": "책갈피",
+        "waypoint": "책갈피",
+        "waypoint_name": "책갈피 이름",
+        "add_waypoint": "책갈피 추가",
+        "delete_waypoint": "책갈피 삭제",
+        "jump_waypoint": "책갈피로 이동",
+        "previous_waypoint": "이전 책갈피",
+        "next_waypoint": "다음 책갈피",
         "select_all_speeds": "모든 속도 변경 선택",
         "interpolate_speeds": "속도 보간",
         "line_tools": "슬라이드 도구",
@@ -3299,6 +3308,11 @@
         "page_down": "한 화면 아래로 이동",
         "home": "처음으로 이동",
         "end": "끝으로 이동"
+      },
+      "statistics": {
+        "title": "통계",
+        "authored": "배치 노드 수",
+        "duration": "음원 길이"
       },
       "patterns": {
         "import": "패턴 가져오기",

@@ -3158,6 +3158,15 @@
       "enabled": "有効",
       "disabled": "オフ",
       "creation": {
+        "export_waypointsUnsupported": "しおりは含まれません",
+        "waypoints": "しおり",
+        "waypoint": "しおり",
+        "waypoint_name": "しおり名",
+        "add_waypoint": "しおりを追加",
+        "delete_waypoint": "しおりを削除",
+        "jump_waypoint": "しおりへ移動",
+        "previous_waypoint": "前のしおり",
+        "next_waypoint": "次のしおり",
         "select_all_speeds": "速度変化をすべて選択",
         "interpolate_speeds": "速度を補間",
         "line_tools": "スライド操作",
@@ -3299,6 +3308,11 @@
         "page_down": "1画面下へ移動",
         "home": "先頭へ移動",
         "end": "末尾へ移動"
+      },
+      "statistics": {
+        "title": "統計",
+        "authored": "配置ノード数",
+        "duration": "音源の長さ"
       },
       "patterns": {
         "import": "パターンを読み込む",

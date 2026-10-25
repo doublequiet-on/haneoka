@@ -3158,6 +3158,15 @@
       "enabled": "Enabled",
       "disabled": "Off",
       "creation": {
+        "export_waypointsUnsupported": "Waypoints are omitted",
+        "waypoints": "Waypoints",
+        "waypoint": "Waypoint",
+        "waypoint_name": "Waypoint name",
+        "add_waypoint": "Add waypoint",
+        "delete_waypoint": "Delete waypoint",
+        "jump_waypoint": "Go to waypoint",
+        "previous_waypoint": "Previous waypoint",
+        "next_waypoint": "Next waypoint",
         "select_all_speeds": "Select all speeds",
         "interpolate_speeds": "Interpolate speeds",
         "line_tools": "Slide tools",
@@ -3299,6 +3308,11 @@
         "page_down": "Page down",
         "home": "Go to beginning",
         "end": "Go to end"
+      },
+      "statistics": {
+        "title": "Statistics",
+        "authored": "Authored nodes",
+        "duration": "Audio duration"
       },
       "patterns": {
         "import": "Import pattern",

@@ -55,6 +55,10 @@ preserving endpoints, same-tick controls and connector group/layer ownership.
 `setLinePointMode` changes selected interior controls using their resolved source
 geometry. Automatic controls keep the authored interpolation marker.
 
+Project JSON optionally carries `waypoints` with stable IDs, names and integer
+ticks. Older projects without waypoints remain valid. These author navigation
+markers are separate from gameplay skill, fever and call events.
+
 The host provides the user interface, files, storage, and audio decoding.
 Conversion warnings must be shown to the user.
 

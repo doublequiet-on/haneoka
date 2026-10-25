@@ -321,6 +321,16 @@ export const validateProject = (value: unknown): ProjectValidationResult => {
       add("error", "markers.call", "$.markers.call", "Call markers must contain a tick and finite timing values");
     }
   }
+  if (value.waypoints !== undefined) {
+    if (!Array.isArray(value.waypoints)) add("error", "waypoints.type", "$.waypoints", "Waypoints must be an array");
+    else for (const [index, waypoint] of value.waypoints.entries()) {
+      const path = `$.waypoints[${index}]`;
+      if (!record(waypoint)) { add("error", "waypoint.type", path, "Waypoint must be an object"); continue; }
+      checkId(waypoint.id, `${path}.id`);
+      checkTick(waypoint.tick, `${path}.tick`);
+      if (typeof waypoint.name !== "string") add("error", "waypoint.name", `${path}.name`, "Waypoint name must be a string");
+    }
+  }
   if (!record(value.extensions)) add("error", "extensions.type", "$.extensions", "Extensions must be a JSON object");
   else if (!jsonValue(value.extensions))
     add("error", "extensions.json", "$.extensions", "Extensions must contain finite, acyclic JSON values");

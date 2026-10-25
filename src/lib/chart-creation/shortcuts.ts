@@ -49,6 +49,8 @@ export const chartShortcutCommands: readonly ShortcutCommand[] = [
   { id: "page_down", label: "shortcuts.page_down", defaults: ["PageDown"] },
   { id: "home", label: "shortcuts.home", defaults: ["Home"] },
   { id: "end", label: "shortcuts.end", defaults: ["End"] },
+  { id: "previous_waypoint", label: "creation.previous_waypoint", defaults: [] },
+  { id: "next_waypoint", label: "creation.next_waypoint", defaults: [] },
   ...chartCreationTools.map((tool, index) => ({ id: `tool:${tool}`, label: tool === "brush" ? "creation.brush" : tool, defaults: [`Digit${(index + 1) % 10}`] })),
   ...chartSnapDivisions.map((division, index) => ({ id: `grid:${division}`, label: `1/${division}`, defaults: [`Shift+Digit${index + 1}`] })),
 ];

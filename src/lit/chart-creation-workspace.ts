@@ -1,8 +1,8 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面编辑、滑条单点插入／合并／拆分、选区批量调宽、精确 Tick 输入、图案文件交换、镜像粘贴／复制、节点重复与 Trace 生成、变速插值、自定义快捷键、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面与滑条结构编辑、精确定位和路标、图案／键位配置、原生统计、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
-// Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
+// Effects/Dependencies: IndexedDB、localStorage、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { snackbar } from "../lib/snackbar";
 import { LitElement, html, nothing, type PropertyValues } from "lit";
@@ -338,6 +338,8 @@ export class ChartCreationWorkspace extends LitElement {
   private rate = 1;
   private selectedSpeeds = new Set<string>();
   private lineToolsOpen = false;
+  private statisticsOpen = false;
+  private statisticsSnapshot?: { project: Project; audio: CreationAudio | undefined; locale: string; facts: [string, string | number][] };
   private shortcutOverrides: ChartShortcutOverrides = {};
   private shortcutsOpen = false;
   private recordingShortcut?: { id: string; index: number };
@@ -1237,6 +1239,7 @@ export class ChartCreationWorkspace extends LitElement {
       case "page_up": case "page_down":
         this.windowStart = this.clampStart(this.windowStart + (command === "page_up" ? 1 : -1) * this.secondsPerScreen); break;
       case "home": case "end": this.windowStart = command === "home" ? 0 : this.clampStart(this.audio?.analysis.duration ?? 0); break;
+      case "previous_waypoint": case "next_waypoint": this.stepWaypoint(command === "next_waypoint" ? 1 : -1); break;
       default: return false;
     }
     return true;
@@ -1760,6 +1763,18 @@ export class ChartCreationWorkspace extends LitElement {
       }
     }
     ctx.globalAlpha = 1;
+    for (const waypoint of chart.waypoints ?? []) {
+      const at = y(waypoint.tick);
+      if (at < 0 || at > height) continue;
+      ctx.save();
+      ctx.strokeStyle = color("tertiary"); ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(0, at); ctx.lineTo(width, at); ctx.stroke();
+      ctx.font = `${style.getPropertyValue("--md-sys-typescale-label-small-size").trim()} ${style.getPropertyValue("--app-font").trim()}`;
+      const labelWidth = Math.min(ctx.measureText(waypoint.name).width, Math.max(0, width - 24));
+      ctx.fillStyle = color("surface-container-high"); ctx.fillRect(8, at - 24, labelWidth + 8, 20);
+      ctx.fillStyle = color("on-surface"); ctx.fillText(waypoint.name, 12, at - 10, Math.max(1, labelWidth));
+      ctx.restore();
+    }
     const previewing = chart !== this.chart;
     const display = this.editingProject(chart);
     const projection=this.flatProjection(display);
@@ -2311,6 +2326,70 @@ export class ChartCreationWorkspace extends LitElement {
   private interpolateSpeeds() {
     try { this.commitProject(interpolateChartTimeScales(this.chart, this.selectedSpeeds, this.snap)); }
     catch (error) { this.lineToolError(error); }
+  }
+  private jumpToWaypoint(tick: number) {
+    const seconds = this.map().tickToSeconds(tick);
+    this.seekPlayback(seconds, true);
+    this.windowStart = this.clampStart(seconds - this.secondsPerScreen * 0.25);
+    this.requestUpdate();
+  }
+  private stepWaypoint(direction: -1 | 1) {
+    const tick = this.map().secondsToTick(this.seconds), points = [...(this.chart.waypoints ?? [])].sort((a, b) => a.tick - b.tick);
+    const target = direction > 0 ? points.find(point => point.tick > tick + 0.01) : points.findLast(point => point.tick < tick - 0.01);
+    if (target) this.jumpToWaypoint(target.tick);
+  }
+  private renderStatistics() {
+    return accordion({ id: "chart-statistics", label: this.t("statistics.title"), expanded: this.statisticsOpen,
+      onExpandedChange: expanded => { this.statisticsOpen = expanded; this.requestUpdate(); },
+      content: html`<dl class="spec-list">${this.statisticsFacts().map(([label, value]) => html`<div><dt>${label}</dt><dd>${value}</dd></div>`)}</dl>` });
+  }
+  private statisticsFacts() {
+    if (this.statisticsSnapshot?.project === this.chart && this.statisticsSnapshot.audio === this.audio && this.statisticsSnapshot.locale === this.locale)
+      return this.statisticsSnapshot.facts;
+    const chart = this.chart, points = [...chart.singles, ...chart.lines.flatMap(line => line.points)];
+    const projection = this.flatProjection(chart), bpm = chart.tempos.map(event => event.bpm);
+    const facts: [string, string | number][] = [
+      [this.t("statistics.authored"), points.length],
+      ["COMBO", projection?.chart.notes.filter(note => note.judged).length ?? "—"],
+      [this.t("tap"), chart.singles.filter(note => note.type === "tap").length],
+      ...(["flick", "trace"] as const).map(type => [this.t(type), points.filter(note => note.type === type).length] as [string, number]),
+      [this.t("hold"), chart.lines.filter(line => line.kind === "long").length],
+      [this.t("guide"), chart.lines.filter(line => line.kind === "guide").length],
+      [this.t("node"), chart.lines.reduce((sum, line) => sum + line.points.length - 2, 0)],
+      [this.t("creation.bpm"), Math.min(...bpm) === Math.max(...bpm) ? bpm[0]! : `${Math.min(...bpm)}–${Math.max(...bpm)}`],
+      [this.t("statistics.duration"), `${(this.audio?.analysis.duration ?? 0).toFixed(2)} s`],
+    ];
+    this.statisticsSnapshot = { project: chart, audio: this.audio, locale: this.locale, facts };
+    return facts;
+  }
+  private renderWaypoints() {
+    return html`<section class="stack" aria-label=${this.t("creation.waypoints")}>
+      <h3 class="detail-section-title">${this.t("creation.waypoints")}</h3>
+      <div class="chart-creation__actions">
+        <button class="button button--tonal" type="button" ?disabled=${this.busy || !this.audio} @click=${() => this.edit(project => {
+          const waypoints = project.waypoints ??= [];
+          waypoints.push({ id: createProjectId("waypoint"), tick: Math.max(0, Math.round(this.map().secondsToTick(this.seconds))),
+            name: `${this.t("creation.waypoint")} ${waypoints.length + 1}` });
+          waypoints.sort((a, b) => a.tick - b.tick);
+        })}>${this.t("creation.add_waypoint")}</button>
+        ${([-1, 1] as const).map(direction => iconButton({ label: this.t(direction < 0 ? "creation.previous_waypoint" : "creation.next_waypoint"),
+          shortcut: this.shortcutLabel(direction < 0 ? "previous_waypoint" : "next_waypoint"), icon: direction < 0 ? "arrow_downward" : "arrow_upward",
+          disabled: this.busy || !this.audio || !this.chart.waypoints?.length, onClick: () => this.stepWaypoint(direction) }))}
+      </div>
+      ${(this.chart.waypoints ?? []).map(point => html`<div class="chart-creation__form">
+        ${this.field("creation.waypoint_name", point.name, name => this.edit(project => { project.waypoints!.find(item => item.id === point.id)!.name = name; }))}
+        ${this.beatField(point.tick, tick => this.edit(project => {
+          project.waypoints!.find(item => item.id === point.id)!.tick = tick;
+          project.waypoints!.sort((a, b) => a.tick - b.tick);
+        }))}
+        <div class="chart-creation__actions">
+          <button class="button button--text" type="button" ?disabled=${this.busy || !this.audio}
+            aria-label=${`${this.t("creation.jump_waypoint")} · ${point.name}`} @click=${() => this.jumpToWaypoint(point.tick)}>${this.t("creation.jump_waypoint")}</button>
+          ${iconButton({ label: `${this.t("creation.delete_waypoint")} · ${point.name}`, icon: "delete", disabled: this.busy,
+            onClick: () => this.edit(project => { project.waypoints = project.waypoints!.filter(item => item.id !== point.id); }) })}
+        </div>
+      </div>`)}
+    </section>`;
   }
   private lineSampler(project: Project) {
     const projection = this.flatProjection(project), map = this.map();
@@ -3264,6 +3343,7 @@ export class ChartCreationWorkspace extends LitElement {
           `,
         )}
       </section>
+      ${this.renderWaypoints()}
     `;
     const versionsPanel = html`
       <div class="chart-creation__form">
@@ -3679,7 +3759,7 @@ export class ChartCreationWorkspace extends LitElement {
               },
             })}
             <div class="chart-studio__panel-content">
-              <div ?hidden=${this.projectTab !== "project"}>${projectPanel}${audioPanel}${versionsPanel}</div>
+              <div ?hidden=${this.projectTab !== "project"}>${projectPanel}${audioPanel}${this.renderStatistics()}${versionsPanel}</div>
               <div ?hidden=${this.projectTab !== "files"}>${filesPanel}${exportControls}${warningsPanel}</div>
               <div ?hidden=${this.projectTab !== "timing"}>${timingPanel}</div>
             </div>

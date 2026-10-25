@@ -3158,6 +3158,15 @@
       "enabled": "啟用",
       "disabled": "關閉",
       "creation": {
+        "export_waypointsUnsupported": "此格式不含路標",
+        "waypoints": "路標",
+        "waypoint": "路標",
+        "waypoint_name": "路標名稱",
+        "add_waypoint": "新增路標",
+        "delete_waypoint": "刪除路標",
+        "jump_waypoint": "跳轉路標",
+        "previous_waypoint": "上一個路標",
+        "next_waypoint": "下一個路標",
         "select_all_speeds": "選擇全部變速",
         "interpolate_speeds": "變速插值",
         "line_tools": "滑條工具",
@@ -3299,6 +3308,11 @@
         "page_down": "向下翻頁",
         "home": "移至開頭",
         "end": "移至末尾"
+      },
+      "statistics": {
+        "title": "統計",
+        "authored": "編輯節點",
+        "duration": "音訊長度"
       },
       "patterns": {
         "import": "匯入圖案",

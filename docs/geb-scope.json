@@ -142,6 +142,7 @@
     "packages/embed-vega/src/index.ts",
     "packages/embed-home-spot/src/index.ts",
     "packages/chart-editor/src/index.ts",
+    "packages/chart-editor/src/model.ts",
     "packages/sonolus-core/src/index.ts",
     "packages/sonolus/src/index.ts",
     "packages/ui/src/index.ts",

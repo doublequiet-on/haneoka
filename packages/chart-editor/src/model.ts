@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: 规范谱面、创作路标及外部格式的 JSON 字段。
+// Output: 公共工程类型、稳定 ID、排序与自动节点几何解析。
+// Pos: [Map](../L2-2.md)；编辑器的持久模型与几何契约。
+// Effects/Dependencies: 纯模型运算；新 ID 使用浏览器 crypto 或进程内后备计数。
 export const PROJECT_VERSION = 1 as const;
 export const PROJECT_RESOLUTION = 480 as const;
 export const LANE_COUNT = 24 as const;
@@ -38,6 +43,11 @@ export interface TimeScaleEvent {
   id: string;
   tick: number;
   scale: number;
+}
+export interface ChartWaypoint {
+  id: string;
+  tick: number;
+  name: string;
 }
 
 export interface CallMarker {
@@ -101,6 +111,8 @@ export interface Project {
   tempos: TempoEvent[];
   meters: MeterEvent[];
   timeScales: TimeScaleEvent[];
+  /** Author navigation markers, retained in project files independently of game events. */
+  waypoints?: ChartWaypoint[];
   singles: SingleNote[];
   lines: NoteLine[];
   markers: ProjectMarkers;
@@ -180,6 +192,7 @@ export const sortProject = (project: Project): Project => ({
   tempos: [...project.tempos].sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id)),
   meters: [...project.meters].sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id)),
   timeScales: [...project.timeScales].sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id)),
+  ...(project.waypoints === undefined ? {} : { waypoints: [...project.waypoints].sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id)) }),
   singles: [...project.singles].sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id)),
   lines: [...project.lines]
     .map((line) => ({

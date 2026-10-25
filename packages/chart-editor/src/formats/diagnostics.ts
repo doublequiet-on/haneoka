@@ -30,6 +30,8 @@ const hasExtensions = (project: Project, format: Exclude<ExportFormat, "project"
 export const getExportDiagnostics = (project: Project, format: ExportFormat): FormatWarning[] => {
   if (format === "project") return [];
   const warnings: FormatWarning[] = [];
+  if (project.waypoints?.length)
+    warnings.push(warning(`${format}.export.waypointsUnsupported`, "$.waypoints", `${format.toUpperCase()} does not carry author navigation waypoints`));
 
   if (hasUnsupportedMeta(project, format)) {
     warnings.push(
