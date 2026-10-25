@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 引擎请求／结果与配队数据类型。
-// Output: EngineCall（含编译模块、私有评分缓存及实时下界）、EngineReply、停止原因及 EngineSnapshot。
+// Output: EngineCall（含编译模块、固定谱面载荷、私有评分缓存及实时下界）、EngineReply（含 Worker 四张缓存身份）、停止原因及 EngineSnapshot。
 // Pos: [Map](L2-2.md)；主线程与当前引擎 Worker 的消息边界。
 // Effects/Dependencies: 类型声明；资源获取与计算由 client／worker 实现。
 import type { TeamBuilderData } from "../data";
@@ -31,20 +31,21 @@ export type ExplainRequest = {
   play: PlayModel;
 };
 export type EngineChartSources = Record<string, { identity: TeamBuilderData["identity"]; file: string }>;
-export type EngineCall =
+export type EngineChart = { song: SongRef; chart: Record<string, unknown> };
+export type EngineCall = (
   | { type: "init"; id: number; data: string; charts: EngineChartSources; module: WebAssembly.Module }
-  | { type: "run"; id: number; request: EngineRequest; deferScores?: boolean; scoredSeeds?: unknown[]; cooperativeFloor?: boolean }
+  | { type: "run"; id: number; request: EngineRequest; deferScores?: boolean; scoredSeeds?: unknown[]; cooperativeFloor?: boolean; initialFloor?: number }
   | { type: "floor"; id: number; value: number }
   | { type: "growth"; id: number; request: EngineRequest }
   | { type: "evaluate"; id: number; request: EvaluateRequest }
   | { type: "explain"; id: number; request: ExplainRequest }
-  | { type: "charts"; id: number; songs: SongRef[] };
+  | { type: "charts"; id: number; songs: SongRef[] }) & { loadedCharts?: EngineChart[] };
 export type EngineReply =
   | { type: "phase"; id: number; phase: "network" | "computation" }
   | { type: "snapshot"; id: number; snapshot: EngineSnapshot }
   | { type: "ready"; id: number; cooperativeFloor?: boolean }
   | { type: "progress"; id: number; done: number; total: number }
-  | { type: "result"; id: number; result: unknown; scoredSeeds?: unknown[] }
+  | { type: "result"; id: number; result: unknown; scoredSeeds?: unknown[]; cachedCharts?: string[] }
   | { type: "error"; id: number; message: string };
 
 export type StopReason = "complete" | "budget" | "cancelled" | "error";

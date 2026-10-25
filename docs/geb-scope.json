@@ -106,6 +106,7 @@
     "src/lib/team-builder/storage.ts",
     "src/lib/team-builder/optimizer.ts",
     "src/lib/team-builder/engine/client.ts",
+    "src/lib/team-builder/engine/charts.ts",
     "src/lib/team-builder/engine/worker.ts",
     "src/lib/team-builder/engine/protocol.ts",
     "src/lib/team-builder/engine/api.ts",

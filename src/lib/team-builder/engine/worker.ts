@@ -1,15 +1,15 @@
 /// <reference lib="webworker" />
 // L3 — GEB
-// Input: EngineCall、已序列化 release、谱面固定来源索引及编译后的 WASM 模块。
+// Input: EngineCall、已序列化 release、谱面固定来源索引／共享载荷及编译后的 WASM 模块。
 // Output: EngineReply、进度、快照、计算结果或错误；私有补分请求保留最终待评分候选，公开进度只含完整评分。
 // Pos: [Map](L2-2.md)；当前 Rust/WASM 配队引擎的浏览器 Worker 适配。
-// Effects/Dependencies: 限时获取谱面、实例化独立 WASM 内存；JSPI 暂停期间接收当前调用的下界，持有句柄和完整评分缓存并发送消息。
+// Effects/Dependencies: 补取未提供的固定谱面、实例化独立 WASM 内存；准备期间保留当前调用的下界，JSPI 暂停期间实时接收下界，持有句柄和完整评分缓存并发送消息。
 /** Team engine Worker: the ournotes-team-builder engine (WebAssembly) holds the release and the charts it was sent, and
  * serves searches and evaluations. */
-import { pinnedSongAssetUrl } from "../solver/song-loader";
+import { chartKey, downloadChart } from "./charts";
 import type { EngineHit, EngineRequest, EngineResponse, SongRef, TeamEvaluation, Timeline } from "./api";
 import { emptyResponse, requestSongs } from "./execution";
-import type { EngineCall, EngineChartSources, EngineReply, ExplainRequest } from "./protocol";
+import type { EngineCall, EngineChart, EngineChartSources, EngineReply, ExplainRequest } from "./protocol";
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -40,6 +40,7 @@ let handle = 0;
 let cached: string[] = [];
 let onProgress: ((value: Doc) => void) | null = null;
 let cooperativeRun = false;
+let pendingFloor: number | null = null;
 let nextYield = 0;
 const milliseconds = () => performance.timeOrigin + performance.now();
 const continuation = new MessageChannel();
@@ -110,36 +111,24 @@ async function ready() {
   }
 }
 
-async function chartBytes(song: SongRef): Promise<Uint8Array> {
-  const source = chartSources[`${song.songId}:${song.difficulty}`];
-  if (!source?.file) throw new Error("chart-file-missing");
-  const { identity: pinned, file } = source;
-  post({ type: "phase", id: activeId, phase: "network" });
-  // A search over many songs fetches many charts: one dropped request must not fail all of them.
-  let response = await fetch(pinnedSongAssetUrl(pinned, file), { credentials: "omit", signal: AbortSignal.timeout(60_000) }).catch(() => null);
-  for (let attempt = 1; attempt < 3 && (!response || response.status >= 500); attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-    response = await fetch(pinnedSongAssetUrl(pinned, file), { credentials: "omit", signal: AbortSignal.timeout(60_000) }).catch(() => null);
-  }
-  if (!response) throw new Error("chart-network");
-  if (!response.ok) throw new Error(`chart-http:${response.status}`);
-  // The URL pins the release; a server that labels it must agree.
-  const release = response.headers.get("x-haneoka-release-id");
-  if (release && release !== pinned.releaseId) throw new Error("chart-release-identity-mismatch");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  post({ type: "phase", id: activeId, phase: "computation" });
-  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
-  return new Uint8Array(await new Response(new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
-}
 /** The charts of `songs` the engine does not hold yet, in the order it will keep them. */
-async function charts(songs: SongRef[]) {
+async function charts(songs: SongRef[], loaded: EngineChart[] = [], touch = true) {
   const staged = [...cached];
   const rows: Doc[] = [];
   for (const song of songs) {
     const key = `${song.songId}:${song.difficulty}`;
     const index = staged.indexOf(key);
+    if (index >= 0 && !touch) continue;
     if (index >= 0) staged.splice(index, 1);
-    else rows.push({ song, chart: JSON.parse(decoder.decode(await chartBytes(song))) });
+    else {
+      const prepared = loaded.find(row => chartKey(row.song) === key);
+      if (prepared) rows.push(prepared);
+      else {
+        post({ type: "phase", id: activeId, phase: "network" });
+        rows.push({ song, chart: await downloadChart(chartSources[key]) });
+        post({ type: "phase", id: activeId, phase: "computation" });
+      }
+    }
     staged.push(key);
     if (staged.length > 4) staged.shift();
   }
@@ -161,9 +150,15 @@ async function execute(call: EngineCall) {
     await ready();
     activeId = call.id;
     if (call.type === "run") {
-      const request: EngineRequest = call.request;
+      let request: EngineRequest = call.request;
+      pendingFloor = call.initialFloor ?? -Infinity;
       const songs = requestSongs(request).filter((song): song is SongRef => song !== null);
-      const rows = await charts(songs);
+      const rows = await charts(songs, call.loadedCharts);
+      if (pendingFloor !== null && Number.isFinite(pendingFloor)) {
+        request = request.rewardPhase && request.rewardPhase.kind !== "primary"
+          ? { ...request, rewardPhase: { ...request.rewardPhase, floor: Math.max(request.rewardPhase.floor ?? 0, pendingFloor) } }
+          : { ...request, floors: { ...request.floors, [chartKey(songs[0]!)]: Math.max(request.floors?.[chartKey(songs[0]!)] ?? -Infinity, pendingFloor) } };
+      }
       // Each improvement arrives as one song's best teams so far.
       onProgress = (value) => {
         const song = (value.song ?? null) as SongRef | null;
@@ -186,30 +181,31 @@ async function execute(call: EngineCall) {
         // Native runs that exhaust the budget before evaluating a chart return null here.
         if (result.unknownCards === null) result.unknownCards = [];
         post({ type: "progress", id: call.id, done: songs.length, total: songs.length });
-        post({ type: "result", id: call.id, result, scoredSeeds });
+        post({ type: "result", id: call.id, result, scoredSeeds, cachedCharts: cached });
       } finally {
         cooperativeRun = false;
+        pendingFloor = null;
         onProgress = null;
       }
     } else if (call.type === "growth") {
       const request: EngineRequest = call.request;
-      const rows = await charts(requestSongs(request).filter((song): song is SongRef => song !== null));
+      const rows = await charts(requestSongs(request).filter((song): song is SongRef => song !== null), call.loadedCharts);
       onProgress = (value) => {
         const growth = value.growth as { done: number; total: number } | undefined;
         if (growth) post({ type: "progress", id: call.id, done: growth.done, total: growth.total });
       };
       try {
-        post({ type: "result", id: call.id, result: await invoke({ op: "growth", handle, request, charts: rows }, true) });
+        post({ type: "result", id: call.id, result: await invoke({ op: "growth", handle, request, charts: rows }, true), cachedCharts: cached });
       } finally {
         onProgress = null;
       }
     } else if (call.type === "evaluate") {
-      const rows = await charts(call.request.songs);
+      const rows = await charts(call.request.songs, call.loadedCharts);
       const result = await invoke({ op: "evaluateAll", handle, request: call.request, charts: rows });
-      post({ type: "result", id: call.id, result: result.evaluations as TeamEvaluation[] });
+      post({ type: "result", id: call.id, result: result.evaluations as TeamEvaluation[], cachedCharts: cached });
     } else if (call.type === "explain") {
       const request: ExplainRequest = call.request;
-      const rows = await charts([request.song]);
+      const rows = await charts([request.song], call.loadedCharts);
       const order = request.eventOrder.map((key) => request.team.members.indexOf(key));
       const result = await invoke({
         op: "timeline",
@@ -217,16 +213,15 @@ async function execute(call: EngineCall) {
         request: { ...request, memberKeys: request.team.members, snapKeys: request.team.snaps, order: order.filter((slot) => slot >= 0) },
         charts: rows,
       });
-      post({ type: "result", id: call.id, result: { ...(result as unknown as Timeline), score: 0 } });
+      post({ type: "result", id: call.id, result: { ...(result as unknown as Timeline), score: 0 }, cachedCharts: cached });
     } else if (call.type === "charts") {
-      for (const row of await charts(call.songs)) {
+      for (const row of await charts(call.songs, call.loadedCharts, false)) {
         await invoke({ op: "chart", handle, song: row.song, chart: row.chart });
-        const song = row.song as SongRef;
-        cached = [...cached.filter((key) => key !== `${song.songId}:${song.difficulty}`), `${song.songId}:${song.difficulty}`];
       }
-      post({ type: "result", id: call.id, result: null });
+      post({ type: "result", id: call.id, result: null, cachedCharts: cached });
     }
   } catch (error) {
+    pendingFloor = null;
     post({ type: "error", id: call.id, message: error instanceof Error ? error.message : String(error) });
   }
 }
@@ -234,6 +229,9 @@ let operations = Promise.resolve();
 self.onmessage = (event: MessageEvent<EngineCall>) => {
   const call = event.data;
   if (call.type === "floor") {
-    if (cooperativeRun && call.id === activeId) engine?.haneoka_search_floor?.(call.value);
+    if (call.id === activeId && pendingFloor !== null && Number.isFinite(call.value)) {
+      pendingFloor = Math.max(pendingFloor, call.value);
+      if (cooperativeRun) engine?.haneoka_search_floor?.(call.value);
+    }
   } else operations = operations.then(() => execute(call));
 };
