@@ -1,4 +1,5 @@
 import type { EngineHit } from "../../lib/team-builder/engine/api";
+import { manualEventFromEffects } from "../../lib/team-builder/manual-event";
 import { DEFAULT_SETTINGS, type BuildSettings } from "./types";
 import type { TeamBuilder } from "../team-builder";
 
@@ -60,6 +61,10 @@ export const resultSettings = (
     const task = source ?? (hit ? job?.tasks.find((task) => task.result?.hits.includes(hit)) : undefined);
     return {
       ...DEFAULT_SETTINGS,
+      ...(goal?.kind === "event" && goal.eventEffects !== undefined ? {
+        manualEventEnabled: true,
+        manualEvent: manualEventFromEffects(goal.eventId, goal.eventEffects),
+      } : {}),
       eventId: goal?.kind === "event" && goal.eventId >= 0 ? goal.eventId : null,
       goal: "event",
       route: task?.route ?? "live",

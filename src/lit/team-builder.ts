@@ -3,6 +3,7 @@
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
 // Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；辅助页接管并恢复标题栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
+import { resolveManualEvent } from "../lib/team-builder/manual-event";
 import { ResultComparison } from "./team-builder/result-comparison";
 import { usesPtResults } from "./team-builder/score-goal";
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -48,7 +49,7 @@ import {
   type FarmingSettings,
   type Tab,
 } from "./team-builder/types";
-import { farmingMode, farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
+import { farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
 import { renderBuildTab } from "./team-builder/build-tab";
 import { snackbar } from "../lib/snackbar";
 import { renderBoxTab, renderCardEditor, renderUndoAction } from "./team-builder/box-tab";
@@ -679,7 +680,7 @@ export class TeamBuilder extends LitElement {
   }
   updateFarming(patch: Partial<FarmingSettings>) {
     const farming = { ...this.settings.farming, ...patch };
-    const rewardMode = this.settings.rewardMode === "plan" ? "plan" : farmingMode(farming);
+    const rewardMode = this.settings.rewardMode === "plan" ? "plan" : farmingSettings({ ...this.settings, farming }).rewardMode;
     if (rewardMode !== this.settings.rewardMode) {
       this.cancel();
       this.pt.showIssues = false;
@@ -868,9 +869,10 @@ export class TeamBuilder extends LitElement {
         ? settings.route === "challenge"
         : (goal === "score" || goal === "power") && settings.challengeRules;
     const normalEvent = goal === "event" || goal === "plan" || goal === "recommendation";
+    if (!["event", "recommendation"].includes(goal)) settings = { ...settings, manualEventEnabled: false };
     const allowed = challenge
       ? challengeIds
-      : normalEvent && settings.eventId !== null
+      : normalEvent && !settings.manualEventEnabled && settings.eventId !== null
         ? new Set(this.catalog.normalEventSongIds(settings.eventId))
         : undefined;
     const exists = (song: { songId: number; difficulty: number }) =>
@@ -899,10 +901,14 @@ export class TeamBuilder extends LitElement {
     const add = (field: string, key: string, fallback: string) =>
       issues.push({ field, message: this.t(key, fallback) });
     if (!this.engineCards().members.length) add("tb-cards", "needCardsShort", "Choose cards");
+    if (s.goal === "event" && s.manualEventEnabled && this.master) {
+      const issue = resolveManualEvent(this.master, s.manualEvent).issue;
+      if (issue) add("tb-manual-" + issue, "manualEvent.need." + issue, "Complete the manual event conditions");
+    }
     if (!recommendation) {
       if (
         (s.goal === "event" || s.goal === "plan" || ((s.goal === "score" || s.goal === "power") && s.challengeRules)) &&
-        s.eventId === null
+        s.eventId === null && !s.manualEventEnabled
       )
         add("tb-event", "needEvent", "Choose an event");
       if (
@@ -994,6 +1000,11 @@ export class TeamBuilder extends LitElement {
     return issues;
   }
   async focusInput(field: string) {
+    if (field === "tb-manual-cards") {
+      this.expanded.add("manual-pickups");
+      this.requestUpdate();
+      await this.updateComplete;
+    }
     if (this.querySelector(`#${field}`)?.closest(".tb-results-column")) {
       if (this.conditionsOpen) this.closeConditions();
       await this.updateComplete;
@@ -1123,6 +1134,11 @@ export class TeamBuilder extends LitElement {
       return null;
     const cards = this.engineCards();
     const s = this.searchSettings;
+    if (goal.kind === "event" && s.manualEventEnabled) {
+      const resolved = resolveManualEvent(this.master!, s.manualEvent);
+      if (!resolved.effects || goal.route === "challenge" || s.ptCycle) return null;
+      goal = { ...goal, eventId: s.manualEvent.templateId!, eventEffects: resolved.effects };
+    }
     const theoretical = s.scope === "theoretical";
     const locked = (kind: "m" | "s") =>
       theoretical

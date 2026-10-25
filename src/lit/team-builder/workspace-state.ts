@@ -38,7 +38,7 @@ export function restoreBuildSettings(stored: Partial<BuildSettings> = {}): Build
       requireGrowth: !custom, includeMemory: custom,
     };
   }
-  settings.rewardMode = mode === "plan" ? "plan" : farmingMode(settings.farming);
+  settings.rewardMode = mode === "plan" ? "plan" : farmingSettings(settings).rewardMode;
   return settings;
 }
 
@@ -54,9 +54,14 @@ export function farmingMode(draft: FarmingSettings): "recommendation" | "event" 
     s.measure !== "challenge-points" && !s.weighted && !s.fullRanking && s.k === 1 && s.timeLimit === null ? "recommendation" : "event";
 }
 export function farmingSettings(settings: BuildSettings): BuildSettings {
-  const s = farmingConditions(settings.farming);
+  const draft = settings.manualEventEnabled
+    ? { ...settings.farming, play: settings.farming.play === "challenge" ? "solo" as const : settings.farming.play, ptCycle: false }
+    : settings.farming;
+  const s = farmingConditions(draft);
   const mode = farmingMode(s);
   return { ...settings, ...s, rewardMode: mode, goal: "event",
+    farming: draft,
+    eventId: settings.manualEventEnabled ? settings.manualEvent.templateId : settings.eventId,
     route: s.play === "solo" || s.play === "gekiso" ? "live" : s.play,
     ptMode: s.play === "gekiso" ? "gekiso" : "solo",
     unknownPolicy: s.requireGrowth ? "min" : s.unknownPolicy,

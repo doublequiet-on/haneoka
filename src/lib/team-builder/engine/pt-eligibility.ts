@@ -165,7 +165,8 @@ export function validatePtRequest(master: EngineMaster, request: EngineRequest):
     if (!integer(level) || (level !== 0 && !item.levels.has(level))) add("player", `bi.${id}`);
   }
 
-  const event = master.events.get(goal.eventId);
+  const source = master.events.get(goal.eventId);
+  const event = source && { ...source, effects: goal.eventEffects ?? source.effects };
   const challenge = goal.route === "challenge";
   const points = challenge ? event?.challengePoints : event?.livePoints;
   const rewards =

@@ -1,5 +1,6 @@
 import type { SongRef } from "../../lib/team-builder/engine/api";
 import type { Criterion } from "../../lib/team-builder/engine/objectives";
+import { emptyManualEvent, type ManualEventDraft } from "../../lib/team-builder/manual-event";
 
 export type Tab = "build" | "box" | "account" | "teams" | "pt" | "song-comparison";
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
@@ -26,6 +27,8 @@ export interface BuildSettings {
   /** Pattern play: every Nth note is a Miss (0 none). */
   missEvery: number;
   eventId: number | null;
+  manualEventEnabled: boolean;
+  manualEvent: ManualEventDraft;
   measure: "points" | "items" | "challenge-points";
   /** Rank by a weighted sum of event points, items and challenge points. */
   weighted: boolean;
@@ -99,6 +102,8 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   miss: 0,
   missEvery: 0,
   eventId: null,
+  manualEventEnabled: false,
+  manualEvent: emptyManualEvent(),
   measure: "points",
   weighted: false,
   weightPoints: 1,

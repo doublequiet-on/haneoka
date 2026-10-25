@@ -89,7 +89,7 @@ function conditionLines(host: TeamBuilder, hit: EngineHit): string[] {
         : []),
     ...((s.goal === "event" || s.goal === "plan") && s.eventId !== null
       ? [
-          `${host.t("event", "Event")}: ${host.catalog!.events().find((event) => event.id === s.eventId)?.name ?? s.eventId}`,
+          `${s.manualEventEnabled ? host.t("manualEvent.summary", "Manual · Rules") : host.t("event", "Event")}: ${host.catalog!.events().find((event) => event.id === s.eventId)?.name ?? s.eventId}`,
           s.route === "challenge"
             ? host.t("routeChallenge", "Challenge live")
             : s.route === "skip"
@@ -97,6 +97,14 @@ function conditionLines(host: TeamBuilder, hit: EngineHit): string[] {
               : host.t("routeLive", "Normal live"),
         ]
       : []),
+    ...(s.goal === "event" && s.manualEventEnabled
+      ? [
+          host.t("manualEvent.attribute", "Bonus attribute") + ": " + (s.manualEvent.attribute ? host.catalog!.attributeName(s.manualEvent.attribute) : host.t("manualEvent.none", "None")),
+          host.t("manualEvent.targets", "Bonus targets") + ": " + (s.manualEvent.targetKind === "none" ? host.t("manualEvent.none", "None") : s.manualEvent.targets.map(id => s.manualEvent.targetKind === "band" ? host.catalog!.bandName(id) : host.catalog!.characterName(id)).join(" / ")),
+          ...(["members", "snaps"] as const).flatMap(kind => s.manualEvent[kind].map(row =>
+            host.catalog!.cardName(kind, row.cardId) + " · " + JSON.parse(row.tier).filter((effect: [number, number[]]) => effect[0] !== 2).map((effect: [number, number[]]) =>
+              host.t(effect[0] === 0 ? "measurePoints" : "measureItems", effect[0] === 0 ? "Event points" : "Shop items") + " +" + effect[1].map(value => value / 100).join("/") + "%").join(" · "))),
+        ] : []),
     ...(s.goal === "plan"
       ? [
           `${host.t("planBudget", "Boosts to spend")}: ${s.planBudget} · ${host.t("planStartCp", "Challenge points now")}: ${s.planStartingCp}`,
@@ -931,6 +939,7 @@ function songMetaHref(host: TeamBuilder, hit: EngineHit): string | null {
   });
   const query = new URLSearchParams({ deckPower: String(hit.power), deckSlots: slots.join(",") });
   const settings = resultSettings(host, hit);
+  if (settings.manualEventEnabled && settings.goal === "event") return null;
   const event = settings.eventId !== null ? master.events.get(settings.eventId) : undefined;
   if (hit.event && (settings.goal === "event" || settings.goal === "plan") && settings.route !== "challenge" && event) {
     const bonus = (type: number) =>

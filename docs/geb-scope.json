@@ -218,6 +218,8 @@
     "worker/community-charts.ts",
     "worker/community-chart-media.ts",
     "src/lit/team-builder/workspace-state.ts",
+    "src/lib/team-builder/manual-event.ts",
+    "src/lit/team-builder/manual-event.ts",
     "src/lit/team-builder/song-picker.ts",
     "src/lit/team-builder/result-comparison.ts",
     "src/lit/team-builder/result-metric.ts",

@@ -80,6 +80,7 @@ export type Goal =
       measure: "points" | "items" | "challenge-points";
       route: "live" | "challenge" | "skip";
       eventId: number;
+      eventEffects?: readonly EventEffectRow[];
       songs: SongRef[];
       /** Boosts per normal live (0–10) or challenge points per challenge live. */
       consumption: number;
@@ -323,7 +324,7 @@ export function musicView(master: EngineMaster, songId: number, challengeEventId
   }
   return { musicType, bestTags: song.bestTags, memoryKey: songId };
 }
-export function eventRoute(master: EngineMaster, eventId: number, route: "live" | "challenge" | "skip", consumption: number): EventRoute {
+export function eventRoute(master: EngineMaster, eventId: number, route: "live" | "challenge" | "skip", consumption: number, effects?: readonly EventEffectRow[]): EventRoute {
   const event = master.events.get(eventId);
   if (!event) throw new RangeError(`unknown-event:${eventId}`);
   const challenge = route === "challenge" || (route === "skip" && consumption > 10);
@@ -340,7 +341,7 @@ export function eventRoute(master: EngineMaster, eventId: number, route: "live" 
     rewards: challenge ? event.challengeRewards : event.liveRewards,
     itemId: event.itemId,
     challengePoints: master.liveChallengePoints,
-    effects: event.effects,
+    effects: effects ?? event.effects,
   };
 }
 
@@ -615,7 +616,7 @@ export async function runEngine(master: EngineMaster, charts: ChartCache, reques
       });
     } else if (goal.kind === "event" && goal.gekiso) {
       if (!ptTrial || goal.route !== "live" || !song || !chart) throw new Error("gekiso-reward-mode");
-      const route = eventRoute(master, goal.eventId, "live", goal.consumption);
+      const route = eventRoute(master, goal.eventId, "live", goal.consumption, goal.eventEffects);
       const gekiso = await charts.gekiso(song, { great: 0, just: goal.gekiso.just }, 1);
       const measure = goal.measure === "items" ? "items" : "points";
       const adapter = gekisoRewardObjective({ ...shared, chart, gekiso, route, measure, options: goal.gekiso, exchange: goal.cpExchange, scoreCache: charts.gekisoScores, contextCache: charts.gekisoContexts });
@@ -654,7 +655,7 @@ export async function runEngine(master: EngineMaster, charts: ChartCache, reques
         };
       }) });
     } else if (goal.kind === "event") {
-      const route = eventRoute(master, goal.eventId, goal.route, goal.consumption);
+      const route = eventRoute(master, goal.eventId, goal.route, goal.consumption, goal.eventEffects);
       const measure = goal.measure === "items" ? "items" : "points";
       // Under another song's cutoff, the uncapped bounds alone usually prove this song cannot reach it: try that
       // before paying for the score cap and the seed sweeps.
@@ -855,7 +856,7 @@ export interface TeamEvaluation {
 export async function evaluateTeam(
   master: EngineMaster,
   charts: ChartCache,
-  request: { members: MemberInput[]; snaps: SnapInput[]; player: PlayerInput; unknownPolicy: UnknownPolicy; team: TeamSpec; songs: SongRef[]; play: PlayModel; challengeEventId: number | null; event: { eventId: number; route: "live" | "challenge"; consumption: number } | null },
+  request: { members: MemberInput[]; snaps: SnapInput[]; player: PlayerInput; unknownPolicy: UnknownPolicy; team: TeamSpec; songs: SongRef[]; play: PlayModel; challengeEventId: number | null; event: { eventId: number; route: "live" | "challenge"; consumption: number; eventEffects?: readonly import("./master").EventEffectRow[] } | null },
 ): Promise<TeamEvaluation[]> {
   const box = resolveBox(master, request.members, request.snaps, request.unknownPolicy);
   const player = playerState(master, request.player);
@@ -881,7 +882,7 @@ export async function evaluateTeam(
     const { detail } = objective.exact(team, power.total, power.slots);
     let event: TeamEvaluation["event"] = null;
     if (request.event) {
-      const route = eventRoute(master, request.event.eventId, request.event.route, request.event.consumption);
+      const route = eventRoute(master, request.event.eventId, request.event.route, request.event.consumption, request.event.eventEffects);
       const bonus = (type: number) =>
         memberStates.reduce((sum, member) => sum + memberEventPercent(route.effects, member, type), 0) +
         snaps.reduce((sum, snap) => sum + snapEventPercent(route.effects, snap, type), 0);
