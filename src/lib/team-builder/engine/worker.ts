@@ -1,18 +1,15 @@
 /// <reference lib="webworker" />
 // L3 — GEB
-// Input: EngineCall、release 资料、固定来源谱面及 WASM URL。
+// Input: EngineCall、已序列化 release、谱面固定来源索引及编译后的 WASM 模块。
 // Output: EngineReply、进度、快照、计算结果或错误；私有补分请求保留最终待评分候选，公开进度只含完整评分。
 // Pos: [Map](L2-2.md)；当前 Rust/WASM 配队引擎的浏览器 Worker 适配。
-// Effects/Dependencies: 限时获取 WASM／谱面、实例化 WebAssembly，持有句柄和缓存并发送消息。
+// Effects/Dependencies: 限时获取谱面、实例化独立 WASM 内存；JSPI 暂停期间接收当前调用的下界，持有句柄和完整评分缓存并发送消息。
 /** Team engine Worker: the ournotes-team-builder engine (WebAssembly) holds the release and the charts it was sent, and
  * serves searches and evaluations. */
-import engineUrl from "./generated/team-engine.wasm?url";
 import { pinnedSongAssetUrl } from "../solver/song-loader";
-import { teamBuilderSourceIdentity } from "../data/source";
-import { dataRows, type TeamBuilderData } from "../data";
 import type { EngineHit, EngineRequest, EngineResponse, SongRef, TeamEvaluation, Timeline } from "./api";
 import { emptyResponse, requestSongs } from "./execution";
-import type { EngineCall, EngineReply, ExplainRequest } from "./protocol";
+import type { EngineCall, EngineChartSources, EngineReply, ExplainRequest } from "./protocol";
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -21,19 +18,43 @@ interface Exports {
   haneoka_string_free(pointer: number): void;
   haneoka_context_json(input: number): number;
   haneoka_context_stream_wasm(input: number): number;
+  haneoka_search_floor?: (value: number) => void;
 }
+type PromiseWasm = {
+  Suspending?: new (callback: () => number | Promise<number>) => WebAssembly.ImportValue;
+  promising?: (callback: (pointer: number) => number) => (pointer: number) => Promise<number>;
+};
+const promiseWasm = WebAssembly as typeof WebAssembly & PromiseWasm;
 type Doc = Record<string, unknown>;
 
 const post = (reply: EngineReply) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(reply);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 let activeId = 0;
-let data: TeamBuilderData | null = null;
+let data: string | null = null;
+let chartSources: EngineChartSources = {};
 let engine: Exports | null = null;
+let compiled: WebAssembly.Module | null = null;
 let handle = 0;
 /** Charts the engine holds (it keeps the latest few), as `songId:difficulty`. */
 let cached: string[] = [];
 let onProgress: ((value: Doc) => void) | null = null;
+let cooperativeRun = false;
+let nextYield = 0;
+const milliseconds = () => performance.timeOrigin + performance.now();
+const continuation = new MessageChannel();
+let resume: ((time: number) => void) | null = null;
+continuation.port1.onmessage = () => {
+  const resolve = resume;
+  resume = null;
+  resolve?.(milliseconds());
+};
+const cooperativeClock = () => {
+  const now = milliseconds();
+  if (!cooperativeRun || now < nextYield) return now;
+  nextYield = now + 16;
+  return new Promise<number>(resolve => { resume = resolve; continuation.port2.postMessage(null); });
+};
 
 const readString = (pointer: number) => {
   const bytes = new Uint8Array(engine!.memory.buffer);
@@ -44,24 +65,26 @@ const readString = (pointer: number) => {
 async function instantiate() {
   const imports = {
     env: {
-      haneoka_now_ms: () => performance.timeOrigin + performance.now(),
+      haneoka_now_ms: promiseWasm.Suspending && promiseWasm.promising ? new promiseWasm.Suspending(cooperativeClock) : milliseconds,
       haneoka_progress: (pointer: number) => onProgress?.(JSON.parse(readString(pointer)) as Doc),
     },
   };
-  const { instance } = await WebAssembly.instantiateStreaming(fetch(engineUrl, { signal: AbortSignal.timeout(60_000) }), imports);
+  const instance = await WebAssembly.instantiate(compiled!, imports);
   engine = instance.exports as unknown as Exports;
 }
 /** One engine call; a trapped instance is discarded, so the next call starts a fresh one. */
-function invoke(input: Doc, stream = false): Doc {
+async function invoke(input: Doc | string, stream = false): Promise<Doc> {
   const e = engine!;
-  const bytes = encoder.encode(JSON.stringify(input));
+  const bytes = encoder.encode(typeof input === "string" ? input : JSON.stringify(input));
   const pointer = e.haneoka_buffer_alloc(bytes.length + 1);
   const target = new Uint8Array(e.memory.buffer, pointer, bytes.length + 1);
   target.set(bytes);
   target[bytes.length] = 0;
   let result = 0;
   try {
-    result = stream ? e.haneoka_context_stream_wasm(pointer) : e.haneoka_context_json(pointer);
+    const operation = stream ? e.haneoka_context_stream_wasm : e.haneoka_context_json;
+    result = promiseWasm.Suspending && promiseWasm.promising
+      ? await promiseWasm.promising(operation)(pointer) : operation(pointer);
     const output = JSON.parse(readString(result)) as Doc;
     if (typeof output.error === "string") throw new Error(output.error);
     if (Array.isArray(output.cachedCharts)) cached = output.cachedCharts.map(String);
@@ -82,16 +105,15 @@ function invoke(input: Doc, stream = false): Doc {
 async function ready() {
   if (!engine) await instantiate();
   if (!handle) {
-    handle = Number(invoke({ op: "create", data }).handle);
+    handle = Number((await invoke(`{"op":"create","data":${data},"trustedScores":true}`)).handle);
     cached = [];
   }
 }
 
 async function chartBytes(song: SongRef): Promise<Uint8Array> {
-  const pinned = teamBuilderSourceIdentity(data!, "songs", song.songId);
-  const row = Object.values(data!.songs).find((item) => Number(item.musicId) === song.songId);
-  const file = dataRows(row?.difficulty).find((level) => Number(level.difficulty) === song.difficulty)?.file;
-  if (typeof file !== "string" || !file) throw new Error("chart-file-missing");
+  const source = chartSources[`${song.songId}:${song.difficulty}`];
+  if (!source?.file) throw new Error("chart-file-missing");
+  const { identity: pinned, file } = source;
   post({ type: "phase", id: activeId, phase: "network" });
   // A search over many songs fetches many charts: one dropped request must not fail all of them.
   let response = await fetch(pinnedSongAssetUrl(pinned, file), { credentials: "omit", signal: AbortSignal.timeout(60_000) }).catch(() => null);
@@ -124,14 +146,15 @@ async function charts(songs: SongRef[]) {
   return rows;
 }
 
-self.onmessage = async (event: MessageEvent<EngineCall>) => {
-  const call = event.data;
+async function execute(call: EngineCall) {
   try {
     if (call.type === "init") {
       data = call.data;
+      chartSources = call.charts;
+      compiled = call.module;
       handle = 0;
       await ready();
-      post({ type: "ready", id: call.id });
+      post({ type: "ready", id: call.id, cooperativeFloor: !!promiseWasm.Suspending && !!promiseWasm.promising && !!engine?.haneoka_search_floor });
       return;
     }
     if (!data) throw new Error("engine-not-ready");
@@ -152,12 +175,20 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
         post({ type: "snapshot", id: call.id, snapshot: { requestId: request.requestId!, contextKey: request.contextKey!, response, coverage: { completed: 0, total: response.results.length } } });
       };
       try {
-        const result = invoke({ op: "run", handle, request: call.deferScores ? { ...request, deferScores: true } : request, charts: rows }, true) as unknown as EngineResponse;
+        cooperativeRun = call.cooperativeFloor === true && !!promiseWasm.Suspending && !!promiseWasm.promising && !!engine?.haneoka_search_floor;
+        nextYield = milliseconds() + 16;
+        const output = await invoke({ op: "run", handle, request: { ...request, ...(call.deferScores ? { deferScores: true } : {}), cooperativeFloor: cooperativeRun },
+          charts: rows, scoredSeeds: call.scoredSeeds,
+          exportScores: request.goal.kind === "gekiso" || (request.goal.kind === "event" && !!request.goal.gekiso) }, true);
+        const scoredSeeds = output._scoredSeeds as unknown[] | undefined;
+        delete output._scoredSeeds;
+        const result = output as unknown as EngineResponse;
         // Native runs that exhaust the budget before evaluating a chart return null here.
         if (result.unknownCards === null) result.unknownCards = [];
         post({ type: "progress", id: call.id, done: songs.length, total: songs.length });
-        post({ type: "result", id: call.id, result });
+        post({ type: "result", id: call.id, result, scoredSeeds });
       } finally {
+        cooperativeRun = false;
         onProgress = null;
       }
     } else if (call.type === "growth") {
@@ -168,19 +199,19 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
         if (growth) post({ type: "progress", id: call.id, done: growth.done, total: growth.total });
       };
       try {
-        post({ type: "result", id: call.id, result: invoke({ op: "growth", handle, request, charts: rows }, true) });
+        post({ type: "result", id: call.id, result: await invoke({ op: "growth", handle, request, charts: rows }, true) });
       } finally {
         onProgress = null;
       }
     } else if (call.type === "evaluate") {
       const rows = await charts(call.request.songs);
-      const result = invoke({ op: "evaluateAll", handle, request: call.request, charts: rows });
+      const result = await invoke({ op: "evaluateAll", handle, request: call.request, charts: rows });
       post({ type: "result", id: call.id, result: result.evaluations as TeamEvaluation[] });
     } else if (call.type === "explain") {
       const request: ExplainRequest = call.request;
       const rows = await charts([request.song]);
       const order = request.eventOrder.map((key) => request.team.members.indexOf(key));
-      const result = invoke({
+      const result = await invoke({
         op: "timeline",
         handle,
         request: { ...request, memberKeys: request.team.members, snapKeys: request.team.snaps, order: order.filter((slot) => slot >= 0) },
@@ -189,7 +220,7 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
       post({ type: "result", id: call.id, result: { ...(result as unknown as Timeline), score: 0 } });
     } else if (call.type === "charts") {
       for (const row of await charts(call.songs)) {
-        invoke({ op: "chart", handle, song: row.song, chart: row.chart });
+        await invoke({ op: "chart", handle, song: row.song, chart: row.chart });
         const song = row.song as SongRef;
         cached = [...cached.filter((key) => key !== `${song.songId}:${song.difficulty}`), `${song.songId}:${song.difficulty}`];
       }
@@ -198,4 +229,11 @@ self.onmessage = async (event: MessageEvent<EngineCall>) => {
   } catch (error) {
     post({ type: "error", id: call.id, message: error instanceof Error ? error.message : String(error) });
   }
+}
+let operations = Promise.resolve();
+self.onmessage = (event: MessageEvent<EngineCall>) => {
+  const call = event.data;
+  if (call.type === "floor") {
+    if (cooperativeRun && call.id === activeId) engine?.haneoka_search_floor?.(call.value);
+  } else operations = operations.then(() => execute(call));
 };
