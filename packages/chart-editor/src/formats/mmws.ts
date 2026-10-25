@@ -11,13 +11,14 @@ import { projectMeasureMap } from "./sus-export";
 const unsupported = () => new ChartFormatError("mmws", "mmws_unsupported");
 class Reader {
   position = 0;
+  readonly bytes: Uint8Array;
   readonly view: DataView;
-  constructor(readonly bytes: Uint8Array) { this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
+  constructor(bytes: Uint8Array) { this.bytes = bytes; this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
   ensure(length: number) { if (this.position + length > this.bytes.length) throw new ChartFormatError("mmws", "mmws_invalid"); }
   u16() { this.ensure(2); const value = this.view.getUint16(this.position, true); this.position += 2; return value; }
   u32() { this.ensure(4); const value = this.view.getUint32(this.position, true); this.position += 4; return value; }
   f32() { this.ensure(4); const value = this.view.getFloat32(this.position, true); this.position += 4; if (!Number.isFinite(value)) throw new ChartFormatError("mmws", "mmws_invalid"); return value; }
-  text() { const end = this.bytes.indexOf(0, this.position); if (end < 0) throw new ChartFormatError("mmws", "mmws_invalid"); const value = new TextDecoder("utf-8", { fatal: true }).decode(this.bytes.subarray(this.position, end)); this.position = end + 1; return value; }
+  text() { const end = this.bytes.indexOf(0, this.position); if (end < 0) throw new ChartFormatError("mmws", "mmws_invalid"); const value = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(this.bytes.subarray(this.position, end)); this.position = end + 1; return value; }
   seek(position: number) { if (position < 0 || position >= this.bytes.length) throw new ChartFormatError("mmws", "mmws_invalid"); this.position = position; }
   count() { const count = this.u32(); if (count > this.bytes.length - this.position) throw new ChartFormatError("mmws", "mmws_invalid"); return count; }
 }
