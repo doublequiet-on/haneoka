@@ -228,7 +228,9 @@
     "src/lit/team-builder/result-metric.ts",
     "src/lit/team-builder/tool-layout.ts",
     "src/lit/ui/action-menu.ts",
-    "scripts/publish/reward_catalog.py"
+    "scripts/publish/reward_catalog.py",
+    "packages/chart-editor/src/formats/sus-export.ts",
+    "packages/chart-editor/src/formats/mmws.ts"
   ],
   "entry_documents": [
     "AGENTS.md",

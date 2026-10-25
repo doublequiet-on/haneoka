@@ -1,4 +1,4 @@
-import { createProjectId, createEmptyProject, structuredCloneValue, type Project, type JsonValue } from "../model";
+import { createProjectId, createEmptyProject, resolveLinePointShape, structuredCloneValue, type Project, type JsonValue } from "../model";
 import { assertValidProject } from "../validation";
 import { mirrorSelectionNote } from "./selection";
 
@@ -348,6 +348,32 @@ export function copyAuthorSelection(project: Project, selection: ReadonlySet<str
     },
     sourceExtensions: Object.fromEntries(Object.entries(project.extensions).filter(([key]) => key !== COLLECTIONS_KEY)),
   } as AuthorClipboard);
+}
+/** Copy selected connector spans, resolving new automatic endpoints against the source. */
+export function copyAuthorSegments(project: Project, selection: ReadonlySet<string>): AuthorClipboard {
+  const clipboard = copyAuthorSelection(project, selection);
+  clipboard.entities.lines = clipboard.entities.lines.flatMap(line => {
+    if (selection.has(line.id)) return [line];
+    const source = project.lines.find(item => item.id === line.id)!;
+    const selected = line.points.filter(point => selection.has(point.id));
+    if (selected.length < 2) return [];
+    for (const point of [selected[0]!, selected.at(-1)!]) {
+      if (point.lane !== "auto") continue;
+      const shape = resolveLinePointShape(source.points, source.points.findIndex(item => item.id === point.id));
+      point.lane = shape.lane; point.size = shape.size; delete point.autoSize;
+      delete point.resolvedLane; delete point.resolvedSize;
+    }
+    return [{ ...line, points: selected }];
+  });
+  const entities = clipboard.entities;
+  const ids = new Set([
+    ...entities.singles.map(note => note.id), ...entities.lines.flatMap(line => [line.id, ...line.points.map(point => point.id)]),
+    ...entities.tempos.map(event => event.id), ...entities.meters.map(event => event.id), ...entities.timeScales.map(event => event.id),
+  ]);
+  clipboard.sourceOrder = clipboard.sourceOrder.filter(id => ids.has(id));
+  for (const id of Object.keys(clipboard.collections.members)) if (!ids.has(id)) delete clipboard.collections.members[id];
+  assertAuthorClipboard(clipboard);
+  return clipboard;
 }
 export function mirrorAuthorClipboard(clipboard: AuthorClipboard): AuthorClipboard {
   const result = structuredCloneValue(clipboard);

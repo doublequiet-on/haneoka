@@ -532,6 +532,14 @@ export const importSus = (input: string | Uint8Array): ImportResult => {
       meta: { ...analysis.meta },
     },
   };
+  const nativeTick = (tick: number) => Math.round(tick * 480 / analysis.ticksPerBeat);
+  const fever: [number, number][] = [];
+  let feverStart: number | undefined;
+  for (const note of [...analysis.tapNotes].sort((a, b) => a.tick - b.tick || a.line - b.line)) {
+    if (note.lane !== 15) continue;
+    if (note.type === 1) feverStart = nativeTick(note.tick);
+    else if (note.type === 2 && feverStart !== undefined) { fever.push([feverStart, nativeTick(note.tick)]); feverStart = undefined; }
+  }
   return finishImport(
     "sus",
     {
@@ -539,6 +547,7 @@ export const importSus = (input: string | Uint8Array): ImportResult => {
       laneBasis: analysis.laneCount,
       meta: susMeta(analysis.meta),
       meters,
+      markers: { skill: analysis.tapNotes.filter(note => note.lane === 0 && note.type === 4).map(note => nativeTick(note.tick)), fever, call: [] },
       extensions,
     },
     [...analysis.warnings, ...imported.warnings],

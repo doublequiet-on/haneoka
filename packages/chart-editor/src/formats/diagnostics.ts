@@ -5,7 +5,10 @@ import { ChartFormatError } from "./shared";
 import { validateProject } from "../validation";
 import { projectToSs, serializeSs } from "./ss";
 
-export type ExportFormat = "project" | "ss" | "usc";
+import { mmwsExportDiagnostics } from "./mmws";
+import { susExportDiagnostics } from "./sus-export";
+
+export type ExportFormat = "project" | "ss" | "usc" | "sus" | "mmws";
 
 const warning = (code: string, path: string, message: string): FormatWarning => ({ code, path, message });
 
@@ -29,6 +32,7 @@ const hasExtensions = (project: Project, format: Exclude<ExportFormat, "project"
 /** Report canonical project data that the selected external format cannot carry. */
 export const getExportDiagnostics = (project: Project, format: ExportFormat): FormatWarning[] => {
   if (format === "project") return [];
+  if (format === "sus" || format === "mmws") { const result = format === "sus" ? susExportDiagnostics(project) : mmwsExportDiagnostics(project); return [...result.errors, ...result.warnings]; }
   const warnings: FormatWarning[] = [];
   if (project.waypoints?.length)
     warnings.push(warning(`${format}.export.waypointsUnsupported`, "$.waypoints", `${format.toUpperCase()} does not carry author navigation waypoints`));
@@ -194,6 +198,7 @@ export const validateExportTarget = (project: Project, format: ExportFormat): Ex
   const errors: FormatWarning[] = canonical.errors.map(({ code, path, message }) => ({ code, path, message }));
   if (errors.length) return { valid: false, errors, warnings: [] };
   const warnings = getExportDiagnostics(project, format);
+  if (format === "sus" || format === "mmws") { const result = format === "sus" ? susExportDiagnostics(project) : mmwsExportDiagnostics(project); return { valid: !result.errors.length, ...result }; }
   if (format !== "ss") return { valid: true, errors, warnings };
   const document = projectToSs(project);
   const fail = (code: string, path: string, message: string) => errors.push(warning(code, path, message));

@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面与滑条结构编辑、精确定位和路标、图案／键位配置、编辑音频及原生统计、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面与滑条结构编辑、精确定位、路标与游戏事件、图案／键位配置、编辑音频及原生统计、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
 // Effects/Dependencies: IndexedDB、localStorage、媒体、Web Audio 与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -53,7 +53,7 @@ import { loadCommunityChart, readChartCloudDraft, saveChartCloudDraft } from "..
 import { communityChartPath, type ChartMediaRef } from "../lib/chart-creation/community-types";
 import "./chart-creation-collections";
 import type { ChartCollectionScope } from "./chart-creation-collections";
-import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, mirrorAuthorClipboard, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
+import { readAuthorCollections, authorSelectionForScope, authorEntityIds, reconcileAuthorEdit, assignAuthorSelection, copyAuthorSelection, copyAuthorSegments, mirrorAuthorClipboard, pasteAuthorSelection, type AuthorClipboard } from "../../packages/chart-editor/src/creation/collections";
 import { joinNoteLines, lineJoinTargets, linePatternTarget, lineSplitTarget, lineTraces, repeatLinePattern, splitNoteLine } from "../../packages/chart-editor/src/creation/connectors";
 import { applyAuthorCollectionOperation, type AuthorCollectionOperation } from "../../packages/chart-editor/src/creation/collections-history";
 import type { ChartCreationLibrary, PublicChartImport, CreationLibraryProvider } from "./chart-creation-library";
@@ -96,9 +96,11 @@ import {
   zoomVerticalTimeViewportAtY,
 } from "../../packages/chart-editor/src/viewport";
 import { serializeProjectJson } from "../../packages/chart-editor/src/formats/project-json";
+import { serializeMmws, isMmws } from "../../packages/chart-editor/src/formats/mmws";
+import { serializeSus } from "../../packages/chart-editor/src/formats/sus-export";
 import { serializeUsc } from "../../packages/chart-editor/src/formats/usc";
 import {
-  getExportDiagnostics,
+  validateExportTarget,
   serializeSsForTarget,
   type ExportFormat,
 } from "../../packages/chart-editor/src/formats/diagnostics";
@@ -269,7 +271,7 @@ export class ChartCreationWorkspace extends LitElement {
   private operation: Promise<void> = Promise.resolve();
   private original = createEmptyProject();
   private projectSnapshot?: { revision: number; value: Project };
-  private warningSnapshot?: { revision: number; format: ExportFormat; value: ReturnType<typeof getExportDiagnostics> };
+  private warningSnapshot?: { revision: number; format: ExportFormat; value: ReturnType<typeof validateExportTarget> };
   private readonly libraryImport = (value: PublicChartImport, signal: AbortSignal) => this.importLibrary(value, signal);
   private source?: CreationDocument["source"];
   private projectId: string = crypto.randomUUID();
@@ -349,9 +351,11 @@ export class ChartCreationWorkspace extends LitElement {
   private audioFeedbackFailed = false;
   private audioIdentity?: { controller: AbortController; promise: Promise<HaneokaReleaseIdentity> };
   private selectedSpeeds = new Set<string>();
+  private gameMarkersOpen = false;
   private meterDrafts = new Map<string, string>();
   private lineToolsOpen = false;
   private statisticsOpen = false;
+  private timelineSnapshot?: { project: Project; audio: CreationAudio | undefined; duration: number };
   private statisticsSnapshot?: { project: Project; audio: CreationAudio | undefined; locale: string; facts: [string, string | number][] };
   private shortcutOverrides: ChartShortcutOverrides = {};
   private shortcutsOpen = false;
@@ -450,12 +454,12 @@ export class ChartCreationWorkspace extends LitElement {
   private get previewPlayer() {
     return this.querySelector<ChartSimulator>("chart-simulator");
   }
-  private exportWarnings() {
+  private exportValidation() {
     if (this.warningSnapshot?.revision !== this.history.revision || this.warningSnapshot.format !== this.exportFormat)
       this.warningSnapshot = {
         revision: this.history.revision,
         format: this.exportFormat,
-        value: getExportDiagnostics(this.chart, this.exportFormat),
+        value: validateExportTarget(this.chart, this.exportFormat),
       };
     return this.warningSnapshot.value;
   }
@@ -835,7 +839,11 @@ export class ChartCreationWorkspace extends LitElement {
   }
   private flatProjection(project:Project) {
     if(this.flatChart?.project!==project){
-      try { this.flatChart={project,value:compileOurNotesCreation(project)}; }
+      try {
+        const native = !project.meta.source || ["ss", "authored"].includes(project.meta.source)
+          ? project : { ...project, meta: { ...project.meta, source: "authored" } };
+        this.flatChart={project,value:compileOurNotesCreation(native)};
+      }
       catch { this.flatChart={project}; }
     }
     return this.flatChart.value;
@@ -966,7 +974,7 @@ export class ChartCreationWorkspace extends LitElement {
         import("./runtime/chart-simulator"),
       ]);
       signal.throwIfAborted();
-      const compiled = this.nativeChart ? compileOurNotesCreation(this.chart) : undefined;
+      const compiled = this.flatProjection(this.chart);
       const playback: ChartSimulatorPlayback = {
         ss: compiled?.ss ?? serializeSsForTarget(this.chart, false),
         offsetMs: this.chart.audioOffset * 1000,
@@ -1145,14 +1153,15 @@ export class ChartCreationWorkspace extends LitElement {
         return;
       }
       if (file.size > 2 * 1024 * 1024) throw new Error("chart_size");
-      const text = await file.text(),
-        imported = importChart(text);
+      const bytes = new Uint8Array(await file.arrayBuffer()), binary = isMmws(bytes);
+      const text = binary ? Array.from(bytes, byte => String.fromCharCode(byte)).join("") : new TextDecoder().decode(bytes),
+        imported = importChart(binary ? bytes : text);
       signal.throwIfAborted();
       readAuthorCollections(imported.project);
       this.collectionScope = {}; this.deletingProject = false;
       this.history.reset(imported.project);
       this.original = structuredClone(imported.project);
-      this.source = { name: file.name, text };
+      this.source = { name: file.name, text, ...(binary ? { encoding: "binary" as const } : {}) };
       this.projectId = crypto.randomUUID();
       this.head = 0;
       this.activeRevision = 0;
@@ -1185,6 +1194,13 @@ export class ChartCreationWorkspace extends LitElement {
     const path = event.composedPath();
     if (!path.some(node => node === this || node instanceof HTMLElement && node.dataset.appBarOwner === this.toolbarOwner)) return;
     if (document.querySelector("dialog[open]")) return;
+    const shortcut = matchChartShortcut(this.shortcutOverrides, event);
+    if (shortcut === "save") {
+      event.preventDefault();
+      (document.activeElement as HTMLElement | null)?.blur();
+      void this.run(() => this.save());
+      return;
+    }
     if (
       path
         .some(
@@ -1200,7 +1216,6 @@ export class ChartCreationWorkspace extends LitElement {
       return;
     if ([" ", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)
       && path.some(node => node instanceof HTMLElement && node.matches("button,a[href],[role=button],[role=radio],[role=checkbox]"))) return;
-    const shortcut = matchChartShortcut(this.shortcutOverrides, event);
     if (this.pastePlacement) {
       const placement = this.pastePlacement;
       if (shortcut === "cancel" || shortcut === "undo") this.cancelPaste();
@@ -1253,6 +1268,7 @@ export class ChartCreationWorkspace extends LitElement {
       case "select_all": this.setSelection(this.selectionNodes().map(item => item.note.id)); break;
       case "cut": this.cutSelection(); break;
       case "copy": this.clipboard = copyAuthorSelection(this.chart, this.selectedIds); this.requestUpdate(); break;
+      case "copy_segments": this.copySegments(); break;
       case "paste": case "paste_mirrored": this.pasteSelection(command === "paste_mirrored"); break;
       case "duplicate": case "duplicate_mirrored": this.duplicateSelection(command === "duplicate_mirrored"); break;
       case "delete": this.edit(project => deleteChartSelectionGroup(project, this.selectedIds)); break;
@@ -1278,7 +1294,7 @@ export class ChartCreationWorkspace extends LitElement {
         this.laneStart = this.clampLaneStart(this.laneStart + (command === "pan_right" ? 1 : -1) * this.laneSpan() * 0.1); break;
       case "page_up": case "page_down":
         this.windowStart = this.clampStart(this.windowStart + (command === "page_up" ? 1 : -1) * this.secondsPerScreen); break;
-      case "home": case "end": this.windowStart = command === "home" ? 0 : this.clampStart(this.audio?.analysis.duration ?? 0); break;
+      case "home": case "end": this.windowStart = command === "home" ? 0 : this.clampStart(this.timelineDuration() - this.secondsPerScreen); break;
       case "previous_waypoint": case "next_waypoint": this.stepWaypoint(command === "next_waypoint" ? 1 : -1); break;
       case "audio_settings": void this.showAudioSettings(); break;
       case "note_sounds": this.setAudioSetting("notes", !this.audioSettings.notes); break;
@@ -1468,9 +1484,24 @@ export class ChartCreationWorkspace extends LitElement {
     this.zoomX = Math.max(1, Math.min(8, value));
     this.laneStart = this.clampLaneStart(anchor - fraction * this.laneSpan());
   }
-  private clampStart(value: number) {
-    return Math.max(0, Math.min(Math.max(0, (this.audio?.analysis.duration ?? 0) - this.secondsPerScreen), value));
+  private timelineDuration() {
+    if (this.timelineSnapshot?.project === this.chart && this.timelineSnapshot.audio === this.audio) return this.timelineSnapshot.duration;
+    let tick = 0;
+    const include = (value: number) => { tick = Math.max(tick, value); };
+    this.chart.singles.forEach(note => include(note.tick));
+    this.chart.lines.forEach(line => line.points.forEach(point => include(point.tick)));
+    this.chart.tempos.forEach(event => include(event.tick));
+    this.chart.meters.forEach(event => include(event.tick));
+    this.chart.timeScales.forEach(event => include(event.tick));
+    this.chart.waypoints?.forEach(point => include(point.tick));
+    this.chart.markers.skill.forEach(include);
+    this.chart.markers.fever.forEach(pair => pair.forEach(include));
+    this.chart.markers.call.forEach(event => include(event.tick));
+    const duration = Math.max(this.audio?.analysis.duration ?? 0, this.map().tickToSeconds(tick + this.chart.resolution * 8));
+    this.timelineSnapshot = { project: this.chart, audio: this.audio, duration };
+    return duration;
   }
+  private clampStart(value: number) { return Math.max(0, value); }
   private setVerticalZoom(span: number, pixel?: number) {
     if (this.busy || this.gesture || !this.audio || this.stageMode !== "edit" || !Number.isFinite(span)) return;
     const canvas = this.querySelector<HTMLCanvasElement>(".chart-creation__editor");
@@ -1955,16 +1986,50 @@ export class ChartCreationWorkspace extends LitElement {
       }
     }
     ctx.globalAlpha = 1;
-    for (const waypoint of chart.waypoints ?? []) {
-      const at = y(waypoint.tick);
+    const annotations = [
+      ...(chart.waypoints ?? []),
+      ...chart.markers.skill.map((tick, index) => ({ tick, name: `${this.t("markers.skill")} ${index + 1}` })),
+      ...chart.markers.fever.flatMap(([start, end]) => [
+        { tick: start, name: `${this.t("markers.fever")} · ${this.t("markers.start")}` },
+        { tick: end, name: `${this.t("markers.fever")} · ${this.t("markers.end")}` },
+      ]),
+      ...chart.markers.call.map(call => ({ tick: call.tick, name: this.t("markers.call") })),
+    ];
+    const annotationNames = new Map<number, string[]>();
+    for (const point of annotations) {
+      const names = annotationNames.get(point.tick) ?? [];
+      names.push(point.name); annotationNames.set(point.tick, names);
+    }
+    const annotationGroups: { at: number; names: string[] }[] = [];
+    ctx.save();
+    ctx.strokeStyle = color("tertiary"); ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+    for (const [tick, names] of [...annotationNames].sort((a, b) => a[0] - b[0])) {
+      const at = y(tick);
       if (at < 0 || at > height) continue;
-      ctx.save();
-      ctx.strokeStyle = color("tertiary"); ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
       ctx.beginPath(); ctx.moveTo(0, at); ctx.lineTo(width, at); ctx.stroke();
+      const previous = annotationGroups.at(-1);
+      if (previous && Math.abs(previous.at - at) < 24) previous.names.push(...names);
+      else annotationGroups.push({ at, names: [...names] });
+    }
+    ctx.restore();
+    for (const { at, names } of annotationGroups) {
+      ctx.save();
       ctx.font = `${style.getPropertyValue("--md-sys-typescale-label-small-size").trim()} ${style.getPropertyValue("--app-font").trim()}`;
-      const labelWidth = Math.min(ctx.measureText(waypoint.name).width, Math.max(0, width - 24));
+      let label = names.join(" · ");
+      const available = Math.max(0, width - 24);
+      if (ctx.measureText(label).width > available) {
+        let low = 0, high = label.length;
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2);
+          if (ctx.measureText(label.slice(0, middle) + "…").width <= available) low = middle;
+          else high = middle - 1;
+        }
+        if (low > 0 && /[\uD800-\uDBFF]/u.test(label[low - 1]!)) low--;
+        label = label.slice(0, low) + "…";
+      }
+      const labelWidth = ctx.measureText(label).width;
       ctx.fillStyle = color("surface-container-high"); ctx.fillRect(8, at - 24, labelWidth + 8, 20);
-      ctx.fillStyle = color("on-surface"); ctx.fillText(waypoint.name, 12, at - 10, Math.max(1, labelWidth));
+      ctx.fillStyle = color("on-surface"); ctx.fillText(label, 12, at - 10);
       ctx.restore();
     }
     const previewing = chart !== this.chart;
@@ -2160,7 +2225,7 @@ export class ChartCreationWorkspace extends LitElement {
       this.history.endMerge();
       this.error = "";
       if (revision === this.history.revision) return false;
-      this.flatChart = { project: this.chart, ...(compiled ? { value: compiled } : {}) };
+      this.flatChart = compiled ? { project: this.chart, value: compiled } : undefined;
       this.pruneSelection();
       this.dirty = true;
       this.status = "";
@@ -2173,6 +2238,11 @@ export class ChartCreationWorkspace extends LitElement {
       this.requestUpdate();
       return false;
     }
+  }
+  private copySegments() {
+    if (!this.chart.lines.some(line => line.points.filter(point => this.selectedIds.has(point.id)).length >= 2)) return;
+    this.clipboard = copyAuthorSegments(this.chart, this.selectedIds);
+    this.requestUpdate();
   }
   private cutSelection() {
     if (this.busy || this.gesture || !this.selectedIds.size) return;
@@ -2553,6 +2623,48 @@ export class ChartCreationWorkspace extends LitElement {
     ];
     this.statisticsSnapshot = { project: chart, audio: this.audio, locale: this.locale, facts };
     return facts;
+  }
+  private renderGameMarkers() {
+    const at = () => Math.max(0, Math.round(this.map().secondsToTick(this.seconds)));
+    const remove = (key: "skill" | "fever" | "call", index: number) => iconButton({
+      label: this.t(`markers.delete_${key}`), icon: "delete", disabled: this.busy,
+      onClick: () => this.edit(project => { project.markers[key].splice(index, 1); }),
+    });
+    return accordion({ id: "chart-game-markers", label: this.t("markers.title"), expanded: this.gameMarkersOpen,
+      onExpandedChange: expanded => { this.gameMarkersOpen = expanded; this.requestUpdate(); }, content: html`
+      <section class="stack" aria-label=${this.t("markers.skill")}>
+        <h3 class="detail-section-title">${this.t("markers.skill")}</h3>
+        <button class="button button--tonal" type="button" ?disabled=${this.busy || !this.audio}
+          @click=${() => this.edit(project => { project.markers.skill.push(at()); })}>${this.t("markers.add_skill")}</button>
+        ${this.chart.markers.skill.map((tick, index) => html`<div class="chart-creation__form">
+          ${this.beatField(tick, tick => this.edit(project => { project.markers.skill[index] = tick; }))}${remove("skill", index)}
+        </div>`)}
+      </section>
+      <section class="stack" aria-label=${this.t("markers.fever")}>
+        <h3 class="detail-section-title">${this.t("markers.fever")}</h3>
+        <button class="button button--tonal" type="button" ?disabled=${this.busy || !this.audio}
+          @click=${() => this.edit(project => { const tick = at(); project.markers.fever.push([tick, tick + project.resolution * 4]); })}>${this.t("markers.add_fever")}</button>
+        ${this.chart.markers.fever.map((pair, index) => html`<div class="chart-creation__form">
+          ${([0, 1] as const).map(edge => this.field(edge ? "markers.end" : "markers.start", pair[edge] / this.chart.resolution, value => this.edit(project => {
+            const tick = parseBeatTick(value, project.resolution);
+            if (edge ? tick < pair[0] : tick > pair[1]) throw new RangeError("fever_order");
+            project.markers.fever[index]![edge] = tick;
+          })))}${remove("fever", index)}
+        </div>`)}
+      </section>
+      <section class="stack" aria-label=${this.t("markers.call")}>
+        <h3 class="detail-section-title">${this.t("markers.call")}</h3>
+        <button class="button button--tonal" type="button" ?disabled=${this.busy || !this.audio}
+          @click=${() => this.edit(project => { project.markers.call.push({ tick: at(), timing: [1, 1, 1, 1] }); })}>${this.t("markers.add_call")}</button>
+        ${this.chart.markers.call.map((call, index) => html`<div class="chart-creation__form">
+          ${this.beatField(call.tick, tick => this.edit(project => { project.markers.call[index]!.tick = tick; }))}
+          ${this.field("markers.rhythm", call.timing.join(" "), value => this.edit(project => {
+            const values = value.trim() ? value.trim().split(/[\s,，]+/u).map(Number) : [];
+            if (values.some(value => value !== 0 && value !== 1)) throw new RangeError("call_rhythm");
+            project.markers.call[index]!.timing = values;
+          }))}${remove("call", index)}
+        </div>`)}
+      </section>` });
   }
   private renderWaypoints() {
     return html`<section class="stack" aria-label=${this.t("creation.waypoints")}>
@@ -3110,6 +3222,9 @@ export class ChartCreationWorkspace extends LitElement {
                 >
                   ${this.t("creation.copy")}
                 </button>
+                <button class="button button--text" type="button"
+                  ?disabled=${this.busy || !chart.lines.some(line => line.points.filter(point => this.selectedIds.has(point.id)).length >= 2)}
+                  @click=${() => this.copySegments()}>${this.t("creation.copy_segments")}</button>
                 <div class="chart-creation__actions">
                   <button class="button button--text" type="button" ?disabled=${this.busy}
                     @click=${() => this.duplicateSelection()}>${this.t("creation.duplicate")}</button>
@@ -3419,21 +3534,9 @@ export class ChartCreationWorkspace extends LitElement {
         `,
       })}
     `;
-    const warningsPanel = html`
-      ${
-        this.exportWarnings().length
-          ? html`
-              <ul aria-label=${this.t("warnings")}>
-                ${this.exportWarnings().map(
-                  (warning) => html`
-                    <li>${this.t(`creation.export_${warning.code.split(".").at(-1)}`)}</li>
-                  `,
-                )}
-              </ul>
-            `
-          : nothing
-      }
-    `;
+    const warningsPanel = html`${(["errors", "warnings"] as const).map(kind => this.exportValidation()[kind].length
+      ? html`<ul aria-label=${this.t(kind)}>${this.exportValidation()[kind].map(issue => html`
+          <li>${this.t(`creation.export_${issue.code.split(".").at(-1)}`)}</li>`)}</ul>` : nothing)}`;
     const timingPanel = html`
       <section aria-label=${this.t("timing")}>
         <div class="chart-creation__actions">
@@ -3538,6 +3641,7 @@ export class ChartCreationWorkspace extends LitElement {
           `,
         )}
       </section>
+      ${this.renderGameMarkers()}
       ${this.renderWaypoints()}
     `;
     const versionsPanel = html`
@@ -3662,21 +3766,13 @@ export class ChartCreationWorkspace extends LitElement {
               `,
             )}
         </md-outlined-select>
-        <md-outlined-select
-          label=${this.t("playbackSpeed")}
-          .value=${String(this.rate)}
-          ?disabled=${this.busy}
-          @change=${(e: Event) => {
-            this.rate = Number((e.target as HTMLSelectElement).value);
-            if (this.preview) this.preview.clock.rate = this.rate;
-          }}
-        >
-          ${[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map(
-            (value) => html`
-              <md-select-option value=${String(value)}><div slot="headline">${value}×</div></md-select-option>
-            `,
-          )}
-        </md-outlined-select>
+        ${this.field("playbackSpeed", this.rate, value => {
+          const rate = Number(value);
+          if (!Number.isFinite(rate) || rate < 0.25 || rate > 4) { this.error = this.t("creation.invalid_rate"); return; }
+          this.rate = rate;
+          if (this.preview) this.preview.clock.rate = rate;
+          this.requestUpdate();
+        }, true)}
       </div>
     `;
     const exportControls = html`
@@ -3690,11 +3786,11 @@ export class ChartCreationWorkspace extends LitElement {
             this.requestUpdate();
           }}
         >
-          ${(["project", "ss", "usc"] as const).map(
+          ${(["project", "ss", "usc", "sus", "mmws"] as const).map(
             (value) => html`
               <md-select-option value=${value}>
                 <div slot="headline">
-                  ${this.t(value === "project" ? "formatProject" : value === "ss" ? "formatSs" : "formatUsc")}
+                  ${this.t(value === "project" ? "formatProject" : value === "ss" ? "formatSs" : value === "sus" ? "formatSus" : value === "mmws" ? "formatMmws" : "formatUsc")}
                 </div>
               </md-select-option>
             `,
@@ -3702,7 +3798,7 @@ export class ChartCreationWorkspace extends LitElement {
         </md-outlined-select>
         <button
           class="button"
-          ?disabled=${this.busy || !this.audio}
+          ?disabled=${this.busy || !this.audio || !this.exportValidation().valid}
           @click=${() =>
             void this.run(async () => {
               await this.save();
@@ -3713,8 +3809,8 @@ export class ChartCreationWorkspace extends LitElement {
                   ? serializeSsForTarget(chart)
                   : this.exportFormat === "usc"
                     ? serializeUsc(chart, { wrapped: true })
-                    : serializeProjectJson(chart);
-              await downloadBlob(new Blob([content], { type: "application/json" }), `chart.${this.exportFormat}.json`);
+                    : this.exportFormat === "sus" ? serializeSus(chart) : this.exportFormat === "mmws" ? serializeMmws(chart) : serializeProjectJson(chart);
+              await downloadBlob(new Blob([content], { type: this.exportFormat === "sus" ? "text/plain" : this.exportFormat === "mmws" ? "application/octet-stream" : "application/json" }), this.exportFormat === "sus" ? "chart.sus" : this.exportFormat === "mmws" ? "chart.mmws" : `chart.${this.exportFormat}.json`);
             })}
         >
           ${this.t("creation.export_chart")}
@@ -3734,7 +3830,7 @@ export class ChartCreationWorkspace extends LitElement {
           if (file) this.loadAudio(file);
         }}
       />
-      <input hidden data-chart type="file" accept=".json,.sus,.ss,.usc" @change=${(e: Event) => this.importFile(e)} />
+      <input hidden data-chart type="file" accept=".mmws,.ccmmws,.ucmmws,.json,.sus,.ss,.usc" @change=${(e: Event) => this.importFile(e)} />
       <input hidden data-backup type="file" accept=".zip" @change=${(e: Event) => this.importFile(e, true)} />
       ${
         this.conflict
@@ -4028,7 +4124,7 @@ export class ChartCreationWorkspace extends LitElement {
                 aria-label=${this.t("creation.position")}
                 .ariaLabel=${this.t("creation.position")}
                 min="0"
-                max=${Math.max(0, (this.audio?.analysis.duration ?? 4) - this.secondsPerScreen)}
+                max=${Math.max(this.windowStart + this.secondsPerScreen, this.timelineDuration())}
                 step="0.1"
                 .value=${this.windowStart}
                 ?disabled=${this.busy || !this.audio}
@@ -4106,11 +4202,11 @@ export class ChartCreationWorkspace extends LitElement {
             aria-label=${this.t("creation.position")}
             .ariaLabel=${this.t("creation.position")}
             min="0"
-            max=${this.audio?.analysis.duration || 1}
+            max=${Math.max(this.timelineDuration(), this.seconds)}
             step="0.01"
             .value=${this.seconds}
             ?disabled=${this.busy || !this.audio}
-            @input=${(event: Event) => this.seekPlayback(Number((event.target as HTMLInputElement).value))}
+            @input=${(event: Event) => this.seekPlayback(Number((event.target as HTMLInputElement).value), true)}
           ></md-slider>
           <output data-time>0.00</output>
           ${iconButton({

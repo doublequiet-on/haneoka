@@ -45,6 +45,11 @@ Editor statistics report authored objects and the native viewer COMBO count.
 The timing panel edits meter changes. Editor audio has separate music, note and
 metronome volumes, native sound sets and local settings. Editing keeps the current
 media clock; focused text drafts survive playback-follow updates.
+Game events edit skill triggers, FEVER sections and CALL rhythms. The timeline
+extends beyond audio, and playback speed accepts custom values from 0.25 to 4.
+Selected slide segments can be copied independently, with automatic endpoints
+resolved on the original curve. Files support SUS export and MMW binary project
+exchange; export diagnostics identify format limits before writing.
 Its Publish dialog selects audio and cover independently: upload your
 own files or reuse Our Notes and Bestdori song resources. Our Notes references
 retain their release identity. Reused audio and covers are copied into deduplicated

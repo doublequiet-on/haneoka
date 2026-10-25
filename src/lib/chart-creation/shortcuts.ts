@@ -16,6 +16,7 @@ export const chartShortcutCommands: readonly ShortcutCommand[] = [
   { id: "select_all", label: "shortcuts.select_all", defaults: ["Mod+KeyA"] },
   { id: "cut", label: "creation.cut", defaults: ["Mod+KeyX"] },
   { id: "copy", label: "creation.copy", defaults: ["Mod+KeyC"] },
+  { id: "copy_segments", label: "creation.copy_segments", defaults: [] },
   { id: "paste", label: "creation.paste", defaults: ["Mod+KeyV"] },
   { id: "paste_mirrored", label: "creation.paste_mirrored", defaults: ["Mod+Shift+KeyV"] },
   { id: "duplicate", label: "creation.duplicate", defaults: ["Mod+KeyD"] },
