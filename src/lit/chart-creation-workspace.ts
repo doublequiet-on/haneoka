@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面编辑、滑条单点插入／合并／拆分、选区批量调宽、精确 Tick 输入、图案文件交换、镜像粘贴／复制、节点重复与 Trace 生成、变速插值、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面编辑、滑条单点插入／合并／拆分、选区批量调宽、精确 Tick 输入、图案文件交换、镜像粘贴／复制、节点重复与 Trace 生成、变速插值、自定义快捷键、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
 // Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -30,6 +30,9 @@ import { TempoMap, snapTick, parseBeatTick, type SnapMode } from "../../packages
 import { importChart } from "../../packages/chart-editor/src/formats/detect";
 import { assertValidProject } from "../../packages/chart-editor/src/validation";
 import { ChartPatternStore, parseChartPattern, serializeChartPattern, type ChartPattern } from "../lib/chart-creation/patterns";
+import { chartCreationTools as creationTools, chartSnapDivisions as snapDivisions, chartShortcutCommands, chartShortcutBindings,
+  displayChartShortcut, matchChartShortcut, readChartShortcuts, shortcutForEvent, writeChartShortcuts,
+  type ChartShortcutOverrides } from "../lib/chart-creation/shortcuts";
 import { CreationStore, type CreationDocument, type CreationRevision } from "../lib/chart-creation/storage";
 import { createExampleAudio, decodeCreationAudio, type CreationAudio } from "../lib/chart-creation/audio";
 import { MediaClock } from "@haneoka/cassiopeia-host-web";
@@ -137,8 +140,6 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
   "watch": "common.actions.watch"
 };
 
-const creationTools = ["select", "tap", "flick", "trace", "hold", "guide", "erase", "pan", "brush", "node"] as const;
-const snapDivisions = [4, 8, 12, 16, 24, 32, 48, 64];
 const fineSnapDivisions = [96, 192, 384, 480, 960, 1920];
 
 interface EditAudioTransport {
@@ -337,6 +338,10 @@ export class ChartCreationWorkspace extends LitElement {
   private rate = 1;
   private selectedSpeeds = new Set<string>();
   private lineToolsOpen = false;
+  private shortcutOverrides: ChartShortcutOverrides = {};
+  private shortcutsOpen = false;
+  private recordingShortcut?: { id: string; index: number };
+  private shortcutError = "";
   private exportFormat: ExportFormat = "project";
   private clipboard?: AuthorClipboard;
   private get hasClipboard() { return Boolean(this.clipboard && (this.clipboard.entities.singles.length || this.clipboard.entities.lines.length || this.clipboard.entities.tempos.length || this.clipboard.entities.meters.length || this.clipboard.entities.timeScales.length || this.clipboard.collections.groups.length || this.clipboard.collections.layers.length)); }
@@ -443,6 +448,7 @@ export class ChartCreationWorkspace extends LitElement {
     const payload = readPageData<PublicSongsPageData>(this);
     if (payload?.schema === "haneoka-public-songs-page-v1") this.preparePage(payload);
     super.connectedCallback();
+    this.shortcutOverrides = readChartShortcuts();
     if (payload) void this.updateComplete.then(() => this.connectEditor());
     else this.connectEditor();
   }
@@ -1152,10 +1158,11 @@ export class ChartCreationWorkspace extends LitElement {
       return;
     if ([" ", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)
       && path.some(node => node instanceof HTMLElement && node.matches("button,a[href],[role=button],[role=radio],[role=checkbox]"))) return;
+    const shortcut = matchChartShortcut(this.shortcutOverrides, event);
     if (this.pastePlacement) {
       const placement = this.pastePlacement;
-      if (event.key === "Escape" || (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") this.cancelPaste();
-      else if (event.key === "Enter") this.confirmPaste();
+      if (shortcut === "cancel" || shortcut === "undo") this.cancelPaste();
+      else if (shortcut === "confirm") this.confirmPaste();
       else if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
         const direction = event.key === "ArrowUp" || event.key === "ArrowRight" ? 1 : -1;
         const time = event.key === "ArrowUp" || event.key === "ArrowDown";
@@ -1165,82 +1172,75 @@ export class ChartCreationWorkspace extends LitElement {
       event.preventDefault();
       return;
     }
-    if (event.altKey && !["ArrowUp", "ArrowDown"].includes(event.key)) return;
     if (this.stageMode === "preview") {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        void this.run(() => this.save());
-      } else if (event.key === " " && !(event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        this.togglePlayback();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        void this.switchStage();
-      }
+      if (shortcut === "save" || shortcut === "play") { this.executeShortcut(shortcut); event.preventDefault(); }
+      else if (shortcut === "cancel") { event.preventDefault(); void this.switchStage(); }
       return;
     }
     if (this.gesture) {
-      if (event.key === "Escape") this.cancelGesture();
+      if (shortcut === "cancel") this.cancelGesture();
       event.preventDefault();
       return;
     }
-    let used = true;
-    const modifier = event.ctrlKey || event.metaKey;
-    if (modifier && event.key.toLowerCase() === "s") void this.run(() => this.save());
-    else if (modifier && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
-      const redo = event.shiftKey || event.key.toLowerCase() === "y";
-      if (redo ? !this.history.canRedo : !this.history.canUndo) {
-        event.preventDefault();
-        return;
-      }
-      if (redo) this.history.redo();
-      else this.history.undo();
-      this.pruneSelection();
-      this.dirty = true;
-      this.rebuildPreview();
-      this.requestUpdate();
-    } else if (modifier && event.key.toLowerCase() === "a") {
-      this.setSelection(this.selectionNodes().map((item) => item.note.id));
-    } else if (modifier && event.key.toLowerCase() === "x") {
-      this.cutSelection();
-    } else if (modifier && event.key.toLowerCase() === "c") {
-      this.clipboard = copyAuthorSelection(this.chart, this.selectedIds);
-      this.requestUpdate();
-    } else if (modifier && event.key.toLowerCase() === "v" && this.hasClipboard) this.pasteSelection(event.shiftKey);
-    else if (modifier && event.key.toLowerCase() === "d") this.duplicateSelection(event.shiftKey);
-    else if (!modifier && event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown"))
-      this.nudgeSelection(event.key === "ArrowUp" ? 1 : -1);
-    else if (event.key === "Delete" || event.key === "Backspace")
-      this.edit((p) => deleteChartSelectionGroup(p, this.selectedIds));
-    else if (!modifier && !event.altKey && (event.code === "BracketLeft" || event.code === "BracketRight"))
-      this.stepWidth((event.code === "BracketRight" ? 1 : -1) * (event.shiftKey ? 1 : 0.25));
-    else if (!modifier && (event.key === "+" || event.key === "=")) this.setVerticalZoom(this.secondsPerScreen / 2);
-    else if (!modifier && event.key === "-") this.setVerticalZoom(this.secondsPerScreen * 2);
-    else if (event.key === " ") this.togglePlayback();
-    else if (event.key === "Escape") {
-      this.pending = undefined;
-      this.setSelection([]);
-      this.requestUpdate();
-    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-      this.windowStart = this.clampStart(this.windowStart + (event.key === "ArrowUp" ? 1 : -1) * 0.25);
-      this.requestUpdate();
-    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      this.laneStart = this.clampLaneStart(
-        this.laneStart + (event.key === "ArrowRight" ? 1 : -1) * this.laneSpan() * 0.1,
-      );
-    } else if (event.key === "PageUp" || event.key === "PageDown") {
-      this.windowStart = this.clampStart(this.windowStart + (event.key === "PageUp" ? 1 : -1) * this.secondsPerScreen);
-    } else if (event.key === "Home" || event.key === "End") {
-      this.windowStart = event.key === "Home" ? 0 : this.clampStart(this.audio?.analysis.duration ?? 0);
-    } else if (!modifier && event.shiftKey && /^Digit[1-8]$/.test(event.code)) {
-      this.snap = snapDivisions[Number(event.code.slice(-1)) - 1];
-      this.requestUpdate();
-    } else if (/^[0-9]$/.test(event.key) && !modifier && !event.shiftKey) {
-      this.tool = creationTools[event.key === "0" ? 9 : Number(event.key) - 1];
-      this.pending = undefined;
-    } else used = false;
-    if (used) event.preventDefault();
+    if (shortcut && this.executeShortcut(shortcut)) event.preventDefault();
   };
+  private executeShortcut(command: string): boolean {
+    if (command.startsWith("tool:")) {
+      this.tool = command.slice(5);
+      this.pending = undefined;
+      this.requestUpdate();
+      return true;
+    }
+    if (command.startsWith("grid:")) {
+      this.snap = Number(command.slice(5));
+      this.requestUpdate();
+      return true;
+    }
+    switch (command) {
+      case "save": void this.run(() => this.save()); break;
+      case "undo": case "redo": {
+        const redo = command === "redo";
+        if (redo ? !this.history.canRedo : !this.history.canUndo) break;
+        if (redo) this.history.redo(); else this.history.undo();
+        this.pruneSelection(); this.dirty = true; this.rebuildPreview(); this.requestUpdate();
+        break;
+      }
+      case "play": this.togglePlayback(); break;
+      case "cancel": this.pending = undefined; this.setSelection([]); this.requestUpdate(); break;
+      case "confirm": return false;
+      case "select_all": this.setSelection(this.selectionNodes().map(item => item.note.id)); break;
+      case "cut": this.cutSelection(); break;
+      case "copy": this.clipboard = copyAuthorSelection(this.chart, this.selectedIds); this.requestUpdate(); break;
+      case "paste": case "paste_mirrored": this.pasteSelection(command === "paste_mirrored"); break;
+      case "duplicate": case "duplicate_mirrored": this.duplicateSelection(command === "duplicate_mirrored"); break;
+      case "delete": this.edit(project => deleteChartSelectionGroup(project, this.selectedIds)); break;
+      case "flip": this.commitProject(flipChartSelection(this.chart, this.selectedIds)); break;
+      case "join": this.joinLines(); break;
+      case "split": this.splitLine(); break;
+      case "repeat": this.repeatNodes(); break;
+      case "generate_nodes": this.generateSelectedNodes(); break;
+      case "remove_nodes": this.removeSelectedNodes(); break;
+      case "generate_traces": case "convert_traces": this.createLineTraces(command === "generate_traces"); break;
+      case "compress_first": case "compress_last": this.compressSelection(command === "compress_first" ? "first" : "last"); break;
+      case "nudge_up": case "nudge_down": this.nudgeSelection(command === "nudge_up" ? 1 : -1); break;
+      case "tick_up": case "tick_down": this.nudgeSelection(command === "tick_up" ? 1 : -1, true); break;
+      case "width_up": this.stepWidth(0.25); break;
+      case "width_down": this.stepWidth(-0.25); break;
+      case "width_up_large": this.stepWidth(1); break;
+      case "width_down_large": this.stepWidth(-1); break;
+      case "zoom_in": this.setVerticalZoom(this.secondsPerScreen / 2); break;
+      case "zoom_out": this.setVerticalZoom(this.secondsPerScreen * 2); break;
+      case "pan_up": case "pan_down":
+        this.windowStart = this.clampStart(this.windowStart + (command === "pan_up" ? 1 : -1) * 0.25); this.requestUpdate(); break;
+      case "pan_left": case "pan_right":
+        this.laneStart = this.clampLaneStart(this.laneStart + (command === "pan_right" ? 1 : -1) * this.laneSpan() * 0.1); break;
+      case "page_up": case "page_down":
+        this.windowStart = this.clampStart(this.windowStart + (command === "page_up" ? 1 : -1) * this.secondsPerScreen); break;
+      case "home": case "end": this.windowStart = command === "home" ? 0 : this.clampStart(this.audio?.analysis.duration ?? 0); break;
+      default: return false;
+    }
+    return true;
+  }
   private togglePlayback() {
     if (this.stageMode === "preview") {
       void this.previewPlayer?.togglePlayback();
@@ -2182,10 +2182,86 @@ export class ChartCreationWorkspace extends LitElement {
         <button class="button button--tonal" type="button" ?disabled=${this.patternBusy || !this.audio || !this.selectedIds.size} @click=${() => void this.savePattern()}>${this.t("patterns.save_selection")}</button>
         <button class="button button--text" type="button" ?disabled=${this.patternBusy || this.selectedPattern === "one-tick-flick" || !this.patternName.trim()}
           @click=${() => void this.renamePattern()}>${this.t("patterns.rename")}</button>
-        <output class="chart-studio__pattern-status" role="status">${this.patternError}</output>
+        <output class="chart-studio__dialog-status" role="status">${this.patternError}</output>
       </div>
       <footer class="dialog__actions"><button class="button button--text" type="button"
         @click=${() => { this.patternOpen = false; }}>${this.c("close")}</button></footer>
+    </dialog>`;
+  }
+  private shortcutLabel(id: string) {
+    return chartShortcutBindings(this.shortcutOverrides, id).map(displayChartShortcut).join(" / ");
+  }
+  private shortcutCommandLabel(command: typeof chartShortcutCommands[number]) {
+    return command.id.startsWith("grid:") ? command.label : this.t(command.label);
+  }
+  private saveShortcut(id: string, bindings: string[]) {
+    const overrides = { ...this.shortcutOverrides, [id]: bindings };
+    try {
+      writeChartShortcuts(overrides);
+      this.shortcutOverrides = overrides;
+      this.recordingShortcut = undefined;
+      this.shortcutError = "";
+    } catch { this.shortcutError = this.t("shortcuts.storage_failed"); }
+    this.requestUpdate();
+  }
+  private recordShortcut(event: KeyboardEvent, id: string, index: number) {
+    if (this.recordingShortcut?.id !== id || this.recordingShortcut.index !== index) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") { this.recordingShortcut = undefined; this.requestUpdate(); return; }
+    const binding = shortcutForEvent(event);
+    if (!binding || event.repeat) return;
+    const conflict = chartShortcutCommands.find(command => command.id !== id
+      && chartShortcutBindings(this.shortcutOverrides, command.id).includes(binding));
+    if (conflict) {
+      this.shortcutError = `${this.t("shortcuts.conflict")} · ${this.shortcutCommandLabel(conflict)}`;
+      this.requestUpdate();
+      return;
+    }
+    const bindings = [...chartShortcutBindings(this.shortcutOverrides, id)];
+    bindings[index] = binding;
+    this.saveShortcut(id, [...new Set(bindings)]);
+  }
+  private showShortcuts() {
+    this.cancelGesture(); this.cancelWidth(); this.closePanels();
+    this.recordingShortcut = undefined; this.shortcutError = ""; this.shortcutsOpen = true;
+    this.requestUpdate();
+  }
+  private renderShortcuts() {
+    if (!this.shortcutsOpen) return nothing;
+    const recording = (id: string, index: number) => {
+      this.recordingShortcut = { id, index }; this.shortcutError = ""; this.requestUpdate();
+    };
+    return html`<dialog class="dialog" aria-label=${this.t("shortcuts.title")}
+      ${modal(() => { this.shortcutsOpen = false; this.recordingShortcut = undefined; this.requestUpdate(); })}>
+      <header class="dialog__header"><h2>${this.t("shortcuts.title")}</h2><output class="chart-studio__dialog-status" role="status">${this.shortcutError}</output></header>
+      <div class="dialog__body">
+        <div class="stack">
+          ${chartShortcutCommands.map(command => {
+            const bindings = chartShortcutBindings(this.shortcutOverrides, command.id), label = this.shortcutCommandLabel(command);
+            const bindingButton = (binding: string | undefined, index: number) => html`<button class="button button--tonal" type="button"
+              aria-label=${`${label} · ${binding ? displayChartShortcut(binding) : this.t("shortcuts.add")}`}
+              @click=${() => recording(command.id, index)} @keydown=${(event: KeyboardEvent) => this.recordShortcut(event, command.id, index)}>
+              ${this.recordingShortcut?.id === command.id && this.recordingShortcut.index === index ? this.t("shortcuts.recording") : binding ? displayChartShortcut(binding) : this.t("shortcuts.add")}
+            </button>`;
+            return html`<div class="stack stack--tight" role="group" aria-label=${label}><span>${label}</span><div class="cluster">
+              ${bindings.map((binding, index) => html`<div class="cluster">
+                ${bindingButton(binding, index)}${iconButton({ label: `${this.t("shortcuts.clear")} · ${label} · ${displayChartShortcut(binding)}`, icon: "close",
+                  onClick: () => this.saveShortcut(command.id, bindings.filter((_, i) => i !== index)) })}
+              </div>`)}
+              ${bindings.length < 4 ? bindingButton(undefined, bindings.length) : nothing}
+            </div></div>`;
+          })}
+        </div>
+      </div>
+      <footer class="dialog__actions">
+        <button class="button button--text" type="button" @click=${() => {
+          try { writeChartShortcuts({}); this.shortcutOverrides = {}; this.recordingShortcut = undefined; this.shortcutError = ""; }
+          catch { this.shortcutError = this.t("shortcuts.storage_failed"); }
+          this.requestUpdate();
+        }}>${this.t("shortcuts.reset")}</button>
+        <button class="button button--text" type="button" @click=${() => { this.shortcutsOpen = false; this.recordingShortcut = undefined; this.requestUpdate(); }}>${this.c("close")}</button>
+      </footer>
     </dialog>`;
   }
   private copyBrush() {
@@ -2552,7 +2628,7 @@ export class ChartCreationWorkspace extends LitElement {
         ${iconButton({ label: this.t("project"), icon: "folder_open", toggle: true, pressed: this.leftOpen, onClick: () => this.togglePanel("left") })}
         ${iconButton({
           label: this.t("undo"),
-          shortcut: "Ctrl/⌘+Z",
+          shortcut: this.shortcutLabel("undo"),
           icon: "undo",
           disabled: this.busy || !!this.pastePlacement || !this.history.canUndo,
           onClick: () => {
@@ -2566,7 +2642,7 @@ export class ChartCreationWorkspace extends LitElement {
         })}
         ${iconButton({
           label: this.t("redo"),
-          shortcut: "Ctrl/⌘+Shift+Z",
+          shortcut: this.shortcutLabel("redo"),
           icon: "redo",
           disabled: this.busy || !!this.pastePlacement || !this.history.canRedo,
           onClick: () => {
@@ -2582,7 +2658,8 @@ export class ChartCreationWorkspace extends LitElement {
       </span>
       ${this.busy ? iconButton({ label: this.c("cancel"), icon: "close", onClick: () => this.cancelOperation() }) : nothing}
       ${this.stageMode === "edit" ? iconButton({ label: this.t("patterns.title"), icon: "widgets", disabled: this.busy, onClick: () => void this.showPatterns() }) : nothing}
-      ${iconButton({ label: this.t("creation.save"), shortcut: "Ctrl/⌘+S", className: "chart-studio__header-save", icon: "save", disabled: this.busy || !this.audio || !this.dirty, onClick: () => void this.run(() => this.save()) })}
+      ${this.stageMode === "edit" ? iconButton({ label: this.t("shortcuts.title"), icon: "keyboard", disabled: this.busy, onClick: () => this.showShortcuts() }) : nothing}
+      ${iconButton({ label: this.t("creation.save"), shortcut: this.shortcutLabel("save"), className: "chart-studio__header-save", icon: "save", disabled: this.busy || !this.audio || !this.dirty, onClick: () => void this.run(() => this.save()) })}
       <button class="button button--text" type="button" ?disabled=${this.busy || !this.audio}
         @click=${() => void this.querySelector<ChartPublication>("chart-publication")?.show()}>
         ${icon("edit", 20)}<span>${clientText(this.locale, "community.charts.publishToCommunity")}</span>
@@ -3305,7 +3382,7 @@ export class ChartCreationWorkspace extends LitElement {
             .sort((a, b) => a - b)
             .map(
               (value) => html`
-                <md-select-option value=${String(value)}><div slot="headline">1/${value}${snapDivisions.includes(value) ? ` (Shift+${snapDivisions.indexOf(value) + 1})` : nothing}</div></md-select-option>
+                <md-select-option value=${String(value)}><div slot="headline">1/${value}${this.shortcutLabel(`grid:${value}`) ? ` (${this.shortcutLabel(`grid:${value}`)})` : nothing}</div></md-select-option>
               `,
             )}
         </md-outlined-select>
@@ -3398,6 +3475,7 @@ export class ChartCreationWorkspace extends LitElement {
       }
 
       ${this.renderPatterns()}
+      ${this.renderShortcuts()}
       <chart-creation-library
         .pageData=${this.pageData}
         .locale=${this.locale as HaneokaLocale}
@@ -3456,8 +3534,8 @@ export class ChartCreationWorkspace extends LitElement {
               ${segmented({
           label: this.t("currentTool"),
           value: this.tool,
-          options: creationTools.map((value, index) => ({
-            shortcut: String((index + 1) % 10),
+          options: creationTools.map(value => ({
+            shortcut: this.shortcutLabel(`tool:${value}`),
             value,
             label: this.t(value === "brush" ? "creation.brush" : value),
             icon: (
@@ -3500,7 +3578,7 @@ export class ChartCreationWorkspace extends LitElement {
               </output>
               ${iconButton({
           label: this.t("undo"),
-          shortcut: "Ctrl/⌘+Z",
+          shortcut: this.shortcutLabel("undo"),
           icon: "undo",
           className: "chart-studio__history",
           disabled: this.busy || !!this.pastePlacement || !this.history.canUndo,
@@ -3515,7 +3593,7 @@ export class ChartCreationWorkspace extends LitElement {
         })}
               ${iconButton({
           label: this.t("redo"),
-          shortcut: "Ctrl/⌘+Shift+Z",
+          shortcut: this.shortcutLabel("redo"),
           icon: "redo",
           className: "chart-studio__history",
           disabled: this.busy || !!this.pastePlacement || !this.history.canRedo,

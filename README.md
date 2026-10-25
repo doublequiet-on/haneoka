@@ -38,6 +38,8 @@ Selected tail/head pairs can join slides; a selected middle point can split one.
 Mirror paste and duplicate commands share placement previews. Slide tools repeat
 a selected path and generate Trace notes along native curves; timing tools
 interpolate selected speed changes. Patterns support renaming and JSON file exchange.
+Keyboard shortcuts support multiple bindings per command, conflict checks and
+restoring defaults; tooltips follow the saved local bindings.
 Its Publish dialog selects audio and cover independently: upload your
 own files or reuse Our Notes and Bestdori song resources. Our Notes references
 retain their release identity. Reused audio and covers are copied into deduplicated
