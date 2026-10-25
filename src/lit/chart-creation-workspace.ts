@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面编辑、选区边缘批量调宽、精确 Tick 输入、图案复用与放置、节点时间压缩、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面编辑、滑条本体单点插入及节点模式、选区边缘批量调宽、精确 Tick 输入、图案复用与放置、节点时间压缩、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
 // Effects/Dependencies: IndexedDB、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -72,9 +72,13 @@ import {
   compressChartSelection,
   flipChartSelection,
   generateLinePoints,
+  insertLinePoint,
   nudgeChartSelectionOnGrid,
   removableLinePointIds,
   removeLineControlPoints,
+  sampleLineSpan,
+  setLinePointMode,
+  type LinePointMode,
   type NoteBrush,
 } from "../../packages/chart-editor/src/creation/actions";
 import {
@@ -130,7 +134,7 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
   "watch": "common.actions.watch"
 };
 
-const creationTools = ["select", "tap", "flick", "trace", "hold", "guide", "erase", "pan", "brush"] as const;
+const creationTools = ["select", "tap", "flick", "trace", "hold", "guide", "erase", "pan", "brush", "node"] as const;
 const snapDivisions = [4, 8, 12, 16, 24, 32, 48, 64];
 const fineSnapDivisions = [96, 192, 384, 480, 960, 1920];
 
@@ -220,6 +224,7 @@ export class ChartCreationWorkspace extends LitElement {
     patternName: { state: true },
     selectedPattern: { state: true },
     patternError: { state: true },
+    nodeMode: { state: true },
   };
   declare locale: string;
   declare private collectionScope: ChartCollectionScope;
@@ -301,6 +306,7 @@ export class ChartCreationWorkspace extends LitElement {
   };
   private controller?: AbortController;
   private observer?: ResizeObserver;
+  private appearanceObserver?: MutationObserver;
   private unlocale?: () => void;
   declare private busy: boolean;
   declare private dirty: boolean;
@@ -312,7 +318,9 @@ export class ChartCreationWorkspace extends LitElement {
   declare private revisions: CreationRevision[];
   declare private windowStart: number;
   private pending?: { tick: number; lane: number; size: number };
+  declare private nodeMode: LinePointMode;
   private seconds = 0;
+  private preciseSeekSeconds?: number;
   private lastTransportPaint = 0;
   private cursor?: { clientX: number; clientY: number; pointerType: string };
   private cursorFrame = 0;
@@ -369,6 +377,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.patternName = "";
     this.selectedPattern = "one-tick-flick";
     this.patternError = "";
+    this.nodeMode = "visible";
     this.collectionScope = {}; this.deletingProject = false;
     this.defaultWidth = 4;
     this.fullscreen = false;
@@ -453,6 +462,8 @@ export class ChartCreationWorkspace extends LitElement {
     this.panelMedia = matchMedia("(max-width: 959px)");
     this.panelMedia.addEventListener("change", this.mediaChanged);
     this.mediaChanged();
+    this.appearanceObserver ??= new MutationObserver(() => this.paint());
+    this.appearanceObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-seed"] });
     document.addEventListener("keydown", this.keydown);
     window.addEventListener("beforeunload", this.beforeUnload);
     this.unlocale = initializeI18nClient().subscribe((catalog) => {
@@ -525,6 +536,7 @@ export class ChartCreationWorkspace extends LitElement {
     this.canvasController?.abort();
     void this.canvasTheme?.dispose();this.canvasTheme=undefined;
     this.observer?.disconnect();
+    this.appearanceObserver?.disconnect();
     this.unlocale?.();
     void this.operation.then(() => this.store.close()).catch(() => {});
     void this.patternStore.close().catch(() => {});
@@ -583,9 +595,9 @@ export class ChartCreationWorkspace extends LitElement {
       audio: this.audio, dirty: this.dirty, conflict: this.conflict, revisions: this.revisions,
       previewIdentity: this.previewIdentity, collectionScope: this.collectionScope,
       selected: this.selected, selectedIds: this.selectedIds, clipboard: this.clipboard,
-      seconds: this.seconds, windowStart: this.windowStart, laneStart: this.laneStart,
+      seconds: this.seconds, preciseSeekSeconds: this.preciseSeekSeconds, windowStart: this.windowStart, laneStart: this.laneStart,
       zoomX: this.zoomX, secondsPerScreen: this.secondsPerScreen,
-      tool: this.tool, defaultWidth: this.defaultWidth, critical: this.critical,
+      tool: this.tool, nodeMode: this.nodeMode, defaultWidth: this.defaultWidth, critical: this.critical,
       direction: this.direction, snap: this.snap, relativeSnap: this.relativeSnap,
       insertLane: this.insertLane, multiPick: this.multiPick, brushPreset: this.brushPreset,
       followPlayback: this.followPlayback, exportFormat: this.exportFormat,
@@ -672,6 +684,7 @@ export class ChartCreationWorkspace extends LitElement {
     if (this.pastePlacement && this.pastePlacement.base !== this.chart) this.cancelPaste();
     if (this.viewProjectId !== this.projectId) {
       this.viewProjectId = this.projectId;
+      this.preciseSeekSeconds = undefined;
       this.laneStart = (this.chart.laneBasis - this.laneSpan()) / 2;
     }
     this.laneStart = this.clampLaneStart(this.laneStart);
@@ -781,6 +794,8 @@ export class ChartCreationWorkspace extends LitElement {
     return this.flatChart.value;
   }
   private updateTransport(seconds: number, playing: boolean) {
+    if (playing) this.preciseSeekSeconds = undefined;
+    else if (this.preciseSeekSeconds !== undefined) seconds = this.preciseSeekSeconds;
     this.seconds = seconds;
     if (playing && this.stageMode === "edit" && this.followPlayback && !this.gesture) {
       const next = this.clampStart(seconds - this.secondsPerScreen * 0.25);
@@ -874,6 +889,7 @@ export class ChartCreationWorkspace extends LitElement {
     void this.updateComplete.then(() => this.querySelector<ChartCreationLibrary>("chart-creation-library")?.show(provider));
   }
   private async switchStage() {
+    this.preciseSeekSeconds = undefined;
     if (this.busy || !this.audio) return;
     this.clearCursor();
     if (this.stageMode === "preview") {
@@ -924,7 +940,8 @@ export class ChartCreationWorkspace extends LitElement {
       await this.updateComplete;
     });
   }
-  private seekPlayback(seconds: number) {
+  private seekPlayback(seconds: number, exact = false) {
+    this.preciseSeekSeconds = this.stageMode === "edit" && exact ? seconds : undefined;
     if (this.stageMode === "preview") this.previewPlayer?.seek(seconds);
     else this.preview?.seek(seconds);
   }
@@ -938,6 +955,7 @@ export class ChartCreationWorkspace extends LitElement {
       await this.save();
       this.preview?.dispose();
       this.audio = audio;
+      this.preciseSeekSeconds = undefined;
       if (example) {
         this.projectId = crypto.randomUUID();
         this.head = 0;
@@ -1210,8 +1228,8 @@ export class ChartCreationWorkspace extends LitElement {
     } else if (!modifier && event.shiftKey && /^Digit[1-8]$/.test(event.code)) {
       this.snap = snapDivisions[Number(event.code.slice(-1)) - 1];
       this.requestUpdate();
-    } else if (/^[1-9]$/.test(event.key) && !modifier && !event.shiftKey) {
-      this.tool = creationTools[Number(event.key) - 1];
+    } else if (/^[0-9]$/.test(event.key) && !modifier && !event.shiftKey) {
+      this.tool = creationTools[event.key === "0" ? 9 : Number(event.key) - 1];
       this.pending = undefined;
     } else used = false;
     if (used) event.preventDefault();
@@ -1388,6 +1406,7 @@ export class ChartCreationWorkspace extends LitElement {
     const tick = Math.max(0, this.gridTick(map.secondsToTick(seconds))),
       lane = Math.round(pointerLane);
     const edgeTolerance = ((event.pointerType === "touch" ? 14 : 8) / rect.width) * laneSpan;
+    if (this.tool === "node") { this.insertNodeAt(tick, pointerLane, edgeTolerance); return; }
     const selectedEdge = (item: ReturnType<typeof chartSelectionNodes>[number]) =>
       this.selectedIds.has(item.note.id) &&
       Math.min(Math.abs(pointerLane - item.lane), Math.abs(pointerLane - item.lane - item.size)) <= edgeTolerance;
@@ -1614,6 +1633,7 @@ export class ChartCreationWorkspace extends LitElement {
   }
   private place(tick: number, lane: number) {
     const chart = this.chart;
+    if (this.tool === "node") { this.insertNodeAt(tick); return; }
     if (readAuthorCollections(chart).layers.some(layer => layer.id === this.collectionScope.layerId && !layer.visible)) {
       this.error = this.t("creation.invalid_edit"); return;
     }
@@ -1837,6 +1857,13 @@ export class ChartCreationWorkspace extends LitElement {
       const lane = edited?.lane ?? Math.round(viewportXToAuthoredLane(cursorX, width, this.laneView(chart)));
       const cursorLane = action?.kind === "resize-right" && edited ? lane + edited.size : lane;
       const at = y(tick);
+      const nodeTarget = !action && !this.widthSession && this.tool === "node" ? this.nodeTarget(tick, viewportXToAuthoredLane(cursorX, width, this.laneView(chart)), 14 / width * laneSpan) : undefined;
+      if (nodeTarget) {
+        ctx.save();
+        ctx.strokeStyle = color("primary"); ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+        ctx.strokeRect(x(nodeTarget.lane) - 2, at - 14, Math.max(4, w(nodeTarget.size)) + 4, 28);
+        ctx.restore();
+      }
       if (!action && !this.pan && ["tap", "flick", "trace", "hold", "guide"].includes(this.tool)) {
         const valid = authoredSpanInBounds(lane, this.defaultWidth, chart.laneBasis);
         ctx.save();
@@ -1865,7 +1892,8 @@ export class ChartCreationWorkspace extends LitElement {
         Math.abs(y(item.note.tick) - cursorY) <= 12 &&
         Math.min(Math.abs(x(item.lane) - cursorX), Math.abs(x(item.lane + item.size) - cursorX)) <= 8);
       canvas.style.cursor = this.tool === "pan" ? (this.pan ? "grabbing" : "grab") :
-        this.tool === "select" && nearby ? "ew-resize" : "crosshair";
+        this.tool === "select" && nearby ? "ew-resize" : this.tool === "node" ? nodeTarget ? "copy" : "not-allowed" : "crosshair";
+      if (this.tool === "node" && cursorOutput && !nodeTarget) cursorOutput.textContent = this.t("creation.node_missing");
     } else canvas.style.cursor = this.tool === "pan" ? "grab" : "crosshair";
     if (this.pastePlacement) {
       const placement = this.pastePlacement;
@@ -2121,6 +2149,61 @@ export class ChartCreationWorkspace extends LitElement {
     const result = generateLinePoints(project, lines, this.snap, 4);
     if (this.commitProject(result.project)) this.setSelection(result.created);
     this.requestUpdate();
+  }
+  private nodeTarget(tick: number, lane?: number, tolerance = 0) {
+    const project = this.chart, selected = this.selectedConnectorIds();
+    const display = this.editingProject(project), projection = this.flatProjection(display);
+    const nativeNotes = projection ? new Map(projection.chart.notes.map(note => [note.id, note])) : undefined;
+    const at = (this.map().tickToSeconds(tick) - project.audioOffset) * 1000;
+    const candidates: { lineId: string; lane: number; size: number }[] = [];
+    for (const line of display.lines) {
+      let shape = sampleLineSpan(line, tick);
+      if (!shape || lane === undefined && !selected.has(line.id)) continue;
+      if (projection && nativeNotes) {
+        const nativeLine = projection.chart.lines.find(native => projection.sourceMap.linesForCanonical(line.id).includes(native.id));
+        const points = nativeLine?.noteIds.map(id => nativeNotes.get(id)).filter((note): note is ChartNote => !!note && note.indexInLine !== null).sort((a, b) => a.timeMs - b.timeMs);
+        const index = points?.findIndex(point => point.timeMs >= at) ?? -1;
+        if (points && index >= 0) {
+          const head = points[Math.max(0, index - 1)]!, tail = points[index]!;
+          const resolved = head === tail || head.timeMs === tail.timeMs ? { pos: tail.pos, size: tail.size } : interpolateNoteLine(head, tail, at);
+          shape = { lane: resolved.pos / 24 * project.laneBasis, size: resolved.size / 24 * project.laneBasis };
+        }
+      }
+      if (lane !== undefined && (lane < shape.lane - tolerance || lane > shape.lane + shape.size + tolerance)) continue;
+      candidates.push({ lineId: line.id, ...shape });
+    }
+    return candidates.sort((a, b) => Number(selected.has(b.lineId)) - Number(selected.has(a.lineId)) ||
+      (lane === undefined ? 0 : Math.abs(a.lane + a.size / 2 - lane) - Math.abs(b.lane + b.size / 2 - lane)))[0];
+  }
+  private insertNodeAt(tick: number, lane?: number, tolerance = 0) {
+    if (this.busy || this.gesture || !this.audio) return;
+    const target = this.nodeTarget(tick, lane, tolerance);
+    if (!target) { snackbar(this.t("creation.node_missing")); return; }
+    try {
+      const result = insertLinePoint(this.chart, target.lineId, tick, { mode: this.nodeMode, shape: target });
+      if (!result.created || this.commitProject(result.project)) this.setSelection([result.id]);
+      this.requestUpdate();
+    } catch { snackbar(this.t("creation.invalid_edit")); }
+  }
+  private activateNodeTool() {
+    this.cancelGesture();
+    this.cancelWidth();
+    this.pending = undefined;
+    this.tool = "node";
+    this.closePanels();
+    void this.updateComplete.then(() => this.querySelector<HTMLElement>(".chart-creation__editor")?.focus({ preventScroll: true }));
+  }
+  private renderNodeMode(value: LinePointMode, change: (mode: LinePointMode) => void, label = "creation.node_mode") {
+    return html`<md-outlined-select label=${this.t(label)} .value=${live(value)}
+      ?disabled=${this.busy} @change=${(event: Event) => change((event.target as HTMLSelectElement).value as LinePointMode)}>
+      ${(["visible", "hidden", "auto"] as const).map(mode => html`<md-select-option value=${mode} .selected=${mode === value}>
+        <div slot="headline">${this.t(`creation.node_${mode}`)}</div></md-select-option>`)}
+    </md-outlined-select>`;
+  }
+  private changeSelectedNodeMode(mode: LinePointMode) {
+    if (this.busy || this.gesture || this.pastePlacement) return;
+    try { this.commitProject(setLinePointMode(this.chart, this.selectedIds, mode)); }
+    catch { snackbar(this.t("creation.invalid_edit")); }
   }
   private removeSelectedNodes() {
     if (this.busy || this.gesture || !this.audio) return;
@@ -2454,6 +2537,8 @@ export class ChartCreationWorkspace extends LitElement {
   render() {
     const chart = this.chart,
       selection = [...chart.singles, ...chart.lines.flatMap((l) => l.points)].find((n) => n.id === this.selected);
+    const selectedShape = this.selectionNodes(chart).find(item => item.note.id === this.selected);
+    const interior = selection && chart.lines.some(line => line.points.slice(1, -1).some(point => point.id === selection.id));
     const selectedUpdate = (updater: (note: SingleNote | LinePoint) => void) =>
       this.edit((p) => {
         const ids = new Set([this.selected]);
@@ -2601,6 +2686,8 @@ export class ChartCreationWorkspace extends LitElement {
                   `)}
                 </div>
                 ${this.selectedConnectorIds(chart).size ? html`<button class="button button--text" type="button" ?disabled=${this.busy} @click=${() => this.selectConnectors()}>${this.t("patterns.select_line")}</button>` : nothing}
+                ${this.selectedConnectorIds(chart).size ? html`<button class="button button--tonal" type="button" ?disabled=${this.busy}
+                  @click=${() => this.activateNodeTool()}>${icon("add", 20)}${this.t("creation.insert_node")}</button>` : nothing}
                 <div class="chart-studio__tick-actions" role="group" aria-label=${this.t("patterns.compress")}>
                   ${(["first", "last"] as const).map(anchor => html`<button class="button button--text" type="button"
                     ?disabled=${this.busy || new Set(this.selectionNodes(chart).filter(item => this.selectedIds.has(item.note.id)).map(item => item.note.tick)).size < 2}
@@ -2608,13 +2695,15 @@ export class ChartCreationWorkspace extends LitElement {
                 </div>
                 ${this.field(
                   "lane",
-                  selection.lane,
+                  selectedShape?.lane ?? 0,
                   (value) =>
                     selectedUpdate((n) => {
                       n.lane = Number(value);
+                      if ("ease" in n) { delete n.autoSize; delete n.resolvedLane; delete n.resolvedSize; }
                     }),
                   true,
                 )}
+                ${interior && selection ? this.renderNodeMode(selection.lane === "auto" ? "auto" : selection.visible ? "visible" : "hidden", mode => this.changeSelectedNodeMode(mode)) : nothing}
                 ${this.selectedConnectorIds(chart).size ? html`
                   <md-outlined-select label=${this.t("creation.line_kind")}
                     .value=${live(this.selectedLineKind())}
@@ -2724,7 +2813,7 @@ export class ChartCreationWorkspace extends LitElement {
                   <md-checkbox
                     aria-label=${this.t("visible")}
                     .checked=${selection.visible}
-                    ?disabled=${this.busy}
+                    ?disabled=${this.busy || selection.lane === "auto"}
                     @change=${(e: Event) =>
                       selectedUpdate((n) => {
                         n.visible = (e.target as HTMLInputElement).checked;
@@ -2806,6 +2895,11 @@ export class ChartCreationWorkspace extends LitElement {
         },
         content: html`
           <div class="chart-creation__form">
+            ${this.tool === "node" ? html`
+              ${this.renderNodeMode(this.nodeMode, mode => { this.nodeMode = mode; }, "creation.new_node_mode")}
+              <button class="button" type="button" ?disabled=${this.busy || !this.audio || !this.selectedConnectorIds().size}
+                @click=${() => this.insertNodeAt(Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds))))}>${this.t("creation.insert_node_here")}</button>
+            ` : html`
             ${this.widthControl(this.defaultWidth)}
             ${this.field(
               "lane",
@@ -2852,6 +2946,7 @@ export class ChartCreationWorkspace extends LitElement {
                 `,
               )}
             </md-outlined-select>
+            `}
           </div>
         `,
       })}
@@ -3230,12 +3325,13 @@ export class ChartCreationWorkspace extends LitElement {
           label: this.t("currentTool"),
           value: this.tool,
           options: creationTools.map((value, index) => ({
-            shortcut: String(index + 1),
+            shortcut: String((index + 1) % 10),
             value,
             label: this.t(value === "brush" ? "creation.brush" : value),
             icon: (
               {
                 brush: "format_paint",
+                node: "add",
                 select: "center_focus_strong",
                 tap: "music_note",
                 flick: "north_east",
@@ -3471,7 +3567,7 @@ export class ChartCreationWorkspace extends LitElement {
                 html`
                       ${selectionPanel}${defaultsPanel}${viewControls}
                       ${this.beatField(Math.round(this.map().secondsToTick(this.seconds)), tick => {
-                this.seekPlayback(this.map().tickToSeconds(tick));
+                this.seekPlayback(this.map().tickToSeconds(tick), true);
               })}
                       <button
                         class="button button--text"
@@ -3544,7 +3640,7 @@ export class ChartCreationWorkspace extends LitElement {
             let audio: CreationAudio | undefined;
             await this.run(async signal => {
               audio = await decodeCreationAudio(file, AbortSignal.any([signal, external]));
-              await this.save(); signal.throwIfAborted(); this.preview?.dispose(); this.audio = audio; this.dirty = true; this.rebuildPreview(0);
+              await this.save(); signal.throwIfAborted(); this.preview?.dispose(); this.audio = audio; this.preciseSeekSeconds = undefined; this.dirty = true; this.rebuildPreview(0);
             });
             if (!audio) throw new Error("audio_decode"); return audio;
           }}></chart-publication>

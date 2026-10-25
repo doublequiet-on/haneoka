@@ -37,6 +37,10 @@ lane shift; the host can stage its returned project before committing it.
 keeping each note's opposite edge fixed and retaining width differences.
 Stage bounds limit the whole group; automatic points resolve from the unchanged
 source before resizing. The host provides its lane grid for boundary clamping.
+`insertLinePoint` inserts a single visible, hidden or automatic middle control,
+preserving endpoints, same-tick controls and connector group/layer ownership.
+`setLinePointMode` changes selected interior controls using their resolved source
+geometry. Automatic controls keep the authored interpolation marker.
 
 The host provides the user interface, files, storage, and audio decoding.
 Conversion warnings must be shown to the user.

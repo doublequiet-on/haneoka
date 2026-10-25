@@ -1,9 +1,13 @@
 import {
   createProjectId,
+  resolveLinePointShape,
   structuredCloneValue,
   type Project,
   type SingleNote,
   type LinePoint,
+  type NoteLine,
+  type ResolvedLinePointShape,
+  type JsonValue,
   type NoteType,
   type NoteDirection,
   type LineEase,
@@ -13,7 +17,80 @@ import { snapTick } from "../timing";
 import { resizeChartSelection } from "./authoring";
 import { chartSelectionNodes, copyChartSelectionGroup, deleteChartSelectionGroup, moveChartSelection } from "./selection";
 import { assertEditedChartSpans } from "./span";
-import { reconcileAuthorEdit } from "./collections";
+import { COLLECTIONS_KEY, readAuthorCollections, reconcileAuthorEdit } from "./collections";
+
+export type LinePointMode = "visible" | "hidden" | "auto";
+
+function inheritLinePointMembership(project: Project, lineId: string, ids: readonly string[]) {
+  const collections = readAuthorCollections(project), owner = collections.members[lineId];
+  if (!owner?.groupId && !owner?.layerId) return;
+  for (const id of ids) collections.members[id] = {
+    ...(owner.groupId ? { groupId: owner.groupId } : {}),
+    ...(owner.layerId ? { layerId: owner.layerId } : {}),
+  };
+  project.extensions[COLLECTIONS_KEY] = collections as unknown as JsonValue;
+}
+
+export function sampleLineSpan(line: NoteLine, tick: number): ResolvedLinePointShape | undefined {
+  const index = line.points.findIndex(point => point.tick >= tick);
+  if (index < 0) return;
+  if (line.points[index]!.tick === tick) return resolveLinePointShape(line.points, index);
+  if (!index) return;
+  const sample: LinePoint = { ...line.points[index - 1]!, tick, lane: "auto", autoSize: true };
+  return resolveLinePointShape([...line.points.slice(0, index), sample, ...line.points.slice(index)], index);
+}
+
+/** Insert one control without replacing endpoints or existing same-tick nodes. */
+export function insertLinePoint(
+  project: Project,
+  lineId: string,
+  tick: number,
+  options: { mode?: LinePointMode; shape?: ResolvedLinePointShape } = {},
+): { project: Project; id: string; created: boolean } {
+  const source = project.lines.find(line => line.id === lineId);
+  if (!source || !Number.isSafeInteger(tick) || tick < 0) throw new RangeError("invalid_line_point");
+  const existing = source.points.find(point => point.tick === tick);
+  if (existing) return { project: structuredCloneValue(project), id: existing.id, created: false };
+  const shape = options.shape ?? sampleLineSpan(source, tick);
+  if (!shape || tick <= source.points[0]!.tick || tick >= source.points.at(-1)!.tick)
+    throw new RangeError("invalid_line_point");
+  const previous = source.points[source.points.findIndex(point => point.tick > tick) - 1]!;
+  const mode = options.mode ?? "visible", id = createProjectId("node");
+  const point: LinePoint = {
+    id, tick, lane: mode === "auto" ? "auto" : shape.lane, size: mode === "auto" ? 0 : shape.size,
+    ...(mode === "auto" ? { autoSize: true } : {}),
+    type: "tap", critical: source.critical ?? previous.critical, direction: "none", visible: mode !== "hidden",
+    ease: mode === "auto" ? { left: "linear", right: "linear" } : { ...previous.ease },
+  };
+  const result = structuredCloneValue(project), line = result.lines.find(line => line.id === lineId)!;
+  line.points.push(point);
+  line.points.sort((a, b) => a.tick - b.tick);
+  inheritLinePointMembership(result, lineId, [id]);
+  clearAutoCache(result, new Set([id]));
+  assertValidProject(result);
+  assertEditedChartSpans(project, result);
+  return { project: result, id, created: true };
+}
+
+export function setLinePointMode(project: Project, ids: ReadonlySet<string>, mode: LinePointMode): Project {
+  const shapes = new Map(chartSelectionNodes(project).filter(({ note }) => ids.has(note.id)).map(entry => [entry.note.id, entry]));
+  const result = structuredCloneValue(project);
+  for (const line of result.lines) for (const point of line.points.slice(1, -1)) {
+    const shape = shapes.get(point.id);
+    if (!shape) continue;
+    point.lane = mode === "auto" ? "auto" : shape.lane;
+    point.size = mode === "auto" ? 0 : shape.size;
+    point.visible = mode !== "hidden";
+    if (mode === "auto") point.autoSize = true;
+    else delete point.autoSize;
+    delete point.resolvedLane;
+    delete point.resolvedSize;
+  }
+  clearAutoCache(result, ids);
+  assertValidProject(result);
+  assertEditedChartSpans(project, result);
+  return result;
+}
 
 export function removableLinePointIds(project: Project, ids: ReadonlySet<string>): string[] {
   return project.lines.flatMap(line => line.points.slice(1, -1).filter(point => ids.has(point.id)).map(point => point.id));
@@ -166,6 +243,7 @@ export function generateLinePoints(project: Project, lineIds: ReadonlySet<string
     created: string[] = [];
   for (const line of result.lines) {
     if (!lineIds.has(line.id) || line.points.length < 2) continue;
+    const firstCreated = created.length;
     const existing = new Set(line.points.map((point) => point.tick)),
       start = line.points[0]!.tick,
       end = line.points.at(-1)!.tick;
@@ -194,6 +272,7 @@ export function generateLinePoints(project: Project, lineIds: ReadonlySet<string
       created.push(id);
     }
     line.points.sort((a, b) => a.tick - b.tick);
+    inheritLinePointMembership(result, line.id, created.slice(firstCreated));
   }
   assertValidProject(result);
   return { project: result, created };

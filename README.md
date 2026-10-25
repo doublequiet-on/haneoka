@@ -30,7 +30,11 @@ artwork to toggle ownership while keeping the filtered list in place. Finish
 adding returns to growth editing; existing growth and search settings are preserved.
 
 The chart editor saves local revisions automatically and reopens the latest local
-project. Its Publish dialog selects audio and cover independently: upload your
+project. Select Slide node (`0`) and click a Hold or Guide body to insert a middle
+point; the selected connector's inspector also provides Insert middle node.
+Node types are visible, hidden and automatic; Fill nodes on grid remains the
+separate batch operation. Paused beat positions retain their exact input precision.
+Its Publish dialog selects audio and cover independently: upload your
 own files or reuse Our Notes and Bestdori song resources. Our Notes references
 retain their release identity. Reused audio and covers are copied into deduplicated
 community snapshots, so release cleanup does not break published charts. Uploaded audio is prepared as stereo PCM WAV;
