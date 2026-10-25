@@ -3,6 +3,7 @@
 // Output: Migrated farming drafts, effective reward conditions, validated opponents and selection transactions.
 // Pos: [Map](../L2-2.md); team workspace input projection.
 // Effects/Dependencies: Pure transformations; no persistence or engine calls.
+import { legacyRewardPlan } from "../../lib/team-builder/reward-plan";
 import type { SongRef } from "../../lib/team-builder/engine/api";
 import { DEFAULT_FARMING, DEFAULT_SETTINGS, type BuildSettings, type FarmingSettings } from "./types";
 
@@ -38,6 +39,8 @@ export function restoreBuildSettings(stored: Partial<BuildSettings> = {}): Build
       requireGrowth: !custom, includeMemory: custom,
     };
   }
+  settings.farming = { ...structuredClone(DEFAULT_FARMING), ...settings.farming };
+  if (settings.farming.weighted && !settings.farming.rewardPlan) settings.farming.rewardPlan = legacyRewardPlan(settings.farming);
   settings.rewardMode = mode === "plan" ? "plan" : farmingMode(settings.farming);
   return settings;
 }
@@ -50,7 +53,7 @@ export function farmingConditions(draft: FarmingSettings): FarmingSettings {
 }
 export function farmingMode(draft: FarmingSettings): "recommendation" | "event" {
   const s = farmingConditions(draft);
-  return (s.play === "solo" || s.play === "gekiso") && s.playMode === "ap" && s.requireGrowth && !s.includeMemory &&
+  return !s.rewardPlan && (s.play === "solo" || s.play === "gekiso") && s.playMode === "ap" && s.requireGrowth && !s.includeMemory &&
     s.measure !== "challenge-points" && !s.weighted && !s.fullRanking && s.k === 1 && s.timeLimit === null ? "recommendation" : "event";
 }
 export function farmingSettings(settings: BuildSettings): BuildSettings {

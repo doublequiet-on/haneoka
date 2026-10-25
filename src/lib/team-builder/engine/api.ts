@@ -64,6 +64,14 @@ export interface ConstraintInput {
   /** Event bonus floor in percent. */
   minBonusPercent: number | null;
 }
+export type RewardMetric = "points" | "challenge-points" | "items";
+export interface RewardTerm { metric: RewardMetric; weight: number }
+export interface RewardRankingPlan {
+  unit: number;
+  levels: RewardTerm[][];
+  autoCp?: { songs: SongRef[]; consumption: number };
+}
+
 export type Goal =
   | { kind: "power"; song: SongRef | null; challengeEventId: number | null }
   | {
@@ -86,6 +94,7 @@ export type Goal =
       play: PlayModel;
       /** Ranks by weights·(points, items, challenge points) instead of the measure alone. */
       weights?: { points: number; items: number; challengePoints: number };
+      rewardPlan?: RewardRankingPlan;
       /** Primary-reward ordering; pt-only additionally validates the strict solo/challenge input contract. */
       ranking?: "pt-only" | "primary";
       /** Best challenge payout per CP for this objective. Only the solo trial uses this value. */
@@ -124,6 +133,7 @@ export type Goal =
       challengePointsPerPlay?: number;
     };
 export interface EngineRequest {
+  resolveRewardPlan?: boolean;
   members: MemberInput[];
   snaps: SnapInput[];
   player: PlayerInput;
@@ -172,7 +182,9 @@ export interface HitScore {
   ranks: Record<string, number>;
   rangeScores?: number[];
 }
+export interface RewardFraction { numerator: string; denominator: string; value: number }
 export interface EngineHit {
+  rewardRanking?: RewardFraction[];
   /** Base multiplier, including the first-COMBO sustained bonus. */
   comboBonus?: number | null;
   gekiso?: { just: GekisoJustSummary; luckSamples: number; sampled: boolean; rank: 1 };
@@ -186,6 +198,8 @@ export interface EngineHit {
   score: HitScore | null;
   skipScore: number | null;
   event: {
+    rewardPlan?: RewardRankingPlan;
+    rewardValues?: Record<RewardMetric, RewardFraction>;
     mean: number; bonusPercent: number; challengePoints: number; perPlayMin: number; perPlayMax: number;
     /** Per-play mean of the other reward (points ↔ items). */
     otherMean?: number;
@@ -223,6 +237,7 @@ export interface PlanSummary {
   perBoost: number;
 }
 export interface EngineResponse {
+  resolvedRewardPlan?: RewardRankingPlan;
   stopReason?: StopReason;
   error?: string;
   /** Phase durations sum work across Workers; wallMs includes queueing and all phases. */
@@ -415,6 +430,7 @@ function mergeRewardScoreTies<Detail>(first: readonly SearchHit<Detail>[], tied:
 export const GEKISO_CLOSED_FORM_MARGIN = 3e-5;
 
 export async function runEngine(master: EngineMaster, charts: ChartCache, request: EngineRequest, onProgress?: (done: number, total: number) => void, onSnapshot?: (snapshot: EngineSnapshot) => void): Promise<EngineResponse> {
+  if (request.goal.kind === "event" && request.goal.rewardPlan) throw new Error("reward-plan-native-required");
   const started = performance.now();
   const deadline = deadlineOf(request);
   request = { ...request, deadline };

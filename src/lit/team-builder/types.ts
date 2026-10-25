@@ -1,5 +1,6 @@
 import type { SongRef } from "../../lib/team-builder/engine/api";
 import type { Criterion } from "../../lib/team-builder/engine/objectives";
+import type { RewardPlan } from "../../lib/team-builder/reward-plan";
 
 export type Tab = "build" | "box" | "account" | "teams" | "pt" | "song-comparison";
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
@@ -32,6 +33,7 @@ export interface BuildSettings {
   weightPoints: number;
   weightItems: number;
   weightCp: number;
+  rewardPlan: RewardPlan | null;
   route: "live" | "challenge" | "skip";
   boosts: number;
   challengePoints: number;
@@ -68,7 +70,7 @@ export interface BuildSettings {
 }
 export interface FarmingSettings extends Pick<BuildSettings,
   "playMode" | "great" | "good" | "miss" | "missEvery" | "measure" | "weighted" |
-  "weightPoints" | "weightItems" | "weightCp" | "unknownPolicy" | "fullRanking" | "k" | "timeLimit" | "ptCycle"> {
+  "weightPoints" | "weightItems" | "weightCp" | "rewardPlan" | "unknownPolicy" | "fullRanking" | "k" | "timeLimit" | "ptCycle"> {
   play: "solo" | "gekiso" | "challenge" | "skip";
   requireGrowth: boolean;
   includeMemory: boolean;
@@ -76,6 +78,7 @@ export interface FarmingSettings extends Pick<BuildSettings,
 export const DEFAULT_FARMING: FarmingSettings = {
   play: "solo", playMode: "ap", great: 3, good: 0, miss: 0, missEvery: 0,
   measure: "points", weighted: false, weightPoints: 1, weightItems: 0, weightCp: 0,
+  rewardPlan: null,
   requireGrowth: true, unknownPolicy: "min", includeMemory: false,
   fullRanking: false, k: 1, timeLimit: null, ptCycle: false,
 };
@@ -104,6 +107,7 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   weightPoints: 1,
   weightItems: 0,
   weightCp: 0,
+  rewardPlan: null,
   route: "live",
   boosts: 3,
   challengePoints: 200,

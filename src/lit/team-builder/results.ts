@@ -1,3 +1,4 @@
+import { rewardRankingLabel, rewardLabel } from "./reward-plan-view";
 import { cache } from "lit/directives/cache.js";
 import { resultMetric } from "./result-metric";
 import { repeat } from "lit/directives/repeat.js";
@@ -56,6 +57,10 @@ function conditionLines(host: TeamBuilder, hit: EngineHit): string[] {
           `${host.t("farm.memory", "Character / song memory bonuses")}: ${s.goal === "plan" || (s.farming.includeMemory && s.rewardMode !== "recommendation") ? host.t("farm.included", "Included") : host.t("farm.excluded", "Excluded")}`,
         ]
       : []),
+    ...(hit.event?.rewardPlan ? [
+      `${host.t("rewardPlan.order", "Ranking")}: ${rewardRankingLabel(host, hit.event.rewardPlan)}`,
+      ...Object.entries(hit.event.rewardValues ?? {}).map(([metric, value]) => `${rewardLabel(host, metric as "points" | "items" | "challenge-points")}: ${format(host, value.value, 4)}`),
+    ] : []),
     ...(input?.goal.kind === "event" && input.goal.weights
       ? [
           `${host.t("weightPoints", "Weight per event point")}: ${input.goal.weights.points} · ${host.t("weightItems", "Weight per shop item")}: ${input.goal.weights.items} · ${host.t("weightCp", "Weight per challenge point")}: ${input.goal.weights.challengePoints}`,
@@ -242,7 +247,9 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
   }
   if (hit.comboBonus != null)
     out.push(chip(host.t("comboBonus", "Base COMBO BONUS"), `×${format(host, hit.comboBonus)}`));
-  if (hit.event) {
+  if (hit.event?.rewardValues) {
+    for (const [name, reward] of Object.entries(hit.event.rewardValues)) out.push(chip(rewardLabel(host, name as "points" | "items" | "challenge-points"), format(host, reward.value, 4)));
+  } else if (hit.event) {
     if (!(
       s.goal === "event" &&
       ((s.measure === "challenge-points" && !s.weighted) || (s.weighted && s.weightPoints === 0 && s.weightItems === 0))
@@ -283,8 +290,9 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
   if (hit.potential)
     out.push(chip(host.t("skillCoverage", "Skill coverage"), `${format(host, hit.potential.area * 100, 0)}%·s`));
   if (!compact) return out;
-  const selected =
-    s.goal === "event" || s.goal === "plan"
+  const selected = hit.event?.rewardPlan
+    ? ["PT", "CP", rewardLabel(host, "items")]
+    : s.goal === "event" || s.goal === "plan"
       ? [
           s.measure === "items"
             ? host.t("pointsPerPlay", "Event points per play")

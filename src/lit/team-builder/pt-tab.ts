@@ -1,3 +1,4 @@
+import { farmingRewardPlan, renderRewardPlan } from "./reward-plan-view";
 import { toolLayout } from "./tool-layout";
 import { html, nothing, type TemplateResult } from "lit";
 import { live } from "lit/directives/live.js";
@@ -439,16 +440,8 @@ function renderSetup(host: TeamBuilder): TemplateResult {
     { value: "skip", label: host.t("routeSkip", "Skip"), icon: icon("fast_forward", 20), available: normal },
   ] as const;
   const available = plays.filter((play) => play.available).map((play) => play.value);
-  const numberField = (key: "weightPoints" | "weightItems" | "weightCp", label: string) => html`
-    <md-outlined-text-field
-      type="number"
-      min="0"
-      step="any"
-      label=${label}
-      .value=${live(String(f[key]))}
-      @change=${(e: Event) => set({ [key]: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) })}
-    ></md-outlined-text-field>
-  `;
+  const plan = farmingRewardPlan(host);
+  const autoCp = plan.options["challenge-points"].mode === "convert" && plan.options["challenge-points"].auto;
   return html`
     <section class="surface stack">
       ${sectionHeading({ icon: "emoji_events", label: host.t("eventSetup", "Event") })}
@@ -478,54 +471,6 @@ function renderSetup(host: TeamBuilder): TemplateResult {
             `,
           )}
       </div>
-      <md-outlined-select
-        label=${host.t("farm.reward", "Prioritize reward")}
-        .value=${s.weighted ? "weighted" : s.measure}
-        @change=${(e: Event) => {
-          const value = (e.target as HTMLInputElement).value;
-          set(
-            value === "weighted"
-              ? { weighted: true }
-              : { weighted: false, measure: value as FarmingSettings["measure"] },
-          );
-        }}
-      >
-        <md-select-option value="points">
-          <div slot="headline">${host.t("measurePoints", "Event points")}</div>
-        </md-select-option>
-        <md-select-option value="items">
-          <div slot="headline">${host.t("measureItems", "Shop items")}</div>
-        </md-select-option>
-        ${
-          f.play === "solo"
-            ? html`
-                <md-select-option value="challenge-points">
-                  <div slot="headline">${host.t("measureCp", "Challenge points")}</div>
-                </md-select-option>
-              `
-            : nothing
-        }
-        ${
-          f.play !== "gekiso"
-            ? html`
-                <md-select-option value="weighted">
-                  <div slot="headline">${host.t("measureWeighted", "Weighted rewards")}</div>
-                </md-select-option>
-              `
-            : nothing
-        }
-      </md-outlined-select>
-      ${
-        s.weighted
-          ? html`
-              <div class="pt-form-grid" id="tb-reward-weights" data-tb-field tabindex="-1">
-                ${numberField("weightPoints", host.t("weightPoints", "Weight per event point"))}
-                ${numberField("weightItems", host.t("weightItems", "Weight per shop item"))}
-                ${s.route === "live" ? numberField("weightCp", host.t("weightCp", "Weight per challenge point")) : nothing}
-              </div>
-            `
-          : nothing
-      }
       ${
         s.route === "challenge"
           ? segmented({
@@ -542,24 +487,8 @@ function renderSetup(host: TeamBuilder): TemplateResult {
               boostControl(host, s.boosts, (boosts) => host.updateSettings({ boosts })),
             )
       }
-      ${
-        challenge || s.ptCycle
-          ? html`
-              <label class="tb-check" id="tb-reward-scope" data-tb-field tabindex="-1">
-                <md-checkbox
-                  touch-target="wrapper"
-                  .checked=${s.ptCycle}
-                  @change=${(e: Event) => set({ ptCycle: (e.target as HTMLInputElement).checked })}
-                ></md-checkbox>
-                <span>${host.t("farm.cpConversion", "Include challenge rewards from earned CP")}</span>
-              </label>
-            `
-          : nothing
-      }
-      <span class="tb-results__meta">
-        ${s.ptCycle ? host.t("farm.converted", "Direct rewards + CP conversion") : host.t("farm.direct", "Direct rewards per play")}
-      </span>
     </section>
+    ${renderRewardPlan(host, plan)}
     ${
       s.route !== "skip"
         ? html`
@@ -577,7 +506,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                 ),
               )}
               ${
-                s.ptCycle
+                autoCp
                   ? html`
                       <span class="tb-field__label">${host.t("planChallengeSongs", "Challenge songs")}</span>
                       ${ptField(
@@ -680,6 +609,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                       ></md-checkbox>
                       <span>${host.t("farm.memory", "Character and song memory bonuses")}</span>
                     </label>
+                    ${!s.rewardPlan ? html`
                     <label class="tb-check">
                       <md-checkbox
                         touch-target="wrapper"
@@ -688,6 +618,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                       ></md-checkbox>
                       <span>${host.t("fullRanking", "Full reward ranking")}</span>
                     </label>
+                    ` : nothing}
                     <md-outlined-select
                       label=${host.t("resultCount", "Results")}
                       .value=${String(f.k)}

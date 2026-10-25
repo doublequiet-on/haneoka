@@ -8,7 +8,7 @@ import { dataRows, objectRow, type TeamBuilderData } from "../data";
 import { teamBuilderSourceIdentity } from "../data/source";
 import type { EngineHit, EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline } from "./api";
 import type { EngineCall, EngineChartSources, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
-import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs } from "./execution";
+import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs, requestChartSongs } from "./execution";
 import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
 import { chartKey, EngineCharts } from "./charts";
 import engineUrl from "./generated/team-engine.wasm?url";
@@ -126,7 +126,7 @@ class EngineWorker {
     this.preparing = preparation;
     const ready = this.spawn();
     const worker = this.worker;
-    const songs = message.type === "run" || message.type === "growth" ? requestSongs(message.request).filter((song): song is SongRef => song !== null)
+    const songs = message.type === "run" || message.type === "growth" ? requestChartSongs(message.request).filter((song): song is SongRef => song !== null)
       : message.type === "evaluate" ? message.request.songs : message.type === "explain" ? [message.request.song]
         : message.type === "charts" ? message.songs : [];
     const staged = [...this.cachedCharts];
@@ -248,6 +248,7 @@ function weightedLiveReward(request: EngineRequest): boolean {
     && request.k === 1 && goal.songs.length === 1;
 }
 function phasedReward(data: TeamBuilderData, request: EngineRequest): boolean {
+  if (request.goal.kind === "event" && request.goal.rewardPlan) return false;
   if (weightedLiveReward(request)) return true;
   const goal = request.goal;
   if (request.k !== 1 || goal.kind !== "event" || !goal.gekiso || goal.songs.length !== 1) return false;
@@ -296,7 +297,7 @@ export class EngineClient {
   private responseKey(request: EngineRequest): string | null {
     if (request.k > 5 || request.members.length > 256 || request.snaps.length > 256 || requestSongs(request).length > 4
       || request.shard || request.noFloor || request.seedOnly || request.seedVariant || request.seeded || request.rewardPhase
-      || request.floors || request.cutoff || request.rewardCutoff !== undefined || request.completed?.length) return null;
+      || request.resolveRewardPlan || request.floors || request.cutoff || request.rewardCutoff !== undefined || request.completed?.length) return null;
     const { timeLimitMs: _time, deadline: _deadline, requestId: _id, contextKey: _context, ...input } = request;
     return JSON.stringify(input);
   }
@@ -394,6 +395,12 @@ export class EngineClient {
     const work = async (): Promise<EngineResponse> => {
       if (!remaining(deadline)) { stop("budget"); return latest; }
       if (completeResponse(latest)) return latest;
+      if (request.goal.kind === "event" && request.goal.rewardPlan?.autoCp) {
+        const resolved = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, resolveRewardPlan: true } });
+        if (stopped) return latest;
+        if (!resolved.resolvedRewardPlan) return { ...latest, stopReason: resolved.stopReason ?? "budget" };
+        request = { ...request, goal: { ...request.goal, rewardPlan: resolved.resolvedRewardPlan } };
+      }
       const opponents = request.goal.kind === "gekiso" && !!request.goal.opponents;
       const wholeReward = wholeSongReward(this.data, request);
       const smallSampledReward = wholeReward && request.members.length < PARALLEL_MIN_MEMBERS

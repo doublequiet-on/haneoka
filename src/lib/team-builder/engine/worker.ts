@@ -8,7 +8,7 @@
  * serves searches and evaluations. */
 import { chartKey, downloadChart } from "./charts";
 import type { EngineHit, EngineRequest, EngineResponse, SongRef, TeamEvaluation, Timeline } from "./api";
-import { emptyResponse, requestSongs } from "./execution";
+import { emptyResponse, requestSongs, requestChartSongs } from "./execution";
 import type { EngineCall, EngineChart, EngineChartSources, EngineReply, ExplainRequest } from "./protocol";
 
 interface Exports {
@@ -152,7 +152,7 @@ async function execute(call: EngineCall) {
     if (call.type === "run") {
       let request: EngineRequest = call.request;
       pendingFloor = call.initialFloor ?? -Infinity;
-      const songs = requestSongs(request).filter((song): song is SongRef => song !== null);
+      const songs = requestChartSongs(request).filter((song): song is SongRef => song !== null);
       const rows = await charts(songs, call.loadedCharts);
       if (pendingFloor !== null && Number.isFinite(pendingFloor)) {
         request = request.rewardPhase && request.rewardPhase.kind !== "primary"
@@ -189,7 +189,7 @@ async function execute(call: EngineCall) {
       }
     } else if (call.type === "growth") {
       const request: EngineRequest = call.request;
-      const rows = await charts(requestSongs(request).filter((song): song is SongRef => song !== null), call.loadedCharts);
+      const rows = await charts(requestChartSongs(request).filter((song): song is SongRef => song !== null), call.loadedCharts);
       onProgress = (value) => {
         const growth = value.growth as { done: number; total: number } | undefined;
         if (growth) post({ type: "progress", id: call.id, done: growth.done, total: growth.total });

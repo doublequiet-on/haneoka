@@ -9,6 +9,9 @@ export const requestSongs = (request: EngineRequest): (SongRef | null)[] => {
   return goal.kind === "power" ? [goal.song] : goal.kind === "potential" ? [null] : goal.kind === "plan"
     ? [...goal.challengeSongs, ...goal.normalSongs] : goal.kind === "event" && !goal.songs.length && goal.route === "skip" ? [null] : goal.songs;
 };
+export const requestChartSongs = (request: EngineRequest): (SongRef | null)[] => [
+  ...requestSongs(request), ...(request.goal.kind === "event" ? request.goal.rewardPlan?.autoCp?.songs ?? [] : []),
+];
 export const pendingSong = (song: SongRef | null): SongResult => ({
   song, hits: [], proven: false, bound: Infinity,
   stats: { leaders: 0, memberNodes: 0, snapNodes: 0, candidates: 0, exact: 0, elapsedMs: 0 },

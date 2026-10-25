@@ -3,6 +3,7 @@
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
 // Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；辅助页接管并恢复标题栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
+import { compileRewardPlan, effectiveRewardPlan, legacyRewardPlan } from "../lib/team-builder/reward-plan";
 import { ResultComparison } from "./team-builder/result-comparison";
 import { usesPtResults } from "./team-builder/score-goal";
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -924,12 +925,12 @@ export class TeamBuilder extends LitElement {
         add("tb-target-score", "needTargetScore", "Enter a positive target score");
       if (
         s.goal === "event" &&
-        s.weighted &&
+        !s.rewardPlan && s.weighted &&
         !(s.weightPoints > 0 || s.weightItems > 0 || (s.route === "live" && s.weightCp > 0))
       )
         add("tb-reward-weights", "needRewardWeight", "Enter at least one positive reward weight");
     }
-    if (this.tab === "pt" && s.rewardMode !== "plan" && s.ptCycle && s.rewardMode !== "recommendation") {
+    if (this.tab === "pt" && s.rewardMode !== "plan" && !s.rewardPlan && s.ptCycle && s.rewardMode !== "recommendation") {
       const f = s.farming;
       const condition = !["solo", "gekiso"].includes(f.play)
         ? this.t("routeLive", "Normal live")
@@ -951,6 +952,8 @@ export class TeamBuilder extends LitElement {
         message: this.t("farm.conversionConflict", "CP conversion requires {condition}", { condition }),
       });
     }
+    if (s.goal === "event" && s.rewardPlan && !compileRewardPlan(effectiveRewardPlan(s.rewardPlan, s.route !== "live"), { songs: s.planChallengeSongs, consumption: s.challengePoints }))
+      add("tb-reward-plan", "rewardPlan.invalidRate", "Enter conversion rates and challenge charts");
     const gekiso = recommendation ? s.ptMode === "gekiso" : s.goal === "gekiso";
     if (gekiso && (!Number.isInteger(s.minComboBonus) || s.minComboBonus < 1))
       add("tb-combo", "invalidCombo", "Enter a positive integer");
@@ -1070,8 +1073,19 @@ export class TeamBuilder extends LitElement {
       case "event":
         if (s.eventId === null) return null;
         if (s.route !== "skip" && !s.songs.length) return null;
-        if (s.weighted && !(s.weightPoints > 0 || s.weightItems > 0 || (s.route === "live" && s.weightCp > 0)))
+        if (!s.rewardPlan && s.weighted && !(s.weightPoints > 0 || s.weightItems > 0 || (s.route === "live" && s.weightCp > 0)))
           return null;
+        if (s.rewardPlan || s.weighted) {
+          const plan = effectiveRewardPlan(s.rewardPlan ?? legacyRewardPlan(s), s.route !== "live");
+          const compiled = compileRewardPlan(plan, { songs: s.planChallengeSongs, consumption: s.challengePoints });
+          if (!compiled) return null;
+          return { kind: "event", rewardPlan: compiled, measure: plan.primary,
+            ranking: s.ptMode === "gekiso" && s.route === "live" ? "pt-only" : "primary",
+            route: s.route, eventId: s.eventId, songs: s.route === "skip" ? [] : s.songs,
+            consumption: s.route === "challenge" ? s.challengePoints : s.boosts, play,
+            ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
+          };
+        }
         return {
           kind: "event",
           measure: s.weighted
@@ -1118,7 +1132,7 @@ export class TeamBuilder extends LitElement {
     if (
       !goal ||
       !this.view ||
-      (this.tab === "pt" && this.searchSettings.rewardMode === "event" && this.searchSettings.ptCycle)
+      (this.tab === "pt" && this.searchSettings.rewardMode === "event" && !this.searchSettings.rewardPlan && this.searchSettings.ptCycle)
     )
       return null;
     const cards = this.engineCards();
