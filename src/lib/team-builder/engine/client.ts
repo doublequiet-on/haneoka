@@ -278,7 +278,7 @@ export class EngineClient {
     this.pool = Array.from({ length: poolSize() }, (_, index) => new EngineWorker(serialized, charts, this.downloads, `team-engine-${index + 1}`, changed));
   }
   get phases() { return [...new Set(this.pool.map(worker => worker.currentPhase).filter((phase): phase is NonNullable<typeof phase> => phase !== null))]; }
-  /** Warm one Worker; the others compile lazily only if a search actually fans out. */
+  /** Warm the pool after the first Worker is ready. */
   warm() {
     // The others compile once the first is ready, so the first search can use every Worker.
     const generation = this.generation;
@@ -401,6 +401,9 @@ export class EngineClient {
         if (!resolved.resolvedRewardPlan) return { ...latest, stopReason: resolved.stopReason ?? "budget" };
         request = { ...request, goal: { ...request.goal, rewardPlan: resolved.resolvedRewardPlan } };
       }
+      // Plan shards keep their tuple bounds and lottery state throughout the proof.
+      if (request.goal.kind === "event" && request.goal.rewardPlan && request.goal.gekiso)
+        request = { ...request, noFloor: true };
       const opponents = request.goal.kind === "gekiso" && !!request.goal.opponents;
       const wholeReward = wholeSongReward(this.data, request);
       const smallSampledReward = wholeReward && request.members.length < PARALLEL_MIN_MEMBERS
