@@ -3158,6 +3158,7 @@
       "enabled": "启用",
       "disabled": "关闭",
       "creation": {
+        "invalid_meter": "拍号无效",
         "export_waypointsUnsupported": "此格式不含路标",
         "waypoints": "路标",
         "waypoint": "路标",
@@ -3202,7 +3203,7 @@
         "bpm": "BPM",
         "candidate": "BPM 候选",
         "position": "编辑位置",
-        "follow": "移至播放位置",
+        "follow": "跟随播放",
         "add_note": "新增音符",
         "projects": "已保存谱面",
         "versions": "版本",
@@ -3313,6 +3314,16 @@
         "title": "统计",
         "authored": "编辑节点",
         "duration": "音频时长"
+      },
+      "audio": {
+        "title": "编辑音频",
+        "bgm_volume": "音乐音量",
+        "note_volume": "音符音效音量",
+        "metronome": "节拍器",
+        "metronome_volume": "节拍器音量",
+        "sound_group": "音符音效组",
+        "feedback_failed": "无法加载音符音效",
+        "storage_failed": "无法保存音频设置"
       },
       "patterns": {
         "import": "导入图案",

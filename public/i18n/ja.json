@@ -3158,6 +3158,7 @@
       "enabled": "有効",
       "disabled": "オフ",
       "creation": {
+        "invalid_meter": "拍子が無効です",
         "export_waypointsUnsupported": "しおりは含まれません",
         "waypoints": "しおり",
         "waypoint": "しおり",
@@ -3202,7 +3203,7 @@
         "bpm": "BPM",
         "candidate": "BPM候補",
         "position": "編集位置",
-        "follow": "再生位置へ",
+        "follow": "再生に追従",
         "add_note": "ノーツを追加",
         "projects": "保存した譜面",
         "versions": "バージョン",
@@ -3313,6 +3314,16 @@
         "title": "統計",
         "authored": "配置ノード数",
         "duration": "音源の長さ"
+      },
+      "audio": {
+        "title": "編集時の音声",
+        "bgm_volume": "音楽の音量",
+        "note_volume": "ノーツ音量",
+        "metronome": "メトロノーム",
+        "metronome_volume": "メトロノーム音量",
+        "sound_group": "ノーツ音セット",
+        "feedback_failed": "ノーツ音を読み込めません",
+        "storage_failed": "音声設定を保存できません"
       },
       "patterns": {
         "import": "パターンを読み込む",

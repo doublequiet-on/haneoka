@@ -3158,6 +3158,7 @@
       "enabled": "Enabled",
       "disabled": "Off",
       "creation": {
+        "invalid_meter": "Invalid meter",
         "export_waypointsUnsupported": "Waypoints are omitted",
         "waypoints": "Waypoints",
         "waypoint": "Waypoint",
@@ -3202,7 +3203,7 @@
         "bpm": "BPM",
         "candidate": "BPM candidate",
         "position": "Editor position",
-        "follow": "Go to playhead",
+        "follow": "Follow playback",
         "add_note": "Add note",
         "projects": "Saved charts",
         "versions": "Versions",
@@ -3313,6 +3314,16 @@
         "title": "Statistics",
         "authored": "Authored nodes",
         "duration": "Audio duration"
+      },
+      "audio": {
+        "title": "Editor audio",
+        "bgm_volume": "Music volume",
+        "note_volume": "Note sound volume",
+        "metronome": "Metronome",
+        "metronome_volume": "Metronome volume",
+        "sound_group": "Note sound set",
+        "feedback_failed": "Cannot load note sounds",
+        "storage_failed": "Cannot save audio settings"
       },
       "patterns": {
         "import": "Import pattern",

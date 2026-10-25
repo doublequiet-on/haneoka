@@ -42,6 +42,9 @@ Keyboard shortcuts support multiple bindings per command, conflict checks and
 restoring defaults; tooltips follow the saved local bindings. Named waypoints
 save with the project and support exact beat editing and previous/next navigation.
 Editor statistics report authored objects and the native viewer COMBO count.
+The timing panel edits meter changes. Editor audio has separate music, note and
+metronome volumes, native sound sets and local settings. Editing keeps the current
+media clock; focused text drafts survive playback-follow updates.
 Its Publish dialog selects audio and cover independently: upload your
 own files or reuse Our Notes and Bestdori song resources. Our Notes references
 retain their release identity. Reused audio and covers are copied into deduplicated

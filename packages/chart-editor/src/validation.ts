@@ -192,7 +192,7 @@ export const validateProject = (value: unknown): ProjectValidationResult => {
       if (
         !Number.isSafeInteger(meter.denominator) ||
         (meter.denominator as number) <= 0 ||
-        ((meter.denominator as number) & ((meter.denominator as number) - 1)) !== 0
+        2 ** Math.round(Math.log2(meter.denominator as number)) !== meter.denominator
       ) {
         add("error", "meter.denominator", `${path}.denominator`, "Meter denominator must be a positive power of two");
       }

@@ -1,15 +1,15 @@
 // L3 — GEB
 // Input: 本地／云端工程、GBP 歌曲导入地址、歌曲资料、音频与原生素材 release 身份。
-// Output: 谱面与滑条结构编辑、精确定位和路标、图案／键位配置、原生统计、保存及社区发布；预览复用 chart-simulator。
+// Output: 谱面与滑条结构编辑、精确定位和路标、图案／键位配置、编辑音频及原生统计、保存及社区发布；预览复用 chart-simulator。
 // Pos: [Map](L2-2.md)；谱面创作工作区。
-// Effects/Dependencies: IndexedDB、localStorage、媒体与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
+// Effects/Dependencies: IndexedDB、localStorage、媒体、Web Audio 与应用栏；消费导入地址并保存原工程，预览退出和断开时销毁查看器并释放素材 URL。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { snackbar } from "../lib/snackbar";
 import { LitElement, html, nothing, type PropertyValues } from "lit";
 import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
 import { readPageData } from "../lib/page-data";
 import type { PublicSongsPageData } from "../server/tool-page-data";
-import { DEFAULT_RENDER_SETTINGS } from "@haneoka/cassiopeia-plugin-our-notes";
+import { buildChart, parseScore, DEFAULT_RENDER_SETTINGS, OUR_NOTES_NOTE_SE_GROUP_IDS, OUR_NOTES_NOTE_SE_GROUP_NAMES, type OurNotesNoteSeGroup } from "@haneoka/cassiopeia-plugin-our-notes";
 import { live } from "lit/directives/live.js";
 import "@material/web/textfield/outlined-text-field.js";
 import "@material/web/select/outlined-select.js";
@@ -26,7 +26,7 @@ import {
   type LinePoint,
   type NoteLine,
 } from "../../packages/chart-editor/src/model";
-import { TempoMap, snapTick, parseBeatTick, type SnapMode } from "../../packages/chart-editor/src/timing";
+import { TempoMap, meterAtTick, snapTick, parseBeatTick, type SnapMode } from "../../packages/chart-editor/src/timing";
 import { importChart } from "../../packages/chart-editor/src/formats/detect";
 import { assertValidProject } from "../../packages/chart-editor/src/validation";
 import { ChartPatternStore, parseChartPattern, serializeChartPattern, type ChartPattern } from "../lib/chart-creation/patterns";
@@ -35,6 +35,7 @@ import { chartCreationTools as creationTools, chartSnapDivisions as snapDivision
   type ChartShortcutOverrides } from "../lib/chart-creation/shortcuts";
 import { CreationStore, type CreationDocument, type CreationRevision } from "../lib/chart-creation/storage";
 import { createExampleAudio, decodeCreationAudio, type CreationAudio } from "../lib/chart-creation/audio";
+import { EditorAudioFeedback, DEFAULT_EDITOR_AUDIO, readEditorAudioSettings, writeEditorAudioSettings, type EditorAudioSettings } from "../lib/chart-creation/feedback";
 import { MediaClock } from "@haneoka/cassiopeia-host-web";
 import { clientText, initializeI18nClient } from "../i18n/client";
 import { localizedFallbacks } from "../lib/localized-text";
@@ -69,6 +70,7 @@ import type { ChartNote } from "@haneoka/cassiopeia";
 import type { RenderNoteKind } from "@haneoka/cassiopeia-plugin-our-notes";
 import { loadingState } from "./ui/state";
 import { modal } from "./ui/modal";
+import { focusedValue } from "./ui/focused-value";
 
 import { assertEditedChartSpans, authoredSpanInBounds, authoredSpanViewport, authoredWidthBounds, constrainLaneValue, viewportXToAuthoredLane, authoredLaneToViewportX } from "../../packages/chart-editor/src/creation/span";
 import { createAuthoredNote, resizeChartSelection, resizeChartSelectionByDelta } from "../../packages/chart-editor/src/creation/authoring";
@@ -336,7 +338,18 @@ export class ChartCreationWorkspace extends LitElement {
   private snap = 16;
   private secondsPerScreen = 4;
   private rate = 1;
+  private audioSettings: EditorAudioSettings = { ...DEFAULT_EDITOR_AUDIO };
+  private audioFeedback?: EditorAudioFeedback;
+  private feedbackChart?: { project: Project; chart: ReturnType<typeof buildChart> };
+  private transportAudio?: CreationAudio;
+  private transportProject = "";
+  private startingPlayback = false;
+  private playbackRequest = 0;
+  private audioSettingsOpen = false;
+  private audioFeedbackFailed = false;
+  private audioIdentity?: { controller: AbortController; promise: Promise<HaneokaReleaseIdentity> };
   private selectedSpeeds = new Set<string>();
+  private meterDrafts = new Map<string, string>();
   private lineToolsOpen = false;
   private statisticsOpen = false;
   private statisticsSnapshot?: { project: Project; audio: CreationAudio | undefined; locale: string; facts: [string, string | number][] };
@@ -450,9 +463,7 @@ export class ChartCreationWorkspace extends LitElement {
     const payload = readPageData<PublicSongsPageData>(this);
     if (payload?.schema === "haneoka-public-songs-page-v1") this.preparePage(payload);
     super.connectedCallback();
-    this.shortcutOverrides = readChartShortcuts();
-    if (payload) void this.updateComplete.then(() => this.connectEditor());
-    else this.connectEditor();
+    void this.updateComplete.then(() => this.connectEditor());
   }
   preparePage(payload: PublicSongsPageData) {
     this.pageData = payload;
@@ -470,6 +481,9 @@ export class ChartCreationWorkspace extends LitElement {
   }
   private connectEditor() {
     if (!this.isConnected) return;
+    this.shortcutOverrides = readChartShortcuts();
+    this.audioSettings = readEditorAudioSettings();
+    this.requestUpdate();
     if (this.pageData) this.previewIdentity = this.pageData.variants[readReleaseServer()]?.identity;
     document.addEventListener("fullscreenchange", this.fullscreenChanged);
     this.panelMedia = matchMedia("(max-width: 959px)");
@@ -543,8 +557,12 @@ export class ChartCreationWorkspace extends LitElement {
     this.suspendDraft();
     this.pan = undefined;
     this.controller?.abort();
+    ++this.playbackRequest; this.startingPlayback = false;
     this.preview?.dispose();
     this.preview = undefined;
+    const feedback = this.audioFeedback; this.audioFeedback = undefined;
+    void feedback?.dispose();
+    this.audioIdentity?.controller.abort(); this.audioIdentity = undefined;
     void this.disposePreview();
     this.canvasController?.abort();
     void this.canvasTheme?.dispose();this.canvasTheme=undefined;
@@ -693,21 +711,30 @@ export class ChartCreationWorkspace extends LitElement {
       this.error = this.t("creation.invalid_edit");
     }
   }
-  private rebuildPreview(position = this.seconds) {
+  private rebuildPreview(position?: number) {
     if (this.pastePlacement && this.pastePlacement.base !== this.chart) this.cancelPaste();
     if (this.viewProjectId !== this.projectId) {
       this.viewProjectId = this.projectId;
       this.preciseSeekSeconds = undefined;
       this.selectedSpeeds.clear();
+      this.meterDrafts.clear();
       this.laneStart = (this.chart.laneBasis - this.laneSpan()) / 2;
     }
     this.laneStart = this.clampLaneStart(this.laneStart);
     if (this.stageMode === "preview") void this.disposePreview();
+    if (this.preview && this.audio && this.transportAudio === this.audio && this.transportProject === this.projectId) {
+      this.bindAudioFeedback();
+      if (position !== undefined) this.preview.seek(Math.max(0, position));
+      void this.ensureCanvasSkin();
+      return;
+    }
+    ++this.playbackRequest; this.startingPlayback = false;
     this.preview?.dispose();
     this.preview = undefined;
     if (!this.audio || !this.isConnected) return;
     const url = URL.createObjectURL(this.audio.file),
-      clock = new MediaClock(url, { playbackRate: this.rate, volume: 0.82, loop: false });
+      clock = new MediaClock(url, { playbackRate: this.rate, volume: this.audioSettings.bgmVolume, loop: false });
+    this.transportAudio = this.audio; this.transportProject = this.projectId;
     // MediaClock loads its source during construction; restore the chosen rate after load.
     clock.rate = this.rate;
     let frame = 0,
@@ -719,6 +746,7 @@ export class ChartCreationWorkspace extends LitElement {
       frame = 0;
       if (disposed || !this.isConnected) return;
       this.updateTransport(clock.timeMs / 1000, clock.playing);
+      this.audioFeedback?.sync(clock.timeMs / 1000, clock.advancing);
       if (clock.advancing) frame = requestAnimationFrame(sync);
     };
     const pause = () => {
@@ -773,16 +801,21 @@ export class ChartCreationWorkspace extends LitElement {
         URL.revokeObjectURL(url);
       },
     };
-    this.preview.seek(Math.max(0, position));
+    this.bindAudioFeedback();
+    this.preview.seek(Math.max(0, position ?? this.seconds));
     void this.ensureCanvasSkin();
+  }
+  private resourceIdentity(): HaneokaReleaseIdentity | undefined {
+    const stored = this.chart.extensions.haneoka;
+    return stored && typeof stored === "object" && !Array.isArray(stored)
+      && typeof stored.server === "string" && typeof stored.releaseId === "string" && typeof stored.sourceId === "string"
+      ? { schema: "haneoka-resource-release-identity-v1", server: stored.server, releaseId: stored.releaseId, sourceId: stored.sourceId }
+      : this.previewIdentity?.server === readReleaseServer() ? this.previewIdentity : undefined;
   }
   private async ensureCanvasSkin(force = false) {
     if (!this.audio || !this.isConnected) return;
-    const stored=this.chart.extensions.haneoka;
-    const identity = stored && typeof stored === "object" && !Array.isArray(stored) && typeof stored.server === "string" && typeof stored.releaseId === "string" && typeof stored.sourceId === "string"
-      ? {schema:"haneoka-resource-release-identity-v1" as const,server:stored.server,releaseId:stored.releaseId,sourceId:stored.sourceId}
-      : this.previewIdentity?.server===readReleaseServer() ? this.previewIdentity : undefined;
-    const requested=JSON.stringify([identity??readReleaseServer(),this.canvasSkin]);
+    const identity = this.resourceIdentity(), skin = this.canvasSkin;
+    const requested=JSON.stringify([identity??readReleaseServer(),skin]);
     if(!force&&this.canvasThemeKey===requested&&(this.canvasTheme||this.canvasLoading))return;
     this.canvasController?.abort();
     const retired=this.canvasTheme;this.canvasTheme=undefined;void retired?.dispose();
@@ -790,9 +823,9 @@ export class ChartCreationWorkspace extends LitElement {
     const report=beginLoading(this.c("loading"),{signal:controller.signal,scope:"owner"});
     try {
       const pin=identity??(await listPublicCreationSongs({server:readReleaseServer(),locale:this.apiLocale(),limit:1,signal:controller.signal})).release;
-      const theme=await loadOurNotesCreationCanvasSkin(pin,{skin:this.canvasSkin,locale:this.locale,signal:controller.signal});
+      const theme=await loadOurNotesCreationCanvasSkin(pin,{skin,locale:this.locale,signal:controller.signal});
       if(controller!==this.canvasController||!this.isConnected){await theme.dispose();return;}
-      this.canvasTheme=theme;this.previewIdentity=pin;this.canvasThemeKey=JSON.stringify([pin,this.canvasSkin]);
+      this.canvasTheme=theme;this.previewIdentity=pin;this.canvasThemeKey=JSON.stringify([pin,skin]);
       report.finish();this.paint();
     } catch(error) {
       if(!controller.signal.aborted&&controller===this.canvasController){this.canvasFailed=true;report.fail(error);}
@@ -822,11 +855,15 @@ export class ChartCreationWorkspace extends LitElement {
     if (output) output.textContent = seconds.toFixed(2);
     const playhead = this.querySelector<HTMLElement & { value: number }>("[data-playhead]");
     if (playhead) playhead.value = seconds;
-    const button = this.querySelector<HTMLButtonElement>("[data-play]");
-    if (button) {
-      button.setAttribute("aria-label", this.c(playing ? "pause" : "play"));
-      button.setAttribute("aria-pressed", String(playing));
-      button.querySelector("use")?.setAttribute("href", `/icons.svg#${playing ? "pause" : "play_arrow"}`);
+    for (const button of this.querySelectorAll<HTMLButtonElement>("[data-play]")) {
+      const active = playing || this.startingPlayback;
+      button.setAttribute("aria-label", this.c(active ? "pause" : "play"));
+      button.setAttribute("aria-pressed", String(active));
+      button.setAttribute("aria-busy", String(this.startingPlayback));
+      button.querySelector("use")?.setAttribute("href", `/icons.svg#${active ? "pause" : "play_arrow"}`);
+      const label = button.querySelector("[data-play-label]");
+      const text = label && [...label.childNodes].find(node => node.nodeType === Node.TEXT_NODE);
+      if (text) text.textContent = this.c(active ? "pause" : "play");
     }
   }
   private async disposePreview() {
@@ -905,6 +942,7 @@ export class ChartCreationWorkspace extends LitElement {
   private async switchStage() {
     this.preciseSeekSeconds = undefined;
     if (this.busy || !this.audio) return;
+    if (this.startingPlayback) this.pausePlayback();
     this.clearCursor();
     if (this.stageMode === "preview") {
       await this.disposePreview();
@@ -960,8 +998,10 @@ export class ChartCreationWorkspace extends LitElement {
     else this.preview?.seek(seconds);
   }
   private pausePlayback() {
+    ++this.playbackRequest; this.startingPlayback = false;
     this.previewPlayer?.pause();
     this.preview?.pause();
+    this.requestUpdate();
   }
   private loadAudio(file: File, example = false) {
     void this.run(async (signal) => {
@@ -1240,6 +1280,9 @@ export class ChartCreationWorkspace extends LitElement {
         this.windowStart = this.clampStart(this.windowStart + (command === "page_up" ? 1 : -1) * this.secondsPerScreen); break;
       case "home": case "end": this.windowStart = command === "home" ? 0 : this.clampStart(this.audio?.analysis.duration ?? 0); break;
       case "previous_waypoint": case "next_waypoint": this.stepWaypoint(command === "next_waypoint" ? 1 : -1); break;
+      case "audio_settings": void this.showAudioSettings(); break;
+      case "note_sounds": this.setAudioSetting("notes", !this.audioSettings.notes); break;
+      case "metronome": this.setAudioSetting("metronome", !this.audioSettings.metronome); break;
       default: return false;
     }
     return true;
@@ -1249,11 +1292,160 @@ export class ChartCreationWorkspace extends LitElement {
       void this.previewPlayer?.togglePlayback();
       return;
     }
-    if (this.preview?.clock.playing) this.preview.pause();
-    else
-      void this.preview?.play().catch(() => {
-        this.error = this.t("audioFailed");
-      });
+    if (this.preview?.clock.playing || this.startingPlayback) this.pausePlayback();
+    else this.startEditPlayback();
+  }
+  private startEditPlayback() {
+    const transport = this.preview;
+    if (!transport) return;
+    const request = ++this.playbackRequest;
+    this.startingPlayback = true; this.requestUpdate();
+    void (async () => {
+      try {
+        try { await this.prepareAudioFeedback(); }
+        catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") throw error;
+          if (request === this.playbackRequest) { this.audioFeedbackFailed = true; snackbar(this.t("audio.feedback_failed")); }
+        }
+        if (request === this.playbackRequest && this.preview === transport && this.isConnected) await transport.play();
+      } catch (error) {
+        if (request === this.playbackRequest && !(error instanceof DOMException && error.name === "AbortError")) this.error = this.t("audioFailed");
+      } finally {
+        if (request === this.playbackRequest) { this.startingPlayback = false; this.requestUpdate(); }
+      }
+    })();
+  }
+  private bindAudioFeedback() {
+    if (!this.preview) return;
+    if (!this.audioFeedback && !this.audioSettings.notes && !this.audioSettings.metronome) return;
+    const feedback = this.audioFeedback ??= new EditorAudioFeedback(this.audioSettings);
+    feedback.setSettings(this.audioSettings);
+    try {
+      let chart;
+      if (this.audioSettings.notes) {
+        if (this.feedbackChart?.project !== this.chart) {
+          const chart = this.flatProjection(this.chart)?.chart ?? buildChart(parseScore(serializeSsForTarget(this.chart, false)));
+          this.feedbackChart = { project: this.chart, chart };
+        }
+        chart = this.feedbackChart.chart;
+      } else this.feedbackChart = undefined;
+      feedback.bind(this.chart, this.preview.clock.audio, chart, this.resourceIdentity());
+    } catch {
+      feedback.bind(this.chart, this.preview.clock.audio, undefined, this.resourceIdentity());
+      this.audioFeedbackFailed = true;
+    }
+  }
+  private setAudioSetting<K extends keyof EditorAudioSettings>(key: K, value: EditorAudioSettings[K]) {
+    this.audioSettings = { ...this.audioSettings, [key]: value };
+    if (this.preview) this.preview.clock.volume = this.audioSettings.bgmVolume;
+    this.bindAudioFeedback();
+    try { writeEditorAudioSettings(this.audioSettings); }
+    catch { snackbar(this.t("audio.storage_failed")); }
+    if (this.startingPlayback && (key === "group" || key === "notes")) {
+      ++this.playbackRequest; this.startingPlayback = false; this.startEditPlayback();
+    } else if (key === "notes" || key === "metronome" || key === "group") this.unlockAudioFeedback();
+    this.requestUpdate();
+  }
+  private unlockAudioFeedback() {
+    void this.prepareAudioFeedback().catch(error => {
+      if (this.isConnected && !(error instanceof DOMException && error.name === "AbortError")) {
+        this.audioFeedbackFailed = true; snackbar(this.t("audio.feedback_failed"));
+      }
+    }).finally(() => this.requestUpdate());
+  }
+  private async prepareAudioFeedback() {
+    if (!this.audioSettings.notes && !this.audioSettings.metronome) return;
+    this.bindAudioFeedback();
+    const feedback = this.audioFeedback;
+    // Resume Web Audio in the control's user gesture, before resource requests.
+    const unlock = feedback?.unlock();
+    if (this.audioSettings.notes && !this.resourceIdentity()) {
+      void unlock?.catch(() => {});
+      await this.resolveAudioIdentity();
+      this.bindAudioFeedback();
+      await feedback?.unlock();
+    } else await unlock;
+    this.audioFeedbackFailed = false;
+  }
+  private resolveAudioIdentity(): Promise<HaneokaReleaseIdentity> {
+    const identity = this.resourceIdentity();
+    if (identity) return Promise.resolve(identity);
+    if (this.audioIdentity) return this.audioIdentity.promise;
+    const controller = new AbortController();
+    const promise = listPublicCreationSongs({ server: readReleaseServer(), locale: this.apiLocale(), limit: 1, signal: controller.signal })
+      .then(result => { controller.signal.throwIfAborted(); this.previewIdentity = result.release; return result.release; })
+      .finally(() => { if (this.audioIdentity?.controller === controller) this.audioIdentity = undefined; });
+    this.audioIdentity = { controller, promise };
+    return promise;
+  }
+  private renderAudioSettings() {
+    const volume = (key: "bgmVolume" | "noteVolume" | "metronomeVolume", label: string) => html`<label class="stack stack--tight">
+      <span>${label} · ${Math.round(this.audioSettings[key] * 100)}%</span>
+      <md-slider class="md3-slider" min="0" max="100" step="1" .value=${this.audioSettings[key] * 100} aria-label=${label} .ariaLabel=${label}
+        @input=${(event: Event) => this.setAudioSetting(key, Number((event.target as HTMLInputElement).value) / 100)}></md-slider>
+    </label>`;
+    return accordion({ id: "chart-editor-audio", label: this.t("audio.title"), expanded: this.audioSettingsOpen,
+      onExpandedChange: expanded => { this.audioSettingsOpen = expanded; this.requestUpdate(); }, content: html`<div class="chart-creation__form">
+        ${volume("bgmVolume", this.t("audio.bgm_volume"))}
+        <label class="cluster"><md-checkbox .checked=${this.audioSettings.notes} aria-label=${this.c("media.chartPlayer.noteSe")} .ariaLabel=${this.c("media.chartPlayer.noteSe")}
+          @change=${(event: Event) => this.setAudioSetting("notes", (event.target as HTMLInputElement).checked)}></md-checkbox>${this.c("media.chartPlayer.noteSe")}</label>
+        ${volume("noteVolume", this.t("audio.note_volume"))}
+        <md-outlined-select label=${this.t("audio.sound_group")} .value=${live(String(this.audioSettings.group))} .error=${this.audioFeedbackFailed}
+          @change=${(event: Event) => this.setAudioSetting("group", Number((event.target as HTMLSelectElement).value) as OurNotesNoteSeGroup)}>
+          ${OUR_NOTES_NOTE_SE_GROUP_IDS.map(group => html`<md-select-option value=${String(group)} .selected=${this.audioSettings.group === group}>
+            <div slot="headline">${OUR_NOTES_NOTE_SE_GROUP_NAMES[group][this.apiLocale()]}</div></md-select-option>`)}
+        </md-outlined-select>
+        <label class="cluster"><md-checkbox .checked=${this.audioSettings.metronome} aria-label=${this.t("audio.metronome")} .ariaLabel=${this.t("audio.metronome")}
+          @change=${(event: Event) => this.setAudioSetting("metronome", (event.target as HTMLInputElement).checked)}></md-checkbox>${this.t("audio.metronome")}</label>
+        ${volume("metronomeVolume", this.t("audio.metronome_volume"))}
+        <button class="button button--text" type="button" ?disabled=${!this.audioFeedbackFailed}
+          @click=${() => this.unlockAudioFeedback()}>${this.c("common.actions.retry")}</button>
+        <button class="button button--tonal" type="button" data-play ?disabled=${this.busy || !this.audio}
+          aria-label=${this.c(this.startingPlayback || this.preview?.clock.playing ? "pause" : "play")}
+          @click=${() => this.togglePlayback()}>${icon(this.startingPlayback || this.preview?.clock.playing ? "pause" : "play_arrow")}
+          <span data-play-label>${this.c(this.startingPlayback || this.preview?.clock.playing ? "pause" : "play")}</span></button>
+      </div>` });
+  }
+  private async showAudioSettings() {
+    this.cancelGesture(); this.cancelWidth(); this.projectTab = "project";
+    this.leftOpen = true; this.audioSettingsOpen = true;
+    if (this.narrow) this.rightOpen = false;
+    this.requestUpdate();
+    await this.updateComplete;
+    this.querySelector("#chart-editor-audio-trigger")?.scrollIntoView({ block: "start" });
+  }
+  private renderMeters() {
+    return html`<section class="stack" aria-label=${this.t("meter")}>
+      <h3 class="detail-section-title">${this.t("meter")}</h3>
+      <button class="button" type="button" ?disabled=${this.busy || !this.audio} @click=${() => this.edit(project => {
+        const tick = Math.max(0, this.gridTick(this.map().secondsToTick(this.seconds)));
+        if (project.meters.some(meter => meter.tick === tick)) return;
+        const meter = meterAtTick(project.meters, tick) ?? project.meters[0]!;
+        project.meters.push({ id: createProjectId("meter"), tick, numerator: meter.numerator, denominator: meter.denominator });
+        project.meters.sort((a, b) => a.tick - b.tick);
+      })}>${this.t("addMeter")}</button>
+      ${this.chart.meters.map(meter => html`<div class="chart-creation__form">
+        ${meter.tick === 0 ? html`<span class="chip">${this.t("beat")} 0</span>` : this.beatField(meter.tick, tick => this.edit(project => {
+          project.meters.find(item => item.id === meter.id)!.tick = tick;
+          project.meters.sort((a, b) => a.tick - b.tick);
+        }))}
+        <md-outlined-text-field label=${this.t("meter")} .value=${focusedValue(this.meterDrafts.get(meter.id) ?? `${meter.numerator}/${meter.denominator}`)}
+          .error=${this.meterDrafts.has(meter.id)} ?disabled=${this.busy || !this.audio}
+          @input=${() => { if (this.meterDrafts.delete(meter.id)) this.requestUpdate(); }}
+          @change=${(event: Event) => {
+            const value = (event.target as HTMLInputElement).value, match = /^\s*(\d+)\s*\/\s*(\d+)\s*$/u.exec(value);
+            const numerator = Number(match?.[1]), denominator = Number(match?.[2]);
+            if (!Number.isSafeInteger(numerator) || numerator < 1 || !Number.isSafeInteger(denominator) || denominator < 1
+              || 2 ** Math.round(Math.log2(denominator)) !== denominator) {
+              this.meterDrafts.set(meter.id, value); this.requestUpdate(); snackbar(this.t("creation.invalid_meter")); return;
+            }
+            this.meterDrafts.delete(meter.id);
+            this.edit(project => Object.assign(project.meters.find(item => item.id === meter.id)!, { numerator, denominator }));
+          }}></md-outlined-text-field>
+        ${iconButton({ label: this.t("deleteMeter"), icon: "delete", disabled: this.busy || meter.tick === 0 || this.chart.meters.length === 1,
+          onClick: () => this.edit(project => { project.meters = project.meters.filter(item => item.id !== meter.id); this.meterDrafts.delete(meter.id); }) })}
+      </div>`)}
+    </section>`;
   }
   private editingGutter(project = this.chart) { return project.laneBasis / 12; }
   private laneSpan(project = this.chart) { return (project.laneBasis + this.editingGutter(project) * 2) / this.zoomX; }
@@ -2626,6 +2818,7 @@ export class ChartCreationWorkspace extends LitElement {
         <md-slider
           class="md3-slider"
           aria-label=${label}
+          .ariaLabel=${label}
           labeled
           min="0"
           max=${maximum}
@@ -2661,7 +2854,7 @@ export class ChartCreationWorkspace extends LitElement {
           min="0"
           max=${Number.isFinite(limit) ? limit : nothing}
           step="any"
-          .value=${live(String(value))}
+          .value=${focusedValue(String(value))}
           ?disabled=${this.busy || !!this.gesture || !!this.pan || !this.audio}
           @change=${(event: Event) => apply((event.target as HTMLInputElement).value)}
           @focusout=${(event: FocusEvent) => {
@@ -2738,6 +2931,7 @@ export class ChartCreationWorkspace extends LitElement {
       ${this.busy ? iconButton({ label: this.c("cancel"), icon: "close", onClick: () => this.cancelOperation() }) : nothing}
       ${this.stageMode === "edit" ? iconButton({ label: this.t("patterns.title"), icon: "widgets", disabled: this.busy, onClick: () => void this.showPatterns() }) : nothing}
       ${this.stageMode === "edit" ? iconButton({ label: this.t("shortcuts.title"), icon: "keyboard", disabled: this.busy, onClick: () => this.showShortcuts() }) : nothing}
+      ${this.stageMode === "edit" ? iconButton({ label: this.t("audio.title"), icon: "volume_up", disabled: this.busy, onClick: () => void this.showAudioSettings() }) : nothing}
       ${iconButton({ label: this.t("creation.save"), shortcut: this.shortcutLabel("save"), className: "chart-studio__header-save", icon: "save", disabled: this.busy || !this.audio || !this.dirty, onClick: () => void this.run(() => this.save()) })}
       <button class="button button--text" type="button" ?disabled=${this.busy || !this.audio}
         @click=${() => void this.querySelector<ChartPublication>("chart-publication")?.show()}>
@@ -2777,7 +2971,7 @@ export class ChartCreationWorkspace extends LitElement {
         label=${this.t(key)}
         step=${numeric ? step : nothing}
         type=${numeric ? "number" : "text"}
-        .value=${live(String(value))}
+        .value=${focusedValue(String(value))}
         ?disabled=${this.busy || !this.audio}
         @change=${(e: Event) => changed((e.currentTarget as HTMLInputElement).value)}
         @focusout=${(e: FocusEvent) => {
@@ -3286,6 +3480,7 @@ export class ChartCreationWorkspace extends LitElement {
           `,
         )}
       </section>
+      ${this.renderMeters()}
       <section aria-label=${this.t("timeScale")}>
         <div class="chart-creation__actions">
           <button class="button button--text" type="button" ?disabled=${this.busy || !chart.timeScales.length}
@@ -3401,6 +3596,7 @@ export class ChartCreationWorkspace extends LitElement {
             step="0.1"
             .value=${this.zoomX}
             aria-label=${this.t("creation.zoom_x")}
+            .ariaLabel=${this.t("creation.zoom_x")}
             @input=${(event: Event) => this.setHorizontalZoom(Number((event.target as HTMLInputElement).value))}
           ></md-slider>
         </label>
@@ -3759,7 +3955,7 @@ export class ChartCreationWorkspace extends LitElement {
               },
             })}
             <div class="chart-studio__panel-content">
-              <div ?hidden=${this.projectTab !== "project"}>${projectPanel}${audioPanel}${this.renderStatistics()}${versionsPanel}</div>
+              <div ?hidden=${this.projectTab !== "project"}>${projectPanel}${audioPanel}${this.renderAudioSettings()}${this.renderStatistics()}${versionsPanel}</div>
               <div ?hidden=${this.projectTab !== "files"}>${filesPanel}${exportControls}${warningsPanel}</div>
               <div ?hidden=${this.projectTab !== "timing"}>${timingPanel}</div>
             </div>
@@ -3830,6 +4026,7 @@ export class ChartCreationWorkspace extends LitElement {
               <md-slider
                 class="md3-slider"
                 aria-label=${this.t("creation.position")}
+                .ariaLabel=${this.t("creation.position")}
                 min="0"
                 max=${Math.max(0, (this.audio?.analysis.duration ?? 4) - this.secondsPerScreen)}
                 step="0.1"
@@ -3883,11 +4080,13 @@ export class ChartCreationWorkspace extends LitElement {
             class="icon-button icon-button--filled"
             type="button"
             data-play
-            aria-label=${this.c("play")}
+            aria-label=${this.c(this.startingPlayback || this.preview?.clock.playing ? "pause" : "play")}
+            aria-busy=${String(this.startingPlayback)}
+            aria-pressed=${String(this.startingPlayback || !!this.preview?.clock.playing)}
             ?disabled=${this.busy || !this.audio}
             @click=${this.togglePlayback}
           >
-            ${icon("play_arrow")}
+            ${icon(this.startingPlayback || this.preview?.clock.playing ? "pause" : "play_arrow")}
           </button>
           <button
             class="icon-button"
@@ -3905,6 +4104,7 @@ export class ChartCreationWorkspace extends LitElement {
             class="md3-slider"
             data-playhead
             aria-label=${this.t("creation.position")}
+            .ariaLabel=${this.t("creation.position")}
             min="0"
             max=${this.audio?.analysis.duration || 1}
             step="0.01"

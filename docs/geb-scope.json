@@ -211,6 +211,8 @@
     "src/lib/chart-creation/storage.ts",
     "src/lib/chart-creation/patterns.ts",
     "src/lib/chart-creation/shortcuts.ts",
+    "src/lib/chart-creation/feedback.ts",
+    "src/lit/ui/focused-value.ts",
     "packages/chart-editor/src/creation/connectors.ts",
     "src/lit/chart-publication.ts",
     "src/lit/community-charts.ts",

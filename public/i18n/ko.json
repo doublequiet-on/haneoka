@@ -3158,6 +3158,7 @@
       "enabled": "사용",
       "disabled": "끔",
       "creation": {
+        "invalid_meter": "올바르지 않은 박자표",
         "export_waypointsUnsupported": "책갈피는 포함되지 않습니다",
         "waypoints": "책갈피",
         "waypoint": "책갈피",
@@ -3202,7 +3203,7 @@
         "bpm": "BPM",
         "candidate": "BPM 후보",
         "position": "편집 위치",
-        "follow": "재생 위치로 이동",
+        "follow": "재생 따라가기",
         "add_note": "노트 추가",
         "projects": "저장한 채보",
         "versions": "버전",
@@ -3313,6 +3314,16 @@
         "title": "통계",
         "authored": "배치 노드 수",
         "duration": "음원 길이"
+      },
+      "audio": {
+        "title": "편집 오디오",
+        "bgm_volume": "음악 음량",
+        "note_volume": "노트 효과음 음량",
+        "metronome": "메트로놈",
+        "metronome_volume": "메트로놈 음량",
+        "sound_group": "노트 효과음 세트",
+        "feedback_failed": "노트 효과음을 불러올 수 없습니다",
+        "storage_failed": "오디오 설정을 저장할 수 없습니다"
       },
       "patterns": {
         "import": "패턴 가져오기",

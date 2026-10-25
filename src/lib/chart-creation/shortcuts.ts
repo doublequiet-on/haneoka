@@ -51,6 +51,9 @@ export const chartShortcutCommands: readonly ShortcutCommand[] = [
   { id: "end", label: "shortcuts.end", defaults: ["End"] },
   { id: "previous_waypoint", label: "creation.previous_waypoint", defaults: [] },
   { id: "next_waypoint", label: "creation.next_waypoint", defaults: [] },
+  { id: "audio_settings", label: "audio.title", defaults: [] },
+  { id: "note_sounds", label: "labels.noteSound", defaults: [] },
+  { id: "metronome", label: "audio.metronome", defaults: [] },
   ...chartCreationTools.map((tool, index) => ({ id: `tool:${tool}`, label: tool === "brush" ? "creation.brush" : tool, defaults: [`Digit${(index + 1) % 10}`] })),
   ...chartSnapDivisions.map((division, index) => ({ id: `grid:${division}`, label: `1/${division}`, defaults: [`Shift+Digit${index + 1}`] })),
 ];
@@ -77,6 +80,7 @@ export function displayChartShortcut(binding: string): string {
     .replace("Backspace", "⌫").replace("Delete", "⌦").replace("Escape", "Esc").replace("Space", "␣");
 }
 export function readChartShortcuts(): ChartShortcutOverrides {
+  if (typeof window === "undefined") return {};
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? "null");
     if (value?.version !== 1 || !value.bindings || typeof value.bindings !== "object") return {};
