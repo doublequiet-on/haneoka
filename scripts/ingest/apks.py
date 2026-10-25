@@ -508,12 +508,7 @@ def _download_one(
         f".{output.name[:180]}.{os.getpid()}.{threading.get_ident()}.part"
     )
     failure: Exception | None = None
-    handlers: list[urllib.request.BaseHandler] = [_TrustedRedirectHandler(config)]
-    # Some test CDNs are only reachable through the configured Japanese egress.
-    cdn_proxy = os.environ.get("RESOURCE_CDN_PROXY", "").strip()
-    if cdn_proxy:
-        handlers.append(urllib.request.ProxyHandler({"http": cdn_proxy, "https": cdn_proxy}))
-    opener = urllib.request.build_opener(*handlers)
+    opener = urllib.request.build_opener(_TrustedRedirectHandler(config))
     for attempt in range(5):
         try:
             with opener.open(_request(url, config, unity_version, authorization), timeout=120) as response, temporary.open(
