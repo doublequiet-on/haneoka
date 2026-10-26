@@ -94,6 +94,12 @@ The goal empty cell follows the current setting, with automatic detection also a
 Visible tile numbers help distinguish repeated fragments after their shapes are
 calibrated against confident image matches in the same screenshot.
 
+For 5×5 through 8×8 boards, solving starts with a short optimal search, then
+uses [row/column reduction](https://ianparberry.com/pubs/saml.pdf), paired edge placement and a final 3×3 bidirectional
+search to produce a playable solution. These solutions and proven shortest
+solutions have separate result labels. Custom goal empty cells and cancellation
+work with both paths.
+
 ## Development
 
 Start with the [repository map](L1.md) and [development guide](docs/DEV_GUIDE.md)

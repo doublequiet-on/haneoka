@@ -3077,7 +3077,7 @@
       "completed": "Goal reached",
       "searching": "Searching",
       "optimal": "Optimal: {moves} steps",
-      "budget": "Optimality unproved",
+      "budget": "Search limit reached",
       "cancelled": "Cancelled",
       "unsolvable": "Unsolvable",
       "invalid": "Invalid board",
@@ -3114,7 +3114,8 @@
       "imageError": "Unable to read image",
       "imageNoMatch": "Board does not match selected cover",
       "imageTooLarge": "Image exceeds 20 MB",
-      "imageAuto": "Auto"
+      "imageAuto": "Auto",
+      "found": "{moves} moves"
     }
   },
   "editors": {

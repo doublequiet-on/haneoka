@@ -543,7 +543,7 @@ export class SongPuzzle extends LitElement {
         worker.terminate();
         this.worker = undefined;
         this.message = data.result.status;
-        if (data.result.status === "optimal") {
+        if (data.result.status === "optimal" || data.result.status === "found") {
           // Check every returned tile move against the captured complete snapshot.
           let board = [...position.tiles];
           const directions: string[] = [];

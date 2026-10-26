@@ -3077,7 +3077,7 @@
       "completed": "已完成目标",
       "searching": "求解中",
       "optimal": "最优{moves}步",
-      "budget": "未证最优",
+      "budget": "达到搜索上限",
       "cancelled": "已取消",
       "unsolvable": "不可解",
       "invalid": "无效棋盘",
@@ -3114,7 +3114,8 @@
       "imageError": "无法读取图片",
       "imageNoMatch": "棋盘与所选封面不匹配",
       "imageTooLarge": "图片超过 20 MB",
-      "imageAuto": "自动"
+      "imageAuto": "自动",
+      "found": "解法 {moves} 步"
     }
   },
   "editors": {

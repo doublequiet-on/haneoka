@@ -78,6 +78,8 @@
     "src/lib/app-bar.ts",
     "src/lib/song-puzzle/recognition.ts",
     "src/lib/song-puzzle/labels.ts",
+    "src/lib/song-puzzle/constructive.ts",
+    "src/lib/song-puzzle/solver.ts",
     "src/lit/song-puzzle-import.ts",
     "src/workers/song-puzzle-import.worker.ts",
     "src/lib/community-bootstrap.ts",

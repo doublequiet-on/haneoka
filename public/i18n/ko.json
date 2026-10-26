@@ -3077,7 +3077,7 @@
       "completed": "목표 달성",
       "searching": "탐색 중",
       "optimal": "최적 {moves}회",
-      "budget": "최적성 미확인",
+      "budget": "탐색 한도 도달",
       "cancelled": "취소됨",
       "unsolvable": "해결 불가",
       "invalid": "잘못된 보드",
@@ -3114,7 +3114,8 @@
       "imageError": "이미지를 읽을 수 없습니다",
       "imageNoMatch": "선택한 재킷과 일치하지 않습니다",
       "imageTooLarge": "이미지가 20 MB를 초과합니다",
-      "imageAuto": "자동"
+      "imageAuto": "자동",
+      "found": "{moves}수 해법"
     }
   },
   "editors": {

@@ -1,15 +1,54 @@
+// L3 — GEB
+// Input: 棋盘快照、求解预算、进度与取消回调。
+// Output: 已证最短解、可行解或明确的无解／取消／预算状态。
+// Pos: [Map](../L2-2.md)；拼图求解入口与大小棋盘策略。
+// Effects/Dependencies: 本地 CPU；有界置换表 IDA*，5–8 阶短搜后转分层归位。
 import { neighbors, solvable, validPosition, type PuzzlePosition } from "./model";
+import { constructSolution } from "./constructive";
 export interface SolveProgress {
   nodes: number;
   bound: number;
   elapsedMs: number;
 }
 export interface SolveResult extends SolveProgress {
-  status: "optimal" | "budget" | "cancelled" | "unsolvable" | "invalid";
+  status: "optimal" | "found" | "budget" | "cancelled" | "unsolvable" | "invalid";
   path: number[];
 }
-/** Unit-cost IDA*: Manhattan + minimum-removal linear conflict; exact path-cycle pruning. */
 export async function solvePuzzle(
+  position: PuzzlePosition,
+  budgetMs: number,
+  progress: (value: SolveProgress) => void,
+  cancelled: () => boolean,
+): Promise<SolveResult> {
+  if (position.size < 5) return solveOptimalPuzzle(position, budgetMs, progress, cancelled);
+  const start = performance.now(),
+    duration = Number.isFinite(budgetMs) && budgetMs > 0 ? Math.max(100, Math.min(120000, budgetMs)) : 15000;
+  const exact = await solveOptimalPuzzle(position, Math.min(150, duration * 0.2), progress, cancelled);
+  if (exact.status !== "budget" || performance.now() - start >= duration) return exact;
+  const solution = await constructSolution(
+    position,
+    duration - (performance.now() - start),
+    (value) =>
+      progress({
+        ...value,
+        bound: Math.max(value.bound, exact.bound),
+        nodes: value.nodes + exact.nodes,
+        elapsedMs: performance.now() - start,
+      }),
+    cancelled,
+  );
+  const bound = Math.max(exact.bound, solution.bound);
+  return {
+    ...solution,
+    bound,
+    nodes: solution.nodes + exact.nodes,
+    elapsedMs: performance.now() - start,
+    status: solution.status === "found" && solution.path.length === bound ? "optimal" : solution.status,
+  };
+}
+
+/** Unit-cost IDA*: Manhattan + minimum-removal linear conflict, exact keys and bounded transpositions. */
+async function solveOptimalPuzzle(
   position: PuzzlePosition,
   budgetMs: number,
   progress: (value: SolveProgress) => void,
@@ -99,7 +138,8 @@ export async function solvePuzzle(
     answer: number[] | undefined,
     exceeded = Infinity;
   const path: number[] = [],
-    onPath = new Set<bigint>([rootKey]);
+    onPath = new Set<bigint>([rootKey]),
+    transpositions = new Map<bigint, number>();
   interface Frame {
     blank: number;
     previous: number;
@@ -150,6 +190,12 @@ export async function solvePuzzle(
           pop();
           continue;
         }
+        const previous = transpositions.get(frame.key);
+        if (previous !== undefined && previous <= frame.g) {
+          pop();
+          continue;
+        }
+        if (transpositions.size < 100000 || previous !== undefined) transpositions.set(frame.key, frame.g);
         nodes++;
         frame.entered = true;
         if (frame.h === 0) {
@@ -198,6 +244,7 @@ export async function solvePuzzle(
     }
   }
   while (true) {
+    transpositions.clear();
     exceeded = Infinity;
     for (const _ of visit()) {
       progress({ nodes, bound, elapsedMs: performance.now() - start });

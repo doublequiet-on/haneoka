@@ -3077,7 +3077,7 @@
       "completed": "完成",
       "searching": "探索中",
       "optimal": "最適解：{moves}手",
-      "budget": "最適性未確認",
+      "budget": "探索上限に到達",
       "cancelled": "キャンセル済み",
       "unsolvable": "解なし",
       "invalid": "無効な盤面",
@@ -3114,7 +3114,8 @@
       "imageError": "画像を読み込めません",
       "imageNoMatch": "選択したジャケットと一致しません",
       "imageTooLarge": "画像が20 MBを超えています",
-      "imageAuto": "自動"
+      "imageAuto": "自動",
+      "found": "{moves}手の解法"
     }
   },
   "editors": {
