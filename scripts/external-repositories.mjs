@@ -33,7 +33,7 @@ try {
   else if (command === "update") {
     verify();
     git("submodule", "update", "--remote", "--checkout", "--recursive", "--jobs", "4");
-    git("add", "--", ...paths());
+    git("add", "--force", "--", ...paths());
     verify();
   } else throw new Error("Use checkout, verify or update");
 } catch (error) {
