@@ -2,7 +2,7 @@
 // Input: 页面资料、跨服选择、Box 状态与用户设置。
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
-// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；辅助页接管并恢复标题栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
+// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；连接期间更新标题栏，离页清理定时器及应用栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
 import { compileRewardPlan, effectiveRewardPlan, legacyRewardPlan } from "../lib/team-builder/reward-plan";
 import { ResultComparison } from "./team-builder/result-comparison";
 import { usesPtResults } from "./team-builder/score-goal";
@@ -391,6 +391,7 @@ export class TeamBuilder extends LitElement {
   }
   disconnectedCallback() {
     this.layoutObserver?.disconnect();
+    clearTimeout(this.noticeTimer);
     super.disconnectedCallback();
     this.restoreShell();
     clearAppBarActions(SYNC_OWNER);
@@ -467,6 +468,7 @@ export class TeamBuilder extends LitElement {
   }
   private releaseSearch?: () => void;
   protected updated() {
+    if (!this.isConnected) return;
     if (this.task?.kind === "build" && this.activeContext && this.activeContext !== this.calculationContext())
       this.engine?.cancel();
     if (this.manualResults || this.task?.kind === "evaluation") {
@@ -1401,11 +1403,11 @@ export class TeamBuilder extends LitElement {
       this.shellMenu.group.remove();
       this.shellMenu = undefined;
     }
-    if (this.shellHeading) {
+    if (this.shellHeading?.element.isConnected) {
       this.shellHeading.element.replaceChildren(...this.shellHeading.nodes);
       document.title = this.shellHeading.title;
-      this.shellHeading = undefined;
     }
+    this.shellHeading = undefined;
   }
   private syncShell() {
     if (typeof document === "undefined") return;
