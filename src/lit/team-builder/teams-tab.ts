@@ -1,4 +1,3 @@
-import { matchesCardFilters, renderCardFilters } from "./card-filters";
 /** Saved teams, a manual formation and its evaluation across songs, with swap suggestions. */
 import { html, nothing, type TemplateResult } from "lit";
 import { live } from "lit/directives/live.js";
@@ -6,7 +5,6 @@ import type { EngineHit } from "../../lib/team-builder/engine/api";
 import { cardIdOf, engineInputs, type SavedTeam } from "../../lib/team-builder/sync/box-view";
 import { iconButton } from "../ui/controls";
 import { icon } from "../ui/icon";
-import { selectionPane } from "../ui/selection-pane";
 import { tileMedia } from "../ui/tile";
 import { specList } from "../ui/spec";
 import { sectionHeading } from "./catalog";
@@ -164,92 +162,6 @@ async function suggest(host: TeamBuilder, slot: number) {
   }
 }
 
-function slotPicker(host: TeamBuilder): TemplateResult | typeof nothing {
-  const picker = host.slotPicker;
-  if (!picker) return nothing;
-  const catalog = host.catalog!;
-  const kind = picker.kind;
-  const close = () => {
-    host.slotPicker = null;
-    host.slotFilters = {
-      ...host.slotFilters,
-      query: "",
-      bands: [],
-      characters: [],
-      attributes: [],
-      rarities: [],
-      facets: {},
-    };
-    host.slotFiltersOpen = false;
-    host.requestUpdate();
-  };
-  const filters = { ...host.slotFilters, kind };
-  const set = (patch: Partial<typeof filters>) => {
-    host.slotFilters = { ...filters, ...patch };
-    host.requestUpdate();
-  };
-  const theoretical = host.tab !== "song-comparison" && host.settings.scope === "theoretical";
-  const owned = kind === "members" ? host.view!.members : host.view!.snaps;
-  const ids = (
-    theoretical
-      ? Object.keys(kind === "members" ? catalog.data.members : catalog.data.snapshots).map(Number)
-      : [...owned.keys()]
-  )
-    .filter((id) => matchesCardFilters(host, kind, id, filters))
-    .sort((a, b) => b - a);
-  const current = kind === "members" ? host.manual.members[picker.slot] : host.manual.snaps[picker.slot];
-  return selectionPane({
-    id: "tb-slot-picker",
-    title: kind === "members" ? host.t("pickMember", "Choose a member") : host.t("pickSnap", "Choose a snap"),
-    closeLabel: host.common("common.actions.close", "Close"),
-    close,
-    searchLabel: host.common("common.actions.search", "Search"),
-    filterLabel: host.t("filters", "Filters"),
-    filtersOpen: host.slotFiltersOpen,
-    toggleFilters: () => {
-      host.slotFiltersOpen = !host.slotFiltersOpen;
-      host.requestUpdate();
-    },
-    query: filters.query,
-    search: (value) => set({ query: value }),
-    filterLayout: "facets",
-    filters: renderCardFilters(host, filters, set),
-    kind: kind === "members" ? "member" : "support",
-    items: ids.map((id) => ({ ...catalog.cardOptions(kind, id)!, value: String(id) })),
-    selected: current === null || current === undefined ? "" : String(current),
-    select: (value) => {
-      const id = Number(value);
-      const list = kind === "members" ? [...host.manual.members] : [...host.manual.snaps];
-      // A card can sit in one slot only; picking it again moves it.
-      for (let index = 0; index < list.length; index++) if (list[index] === id) list[index] = null;
-      list[picker.slot] = id;
-      host.manual = kind === "members" ? { ...host.manual, members: list } : { ...host.manual, snaps: list };
-      host.manualResults = null;
-      host.manualSuggestions = null;
-      close();
-    },
-    countLabel: host.t("cardCount", "{count} cards", { count: ids.length }),
-    emptyLabel: host.t("noMatches", "No cards match"),
-    preview:
-      kind === "snaps"
-        ? html`
-            <button
-              class="button button--text"
-              type="button"
-              @click=${() => {
-                const snaps = [...host.manual.snaps];
-                snaps[picker.slot] = null;
-                host.manual = { ...host.manual, snaps };
-                host.manualResults = null;
-                close();
-              }}
-            >
-              ${icon("hide_image", 18)}${host.t("noSnap", "No snap")}
-            </button>
-          `
-        : html``,
-  });
-}
 
 function savedFormation(team: SavedTeam) {
   const leader = team.leader === null ? 0 : team.members.indexOf(team.leader);
@@ -686,12 +598,12 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
             </div>
           `,
         )}
-        ${slotPicker(host)}
+
       </div>
     `;
   if (comparison)
     return html`
-      <div class="tb-teams stack stack--loose">${renderSongComparison(host, editor)}${slotPicker(host)}</div>
+      <div class="tb-teams stack stack--loose">${renderSongComparison(host, editor)}</div>
     `;
   return html`
     <div class="tb-teams stack stack--loose">
@@ -805,7 +717,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
             `
           : nothing
       }
-      ${slotPicker(host)}
+
     </div>
   `;
 }

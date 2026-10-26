@@ -2443,6 +2443,28 @@
       "window": "参考时间窗",
       "powerSong": "计入歌曲的属性与标签加成",
       "challengeRules": "挑战 Live 规则（活动参数加成）",
+      "manualEvent": {
+        "manual": "手动设置",
+        "choose": "选择活动",
+        "rules": "参考规则",
+        "chooseRules": "选择完整活动规则",
+        "attribute": "加成属性",
+        "targets": "加成对象",
+        "band": "乐队",
+        "character": "角色",
+        "none": "无",
+        "pickups": "特殊加成卡",
+        "members": "添加成员",
+        "snaps": "添加留影",
+        "addCard": "选择卡牌",
+        "summary": "手动 · 参照规则",
+        "need": {
+          "rules": "选择完整的参考规则",
+          "attribute": "选择加成属性",
+          "targets": "选择加成乐队或角色",
+          "cards": "重新选择特殊加成卡"
+        }
+      },
       "eventSetup": "活动",
       "route": "游玩方式",
       "routeLive": "普通 Live",

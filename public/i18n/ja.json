@@ -2443,6 +2443,28 @@
       "window": "基準時間",
       "powerSong": "楽曲のタイプ・タグボーナスを含める",
       "challengeRules": "チャレンジライブのルール（イベントパラメータボーナス）",
+      "manualEvent": {
+        "manual": "手動設定",
+        "choose": "イベントを選択",
+        "rules": "参照ルール",
+        "chooseRules": "完全なイベントルールを選択",
+        "attribute": "ボーナスタイプ",
+        "targets": "ボーナス対象",
+        "band": "バンド",
+        "character": "キャラクター",
+        "none": "なし",
+        "pickups": "特効カード",
+        "members": "メンバーを追加",
+        "snaps": "スナップを追加",
+        "addCard": "カードを選択",
+        "summary": "手動 · 参照ルール",
+        "need": {
+          "rules": "完全な参照ルールを選択してください",
+          "attribute": "ボーナスタイプを選択してください",
+          "targets": "対象バンドまたはキャラクターを選択してください",
+          "cards": "特効カードを選び直してください"
+        }
+      },
       "eventSetup": "イベント",
       "route": "プレイ方法",
       "routeLive": "通常ライブ",

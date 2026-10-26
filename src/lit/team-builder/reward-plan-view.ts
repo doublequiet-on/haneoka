@@ -85,7 +85,7 @@ export function renderRewardPlan(host: TeamBuilder, plan: RewardPlan) {
           option.mode === "convert"
             ? html`
                 ${
-            metric === "challenge-points"
+            metric === "challenge-points" && !host.searchSettings.manualEventEnabled
               ? segmented({
                   label: host.t("rewardPlan.rate", "Conversion rate"),
                   value: option.auto ? "auto" : "manual",

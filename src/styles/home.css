@@ -1392,3 +1392,13 @@
   .home-event__additional-entry small { color: var(--md-sys-color-on-surface-variant); }
   .home-event__additional-image { width: 96px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; }
 }
+
+@layer pages {
+  .home-event__targets--many .home-event__target:has(> img) > span {
+    display: none;
+  }
+  .home-event__characters--many {
+    gap: 0;
+    --avatar-stack-overlap: max(6px, calc((20px * var(--avatar-stack-count) - 100%) / (var(--avatar-stack-count) - 1)));
+  }
+}

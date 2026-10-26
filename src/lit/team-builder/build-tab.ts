@@ -1,3 +1,5 @@
+import { farmingMode } from "./workspace-state";
+import { enableManualEvent, renderManualEvent } from "./manual-event";
 import { toolLayout } from "./tool-layout";
 import { songMissions } from "../../lib/catalog-filters";
 import { boostControl } from "./boost-control";
@@ -149,12 +151,14 @@ export function eventSection(host: TeamBuilder, s = host.searchSettings): Templa
   const catalog = host.catalog!;
   const events = catalog.events();
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
-  if (!events.length)
+  const manualAllowed = host.tab === "pt" && s.goal !== "plan";
+  const manual = manualAllowed && s.manualEventEnabled;
+  if (!events.length && !manualAllowed)
     return html`
       <p class="inline-message">${icon("info", 18)}${host.t("noEvents", "This server's data has no event yet.")}</p>
     `;
-  const eventId = s.eventId ?? events[0]!.id;
-  if (s.eventId === null) queueMicrotask(() => set({ eventId }));
+  const eventId = host.settings.eventId ?? events[0]?.id ?? null;
+  if (host.settings.eventId === null && eventId !== null && !manual) queueMicrotask(() => set({ eventId }));
   const challengeSongs = catalog.challengeSongs(eventId);
   const challenge = s.goal === "plan" || (s.goal === "event" ? s.route === "challenge" : s.challengeRules);
   return html`
@@ -162,9 +166,15 @@ export function eventSection(host: TeamBuilder, s = host.searchSettings): Templa
       id="tb-event"
       data-tb-field
       label=${host.t("event", "Event")}
-      .value=${String(eventId)}
-      @change=${(e: Event) => set({ eventId: Number((e.target as HTMLInputElement).value) })}
+      .value=${manual ? "manual" : String(eventId ?? "")}
+      @change=${(e: Event) => {
+        const value = (e.target as HTMLInputElement).value;
+        if (value === "manual") enableManualEvent(host);
+        else set({ eventId: Number(value), manualEventEnabled: false, rewardMode: s.goal === "plan" ? "plan" : farmingMode(host.settings.farming) });
+      }}
     >
+      ${!events.length ? html`<md-select-option value="" disabled><div slot="headline">${host.t("manualEvent.choose", "Choose an event")}</div></md-select-option>` : nothing}
+      ${manualAllowed ? html`<md-select-option value="manual"><div slot="headline">${host.t("manualEvent.manual", "Manual setup")}</div></md-select-option>` : nothing}
       ${events.map(
         (row) => html`
           <md-select-option value=${String(row.id)}>
@@ -187,8 +197,9 @@ export function eventSection(host: TeamBuilder, s = host.searchSettings): Templa
         `,
       )}
     </md-outlined-select>
+    ${manual ? renderManualEvent(host) : nothing}
     ${
-      challenge && challengeSongs.length
+      !manual && challenge && challengeSongs.length
         ? html`
             <div class="cluster">
               <button
@@ -603,7 +614,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
   const allowedSongIds = challenge
     ? challengeSongs
     : s.goal === "event" || s.goal === "plan"
-      ? host.catalog!.normalEventSongIds(s.eventId)
+      ? host.catalog!.normalEventSongIds(s.manualEventEnabled ? null : s.eventId)
       : undefined;
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
   const needsSongs =

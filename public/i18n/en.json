@@ -2443,6 +2443,28 @@
       "window": "Reference window",
       "powerSong": "Include a song's type and tag bonus",
       "challengeRules": "Challenge live rules (event parameter bonus)",
+      "manualEvent": {
+        "manual": "Manual setup",
+        "choose": "Choose an event",
+        "rules": "Reference rules",
+        "chooseRules": "Choose complete event rules",
+        "attribute": "Bonus attribute",
+        "targets": "Bonus targets",
+        "band": "Band",
+        "character": "Character",
+        "none": "None",
+        "pickups": "Special bonus cards",
+        "members": "Add member",
+        "snaps": "Add Snapshot",
+        "addCard": "Choose a card",
+        "summary": "Manual · Reference rules",
+        "need": {
+          "rules": "Choose complete reference rules",
+          "attribute": "Choose the bonus attribute",
+          "targets": "Choose bonus bands or characters",
+          "cards": "Reselect special bonus cards"
+        }
+      },
       "eventSetup": "Event",
       "route": "Play",
       "routeLive": "Normal live",

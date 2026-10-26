@@ -1282,7 +1282,7 @@ export class HomeDashboard extends LitElement {
           .filter((target) => target && typeof target === "object")
           .map((target) => [
             String(target.homeTargetKind || target.kind) +
-              String(target.resourceId || target.bandId || target.cardType || localizedText(target.name, this.locale)),
+              String(target.resourceId || target.bandId || target.characterId || target.cardType || localizedText(target.name, this.locale)),
             target,
           ]),
       ).values(),
@@ -1314,7 +1314,7 @@ export class HomeDashboard extends LitElement {
             `
           : nothing;
         return html`
-          <span class="home-event__target" data-target=${target.homeTargetKind}>
+          <span class="home-event__target" data-target=${target.homeTargetKind} aria-label=${name} title=${name}>
             ${image}
             <span>${name}</span>
           </span>
@@ -1328,11 +1328,15 @@ export class HomeDashboard extends LitElement {
           return variant ? [variant.row] : [];
         }) ?? this.characters)
       : [...(this.sourceRelations.characters[eventServer]?.values() ?? [])];
-    const bonusCharacters = sourceCharacters
+    const characterRows = sourceCharacters
       .filter((character) =>
-        unique.some((target) => target.homeTargetKind === "band" && Number(target.bandId) === Number(character.bandId)),
-      )
-      .map((character) => {
+        unique.some((target) =>
+          (target.homeTargetKind === "band" && Number(target.bandId) === Number(character.bandId)) ||
+          (target.homeTargetKind === "character" && Number(target.characterId || target.resourceId) === Number(character.characterId)),
+        ),
+      );
+    const stackedCharacters = characterRows.length > 5;
+    const bonusCharacters = characterRows.map((character) => {
         const name = localizedText(character.characterName, this.locale);
         const content = html`
           <img
@@ -1342,12 +1346,12 @@ export class HomeDashboard extends LitElement {
             alt=""
             loading="lazy"
           />
-          <span>${name}</span>
+          ${stackedCharacters ? nothing : html`<span>${name}</span>`}
         `;
         return eventPage
           ? html`
               <a
-                class="home-event__character"
+                class=${stackedCharacters ? nothing : "home-event__character"}
                 aria-label=${name}
                 title=${name}
                 href=${entityHref({ server: eventPage, locale: this.locale as Locale, kind: "characters", id: String(character.characterId) })}
@@ -1355,11 +1359,11 @@ export class HomeDashboard extends LitElement {
                 ${content}
               </a>
             `
-          : html`<span class="home-event__character" aria-label=${name} title=${name}>${content}</span>`;
+          : html`<span class=${stackedCharacters ? nothing : "home-event__character"} aria-label=${name} title=${name}>${content}</span>`;
       });
     const bonusContents = html`
-      <div class="home-event__targets">${bonusTargets}</div>
-      <div class="home-event__characters">${bonusCharacters}</div>
+      <div class=${"home-event__targets" + (bonusTargets.length > 2 ? " home-event__targets--many" : "")}>${bonusTargets}</div>
+      <div class=${"home-event__characters" + (stackedCharacters ? " avatar-stack home-event__characters--many" : "")} style=${stackedCharacters ? "--avatar-stack-count:" + characterRows.length : nothing}>${bonusCharacters}</div>
     `;
     return html`
       <section class="home-card home-event" aria-labelledby="home-event-title">

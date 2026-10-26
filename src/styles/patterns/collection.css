@@ -503,9 +503,7 @@
   z-index: 1;
   opacity: 1;
 }
-/* ---------- Avatar stack ----------
-   Up to five overlapping portraits, used wherever several characters share
-   one row: a comic's cast, a stamp's subjects, a table cell. */
+/* ---------- Avatar stack ---------- */
 .avatar-stack {
   display: inline-flex;
   flex: 0 0 auto;
@@ -521,7 +519,18 @@
   background: var(--md-sys-color-surface-container-highest);
 }
 .avatar-stack img:not(:first-child) {
-  margin-inline-start: -6px;
+  margin-inline-start: calc(-1 * var(--avatar-stack-overlap, 6px));
+}
+.avatar-stack > :is(a, span) {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.avatar-stack > :is(a, span):not(:first-child) {
+  margin-inline-start: calc(-1 * var(--avatar-stack-overlap, 6px));
+}
+.avatar-stack > :is(a, span):is(:hover, :focus-visible) {
+  position: relative;
+  z-index: 1;
 }
 
 .tile__media > svg {

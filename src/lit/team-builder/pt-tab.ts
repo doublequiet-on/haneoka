@@ -415,14 +415,14 @@ function inputLabel(host: TeamBuilder, target: string): string {
 
 function renderSetup(host: TeamBuilder): TemplateResult {
   const s = host.searchSettings,
-    f = farmingConditions(host.settings.farming),
+    f = farmingConditions(s.farming),
     catalog = host.catalog!;
   const set = (patch: Partial<FarmingSettings>) => host.updateFarming(patch);
   const event = s.eventId === null ? undefined : host.master!.events.get(s.eventId);
   const challengeSongs = catalog.challengeSongs(s.eventId).map((row) => row.liveMusicId);
   const normal = !event || !!event.livePoints.size || !!event.liveRewards.length;
-  const challenge =
-    !event || ((!!event.challengePoints.size || !!event.challengeRewards.length) && challengeSongs.length > 0);
+  const challenge = !s.manualEventEnabled &&
+    (!event || ((!!event.challengePoints.size || !!event.challengeRewards.length) && challengeSongs.length > 0));
   const plays = [
     { value: "solo", label: host.t("routeLive", "Normal live"), icon: icon("play_arrow", 20), available: normal },
     {
@@ -502,7 +502,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                   host.settings.songs,
                   (songs) => host.updateSettings({ songs }),
                   false,
-                  s.route === "challenge" ? challengeSongs : catalog.normalEventSongIds(s.eventId),
+                  s.route === "challenge" ? challengeSongs : catalog.normalEventSongIds(s.manualEventEnabled ? null : s.eventId),
                 ),
               )}
               ${

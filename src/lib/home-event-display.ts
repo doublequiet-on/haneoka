@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: Native event metadata and its resolved bonus targets.
+// Output: Source-preserving home artwork, story and complete band, character and attribute identities.
+// Pos: [Map](L2-2.md); compact home event projection.
+// Effects/Dependencies: Pure projection; retains each target rather than choosing one bonus.
 type Row = Record<string, unknown>;
 const object = (value: unknown): Row =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
@@ -37,10 +42,12 @@ export function homeEventDisplay(row: Row): Row {
                 return [
                   kind,
                   {
-                    ...pick(target, ["kind", "resourceId", "bandId", "cardType", "name", "image", "icon"]),
+                    ...pick(target, ["kind", "resourceId", "bandId", "characterId", "cardType", "name", "image", "icon"]),
                     homeTargetKind: kind,
                     bandId:
                       kind === "band" ? Number(native._bandId ?? native._bandID ?? target.bandId ?? 0) : target.bandId,
+                    characterId:
+                      kind === "character" ? Number(native._characterId ?? target.characterId ?? target.resourceId ?? 0) : target.characterId,
                     cardType:
                       kind === "attribute"
                         ? Number(effect.cardType ?? native._cardType ?? target.cardType ?? 0)

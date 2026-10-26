@@ -26,6 +26,8 @@ export function parseOpponents(drafts: readonly string[]) {
 
 export function restoreBuildSettings(stored: Partial<BuildSettings> = {}): BuildSettings {
   const settings = { ...structuredClone(DEFAULT_SETTINGS), ...stored };
+  const { attribute, ...manualEvent } = settings.manualEvent as typeof settings.manualEvent & { attribute?: number | null };
+  settings.manualEvent = { ...manualEvent, attributes: manualEvent.attributes ?? (attribute ? [attribute] : attribute === 0 ? [] : null) };
   if (stored.gekisoPlacementMode === undefined)
     settings.gekisoPlacementMode = parseOpponents(settings.gekisoOpponents).empty ? "rank" : "opponents";
   const mode = stored.goal === "event" || stored.goal === "plan" ? stored.goal : settings.rewardMode;
@@ -41,7 +43,7 @@ export function restoreBuildSettings(stored: Partial<BuildSettings> = {}): Build
   }
   settings.farming = { ...structuredClone(DEFAULT_FARMING), ...settings.farming };
   if (settings.farming.weighted && !settings.farming.rewardPlan) settings.farming.rewardPlan = legacyRewardPlan(settings.farming);
-  settings.rewardMode = mode === "plan" ? "plan" : farmingMode(settings.farming);
+  settings.rewardMode = mode === "plan" && !settings.manualEventEnabled ? "plan" : farmingSettings(settings).rewardMode;
   return settings;
 }
 
@@ -57,9 +59,18 @@ export function farmingMode(draft: FarmingSettings): "recommendation" | "event" 
     s.measure !== "challenge-points" && !s.weighted && !s.fullRanking && s.k === 1 && s.timeLimit === null ? "recommendation" : "event";
 }
 export function farmingSettings(settings: BuildSettings): BuildSettings {
-  const s = farmingConditions(settings.farming);
+  const draft = settings.manualEventEnabled
+    ? { ...settings.farming, play: settings.farming.play === "challenge" ? "solo" as const : settings.farming.play, ptCycle: false }
+    : settings.farming;
+  const s = farmingConditions(draft);
   const mode = farmingMode(s);
-  return { ...settings, ...s, rewardMode: mode, goal: "event",
+  const rewardPlan = settings.manualEventEnabled && s.rewardPlan
+    ? { ...s.rewardPlan, options: { ...s.rewardPlan.options,
+        "challenge-points": { ...s.rewardPlan.options["challenge-points"], auto: false } } }
+    : s.rewardPlan;
+  return { ...settings, ...s, rewardPlan, rewardMode: mode, goal: "event",
+    farming: draft,
+    eventId: settings.manualEventEnabled ? settings.manualEvent.templateId : settings.eventId,
     route: s.play === "solo" || s.play === "gekiso" ? "live" : s.play,
     ptMode: s.play === "gekiso" ? "gekiso" : "solo",
     unknownPolicy: s.requireGrowth ? "min" : s.unknownPolicy,
