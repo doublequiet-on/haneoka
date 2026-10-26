@@ -44,6 +44,7 @@ class EngineWorker {
     this.changed();
   }
   get currentPhase() { return this.phase; }
+  get supportsFloor() { return this.cooperativeFloor; }
   timing() {
     return { ...this.times, ...(this.phase ? { [this.phase]: this.times[this.phase] + clock() - this.phaseAt } : {}) };
   }
@@ -425,6 +426,7 @@ export class EngineClient {
         const deferScores = goal.criterion === "max" && goal.seeds === 0 && request.k > 1;
         const count = request.constraints.leader ? 1 : this.pool.length;
         const sampledMax = goal.criterion === "max" && goal.seeds >= 16 && request.k === 1;
+        if (sampledMax) this.warm();
         const seedCount = goal.songs.length === 1 && goal.seeds > 1 && goal.criterion !== "mean" ? 2 : 1;
         const parts = [...latest.results];
         const completeScores = new Map<string, EngineHit>();
@@ -511,6 +513,10 @@ export class EngineClient {
               for (const key of response.unknownCards) unknownCards.add(key);
               if (job.shard === null) {
                 state.warm[job.seed!] = response;
+                if (sampledMax && !request.noFloor && engine.supportsFloor && !state.seeded && response.overall.length >= request.k) {
+                  state.seeded = true;
+                  wake();
+                }
                 if (state.seeded && state.next > 0 && !sampledMax) return;
                 parts[job.index] = mergeShardResponses(state.warm.map(scoredResponse), request.k, clock() - started).results[0]!;
               } else {
