@@ -2,11 +2,11 @@
 // Input: 配队资料、Engine 请求及进度／快照／单 Worker 最终结果回调；私有分片可返回待补分候选。
 // Output: EngineClient、搜索／成长／评价／解释结果及当前 Worker 阶段。
 // Pos: [Map](L2-2.md)；主线程到当前引擎 Worker 的生命周期与分片协调。
-// Effects/Dependencies: 共享编译后的 WASM 模块和四张固定谱面的下载，允许预取已选谱面并与 Worker 初始化并行；创建和替换独立 Worker；交换完整评分候选及实时下界，合并全部分片证明，取消与重试替换对应实例。
+// Effects/Dependencies: 共享编译后的 WASM 模块和四张固定谱面的下载，允许预取已选谱面并与 Worker 初始化并行；创建和替换独立 Worker；交换完整评分候选及排序下界，独立保留合法候选，合并全部分片证明，取消与重试替换对应实例。
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
 import { dataRows, objectRow, type TeamBuilderData } from "../data";
 import { teamBuilderSourceIdentity } from "../data/source";
-import type { EngineHit, EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline } from "./api";
+import type { EngineHit, EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline, RewardFloor } from "./api";
 import type { EngineCall, EngineChartSources, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
 import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs, requestChartSongs } from "./execution";
 import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
@@ -18,6 +18,8 @@ const engineModule = () => compiledEngine ??= WebAssembly.compileStreaming(fetch
   .catch(error => { compiledEngine = null; throw error; });
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void; snapshot?: (value: EngineSnapshot) => void };
+type Preparation = { message: Extract<EngineCall, { type: "run" }>; floor: number; reward?: RewardFloor };
+const rewardFloor = (hit: EngineHit): RewardFloor => [hit.key, hit.event?.otherMean ?? 0, hit.score?.mean ?? 0];
 
 /** A detached normal result from a single Worker, before candidate merging and search-proof labels. */
 export interface FinalEngineResult { requestId: string; contextKey: string; response: EngineResponse }
@@ -27,9 +29,10 @@ type FinalResultHandler = (result: FinalEngineResult) => void;
 class EngineWorker {
   scoredSeeds: unknown[] = [];
   private cooperativeFloor = false;
+  private cooperativeReward = false;
   private runId: number | null = null;
   private cachedCharts: string[] = [];
-  private preparing: { message: Extract<EngineCall, { type: "run" }>; floor: number } | null = null;
+  private preparing: Preparation | null = null;
   private worker: Worker | null = null;
   private ready: Promise<void> | null = null;
   private nextId = 1;
@@ -45,6 +48,7 @@ class EngineWorker {
   }
   get currentPhase() { return this.phase; }
   get supportsFloor() { return this.cooperativeFloor; }
+  get supportsReward() { return this.cooperativeReward; }
   timing() {
     return { ...this.times, ...(this.phase ? { [this.phase]: this.times[this.phase] + clock() - this.phaseAt } : {}) };
   }
@@ -72,6 +76,7 @@ class EngineWorker {
         this.setPhase(null);
         this.pending.delete(reply.id);
         if (reply.type === "ready") this.cooperativeFloor = reply.cooperativeFloor === true;
+        if (reply.type === "ready") this.cooperativeReward = reply.cooperativeReward === true;
         if (reply.id === this.runId) this.runId = null;
         if (reply.type === "error") pending.reject(new Error(reply.message));
         else {
@@ -100,7 +105,7 @@ class EngineWorker {
   private acceptsFloor(message: EngineCall) {
     return message.type === "run" && !message.request.noFloor && !message.request.seedOnly
       && message.request.k === 1 && (message.request.shard?.count ?? 1) > 1 && (message.request.goal.kind === "event"
-        ? !!message.request.rewardPhase && !!message.request.goal.gekiso
+        ? (!!message.request.rewardPhase || message.request.rewardLexicographic === true) && !!message.request.goal.gekiso
         : message.request.goal.kind === "gekiso" && message.request.goal.criterion === "max" && message.request.goal.seeds >= 16 && !message.request.goal.opponents);
   }
   private call(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<unknown> {
@@ -122,8 +127,20 @@ class EngineWorker {
     this.worker!.postMessage({ type: "floor", id: this.runId, value } satisfies EngineCall);
     return true;
   }
-  async send<T>(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<T> {
-    const preparation = message.type === "run" ? { message, floor: -Infinity } : null;
+  raiseReward(hit: EngineHit) {
+    if (!this.cooperativeReward) return this.raiseFloor(hit.key);
+    const reward = rewardFloor(hit);
+    if (this.runId === null) {
+      if (!this.preparing || !this.acceptsFloor(this.preparing.message)) return false;
+      this.preparing.floor = Math.max(this.preparing.floor, hit.key);
+      this.preparing.reward = reward;
+      return true;
+    }
+    this.worker!.postMessage({ type: "floor", id: this.runId, value: hit.key, reward } satisfies EngineCall);
+    return true;
+  }
+  async send<T>(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"], searchBudgetMs?: number): Promise<T> {
+    const preparation: Preparation | null = message.type === "run" ? { message, floor: -Infinity } : null;
     this.preparing = preparation;
     const ready = this.spawn();
     const worker = this.worker;
@@ -147,7 +164,9 @@ class EngineWorker {
       if (worker !== this.worker) throw new DOMException("Cancelled", "AbortError");
       if (this.preparing === preparation) this.preparing = null;
       if (message.type === "run" || message.type === "evaluate") this.setPhase("computationMs");
-      return (await this.call({ ...message, loadedCharts, ...(message.type === "run" && Number.isFinite(preparation?.floor) ? { initialFloor: preparation!.floor } : {}) }, progress, snapshot)) as T;
+      if (message.type === "run" && searchBudgetMs !== undefined)
+        message = { ...message, request: { ...message.request, deadline: Math.min(message.request.deadline ?? Infinity, clock() + searchBudgetMs) } };
+      return (await this.call({ ...message, loadedCharts, ...(message.type === "run" && Number.isFinite(preparation?.floor) ? { initialFloor: preparation!.floor } : {}), ...(preparation?.reward ? { initialReward: preparation.reward } : {}) }, progress, snapshot)) as T;
     } finally {
       if (this.preparing === preparation) this.preparing = null;
       if (worker === this.worker && this.pending.size === 0) this.setPhase(null);
@@ -175,6 +194,7 @@ class EngineWorker {
     this.preparing = null;
     this.runId = null;
     this.cooperativeFloor = false;
+    this.cooperativeReward = false;
     this.setPhase(null);
     this.worker?.terminate();
     this.worker = null;
@@ -301,7 +321,7 @@ export class EngineClient {
   private responseKey(request: EngineRequest): string | null {
     if (request.k > 5 || request.members.length > 256 || request.snaps.length > 256 || requestSongs(request).length > 4
       || request.shard || request.noFloor || request.seedOnly || request.seedVariant || request.seeded || request.rewardPhase
-      || request.resolveRewardPlan || request.floors || request.cutoff || request.rewardCutoff !== undefined || request.completed?.length) return null;
+      || request.resolveRewardPlan || request.floors || request.rewardIncumbent || request.cutoff || request.rewardCutoff !== undefined || request.completed?.length) return null;
     const { timeLimitMs: _time, deadline: _deadline, requestId: _id, contextKey: _context, ...input } = request;
     return JSON.stringify(input);
   }
@@ -408,6 +428,8 @@ export class EngineClient {
       // Plan shards keep their tuple bounds and lottery state throughout the proof.
       if (request.goal.kind === "event" && request.goal.rewardPlan && request.goal.gekiso)
         request = { ...request, noFloor: true };
+      if (request.goal.kind === "event" && request.goal.gekiso && !request.rewardPhase && phasedReward(this.data, request))
+        request = { ...request, rewardLexicographic: true };
       const opponents = request.goal.kind === "gekiso" && !!request.goal.opponents;
       const wholeReward = wholeSongReward(this.data, request);
       const smallSampledReward = wholeReward && request.members.length < PARALLEL_MIN_MEMBERS
@@ -651,9 +673,49 @@ export class EngineClient {
           if (!stopped && value.requestId === request.requestId && value.contextKey === request.contextKey) publish(value.response);
         };
         let seeds = request.seeds ?? [];
+        let quickWorker: EngineWorker | null = null;
+        let quickWork: Promise<EngineResponse> | null = null;
+        let acceptQuick = (response: EngineResponse) => publish(response);
+        let rewardBest: EngineHit | undefined;
+        const observeReward = (response: EngineResponse) => {
+          if (!request.rewardLexicographic) return;
+          const hit = response.overall[0];
+          if (hit?.score?.orders.length !== 120 || pendingScores(hit)) return;
+          if (!rewardBest || compareHits(hit, rewardBest) < 0) rewardBest = hit;
+        };
         if (!request.noFloor && !smallSampledReward && stage <= 0) {
-          const quick = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, deadline: Math.min(deadline, clock() + QUICK_MS) } }, stageProgress, acceptPart);
+          quickWorker = this.idlest();
+          let quick: EngineResponse;
+          const quickResponse = (response: EngineResponse): EngineResponse => request.rewardLexicographic ? {
+            ...response, stopReason: undefined,
+            results: response.results.map(({ rewardPhase: _phase, ...part }) => ({ ...part, proven: false })),
+          } : response;
+          const message = { type: "run" as const, id: 0, request: request.rewardLexicographic
+            ? { ...request, rewardPhase: { kind: "primary" as const } }
+            : { ...request, deadline: Math.min(deadline, clock() + QUICK_MS) } };
+          if (request.rewardLexicographic) {
+            this.warm();
+            let firstSeed!: (response: EngineResponse) => void;
+            const seeded = new Promise<EngineResponse>(resolve => { firstSeed = resolve; });
+            acceptQuick = response => {
+              observeReward(response);
+              publish(response);
+              if (quickWorker!.supportsReward && response.overall.length >= request.k) firstSeed(response);
+            };
+            quickWork = quickWorker.send<EngineResponse>(message, stageProgress, value => {
+              if (!stopped && value.requestId === request.requestId && value.contextKey === request.contextKey) acceptQuick(quickResponse(value.response));
+            }, QUICK_MS).then(response => {
+              rewardScores.set(quickWorker!, quickWorker!.scoredSeeds);
+              const value = quickResponse(response);
+              if (!stopped) acceptQuick(value);
+              return value;
+            });
+            quick = await Promise.race([quickWork, seeded]);
+          } else {
+            quick = await quickWorker.send<EngineResponse>(message, stageProgress, acceptPart);
+          }
           for (const worker of this.pool) if (worker.scoredSeeds.length) rewardScores.set(worker, worker.scoredSeeds);
+          observeReward(quick);
           publish(quick);
           if (completeResponse(quick)) return quick;
           seeds = quick.results.flatMap(result => result.hits);
@@ -669,9 +731,21 @@ export class EngineClient {
         for (const response of responses) for (const result of response.results)
           result.hits = seeds.filter(hit => hit.song?.songId === result.song?.songId && hit.song?.difficulty === result.song?.difficulty).slice(0, request.k);
         let next = 0, done = 0;
-        const merge = () => mergeShardResponses(responses, request.k, clock() - started);
+        const merge = () => {
+          if (rewardBest) for (const response of responses) for (const result of response.results)
+            if (result.song?.songId === rewardBest.song?.songId && result.song?.difficulty === rewardBest.song?.difficulty)
+              result.hits = [...result.hits, rewardBest].sort(compareHits).slice(0, request.k);
+          return mergeShardResponses(responses, request.k, clock() - started);
+        };
         const active = new Map<EngineWorker, { floor: number; retry: boolean }>();
+        if (quickWork) acceptQuick = response => {
+          observeReward(response);
+          publish(merge());
+          if (rewardBest) for (const [worker, running] of active)
+            if (!running.retry && worker.raiseReward(rewardBest)) running.floor = Math.max(running.floor, rewardBest.key);
+        };
         const runShard = async (engine: EngineWorker) => {
+          if (engine === quickWorker && quickWork) await quickWork;
           while (!stopped && remaining(deadline) > 0 && next < count) {
             const index = next++;
             while (!stopped && remaining(deadline) > 0) {
@@ -685,13 +759,18 @@ export class EngineClient {
                   ? { ...request.rewardPhase, floor: Math.max(0, job.floor) } : request.rewardPhase;
                 response = await engine.send<EngineResponse>({ type: "run", id: 0, scoredSeeds: [...rewardScores.values()].flat(), request: { ...request, rewardPhase,
                   seeded: sampledRewards || request.rewardPhase ? current.overall.length > 0 : request.seeded,
-                  seeds: sampledRewards ? current.overall : seeds, shard: { index, count }, floors: rewardPhase && rewardPhase.kind !== "primary" ? undefined : floors } }, undefined, value => {
+                  seeds: sampledRewards ? current.overall : seeds, shard: { index, count }, floors: rewardPhase && rewardPhase.kind !== "primary" ? undefined : floors,
+                  ...(rewardBest ? { rewardIncumbent: rewardFloor(rewardBest) } : {}) } }, undefined, value => {
                   if (stopped || job.retry || active.get(engine) !== job || value.contextKey !== request.contextKey || value.requestId !== request.requestId) return;
                   const hit = value.response.overall[request.k - 1];
+                  observeReward(value.response);
                   if (hit) job.floor = Math.max(job.floor, valueOf(hit));
                   responses[index] = value.response;
                   publish(merge());
-                  if (hit) for (const [worker, running] of active)
+                  if (rewardBest) {
+                    for (const [worker, running] of active)
+                      if (!running.retry && worker.raiseReward(rewardBest)) running.floor = Math.max(running.floor, rewardBest.key);
+                  } else if (hit) for (const [worker, running] of active)
                     if (!running.retry && valueOf(hit) > running.floor && worker.raiseFloor(valueOf(hit))) running.floor = valueOf(hit);
                 });
                 rewardScores.set(engine, engine.scoredSeeds);
@@ -702,14 +781,18 @@ export class EngineClient {
                 active.delete(engine);
               }
               if (stopped) return;
+              observeReward(response);
               responses[index] = response;
               publish(merge());
               stageProgress?.(++done / count, 1);
-              if (sampledRewards && !request.noFloor && completeResponse(response)) {
+              if (rewardBest) {
+                for (const [worker, running] of active)
+                  if (!running.retry && worker.raiseReward(rewardBest)) running.floor = Math.max(running.floor, rewardBest.key);
+              } else if (sampledRewards && !request.noFloor && completeResponse(response)) {
                 const hit = response.overall[request.k - 1];
                 const floor = hit ? valueOf(hit) : -Infinity;
                 for (const [worker, running] of active) if (!running.retry && floor > running.floor) {
-                  if (worker.raiseFloor(floor)) running.floor = floor;
+                    if (worker.raiseFloor(floor)) running.floor = floor;
                   else { running.retry = true; worker.cancel(); }
                 }
               }
@@ -723,7 +806,7 @@ export class EngineClient {
           return this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: merged.overall, noFloor: true } }, stageProgress, acceptPart);
         return merged;
       };
-      if (!phasedReward(this.data, request)) return runShards(request, publish);
+      if (request.rewardLexicographic || !phasedReward(this.data, request)) return runShards(request, publish);
       let seeds = request.seeds ?? [];
       let response = emptyResponse(request);
       for (const kind of ["primary", "other", "score"] as const) {
