@@ -2,7 +2,7 @@
 // Input: 页面资料、跨服选择、Box 状态与用户设置。
 // Output: 配队、成长、活动、导入和结果展示的 Lit 工作区。
 // Pos: [Map](L2-2.md)；当前配队界面状态所有者，连接子视图与控制器。
-// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、同步账户数据并管理 Worker 与 DOM 生命周期；连接期间更新标题栏，离页清理定时器及应用栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
+// Effects/Dependencies: 创建 BoxStore／EngineClient，加载资料、预取已选谱面、同步账户数据并管理 Worker 与 DOM 生命周期；连接期间更新标题栏，离页清理定时器及应用栏；按任务隔离结果并恢复滚动，避让吸顶／吸底控件以显示焦点。
 import { compileRewardPlan, effectiveRewardPlan, legacyRewardPlan } from "../lib/team-builder/reward-plan";
 import { resolveManualEvent } from "../lib/team-builder/manual-event";
 import { renderCardPicker } from "./team-builder/card-picker";
@@ -595,6 +595,7 @@ export class TeamBuilder extends LitElement {
       if (!this.isConnected || loadController.signal.aborted) return;
       this.engine?.dispose();
       this.engine = new EngineClient(data, () => this.requestUpdate());
+      this.engine.prefetch(this.searchSettings.songs);
       // Compile the release in every Worker while the reader sets up the search.
       const warm = () => this.engine?.warm();
       if ("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 2000 });
@@ -654,6 +655,7 @@ export class TeamBuilder extends LitElement {
         if (ownerChanged && this.tab !== "box") this.tab = "pt";
       }
       this.songComparison.restore();
+      this.engine?.prefetch(this.searchSettings.songs);
     }
     this.requestUpdate();
     void this.pt.restore();
@@ -676,6 +678,7 @@ export class TeamBuilder extends LitElement {
       (patch.rewardMode === "plan") !== (this.settings.rewardMode === "plan");
     if (scopeChanged) this.saveScroll();
     this.settings = { ...this.settings, ...patch };
+    this.engine?.prefetch(this.searchSettings.songs);
     this.write([{ key: SETTINGS_KEY, value: this.settings as unknown as BoxValue }]);
     this.requestUpdate();
     if (scopeChanged) {

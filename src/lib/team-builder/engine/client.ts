@@ -2,7 +2,7 @@
 // Input: 配队资料、Engine 请求及进度／快照／单 Worker 最终结果回调；私有分片可返回待补分候选。
 // Output: EngineClient、搜索／成长／评价／解释结果及当前 Worker 阶段。
 // Pos: [Map](L2-2.md)；主线程到当前引擎 Worker 的生命周期与分片协调。
-// Effects/Dependencies: 共享编译后的 WASM 模块和四张固定谱面的下载，与 Worker 初始化并行；创建和替换独立 Worker；交换完整评分候选及实时下界，合并全部分片证明，取消与重试替换对应实例。
+// Effects/Dependencies: 共享编译后的 WASM 模块和四张固定谱面的下载，允许预取已选谱面并与 Worker 初始化并行；创建和替换独立 Worker；交换完整评分候选及实时下界，合并全部分片证明，取消与重试替换对应实例。
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
 import { dataRows, objectRow, type TeamBuilderData } from "../data";
 import { teamBuilderSourceIdentity } from "../data/source";
@@ -278,6 +278,9 @@ export class EngineClient {
     this.pool = Array.from({ length: poolSize() }, (_, index) => new EngineWorker(serialized, charts, this.downloads, `team-engine-${index + 1}`, changed));
   }
   get phases() { return [...new Set(this.pool.map(worker => worker.currentPhase).filter((phase): phase is NonNullable<typeof phase> => phase !== null))]; }
+  prefetch(songs: readonly SongRef[]) {
+    if (songs.length <= 4) for (const song of songs) void this.downloads.load(song).catch(() => {});
+  }
   /** Warm the pool after the first Worker is ready. */
   warm() {
     // The others compile once the first is ready, so the first search can use every Worker.
