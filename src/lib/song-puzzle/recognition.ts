@@ -4,6 +4,7 @@
 // Pos: [Map](../L2-2.md)；封面拼图的本地图像匹配与全局分配。
 // Effects/Dependencies: 纯 CPU 像素处理；不读取网络、DOM 或账户。
 import { goalBoard } from "./model";
+import { readPuzzleLabels } from "./labels";
 
 export interface PuzzlePixels {
   width: number;
@@ -244,6 +245,22 @@ function boundedCrop(crop: PuzzleCrop, image: PuzzlePixels): PuzzleCrop {
   };
 }
 
+function uncertainCells(match: Match): number[] {
+  const cells = match.assignment.length - 1,
+    uncertain: number[] = [];
+  const total = match.assignment.reduce((sum, column, row) => sum + match.costs[row][column], 0);
+  for (let row = 0; row < cells; row++) {
+    const column = match.assignment[row],
+      original = match.costs[row][column];
+    match.costs[row][column] = 10000;
+    const alternative = assign(match.costs),
+      delta = alternative.reduce((sum, col, i) => sum + match.costs[i][col], 0) - total;
+    match.costs[row][column] = original;
+    if (original > 0.22 || delta < 0.035) uncertain.push(row);
+  }
+  return uncertain;
+}
+
 /** Gradient integrals rank repeated grid seams before reference matching chooses the board. */
 function locate(image: PuzzlePixels, size: number): PuzzleCrop[] {
   const scale = Math.min(1, 360 / Math.max(image.width, image.height)),
@@ -340,7 +357,7 @@ export function recognizePuzzle(
               next = match(image, fine, size, region, current.gap, 12, missing);
             if (next.error < current.error) current = next;
           }
-      for (const gap of [0, 0.025, 0.05, 0.085]) {
+      for (const gap of [0, 0.02, 0.04, 0.06, 0.085]) {
         const next = match(image, fine, size, current.crop, gap, 12, missing);
         if (next.error < current.error) current = next;
       }
@@ -348,20 +365,55 @@ export function recognizePuzzle(
     if (!best || current.error < best.error) best = current;
   }
   if (!best || best.error > 0.36) throw new Error("no-match");
+  // Refine spacing continuously as well as the crop; a pixel of bias hides fine text on small tiles.
+  for (const step of [0.5, 0.25])
+    for (let pass = 0; pass < 2; pass++) {
+      for (const axis of ["x", "y", "side"] as const)
+        for (const direction of [-1, 1]) {
+          const region = boundedCrop({ ...best.crop, [axis]: best.crop[axis] + step * direction }, image),
+            next = match(image, fine, size, region, best.gap, 12, missing);
+          if (next.error < best.error) best = next;
+        }
+      for (const direction of [-1, 1]) {
+        const gap = Math.max(0, Math.min(0.15, best.gap + (direction * step * size) / best.crop.side)),
+          next = match(image, fine, size, best.crop, gap, 12, missing);
+        if (next.error < best.error) best = next;
+      }
+    }
+  best = match(image, fragments(cover, size, coverCrop, 0, 24), size, best.crop, best.gap, 24, missing);
+  if (best.error > 0.36) throw new Error("no-match");
+  let uncertain = uncertainCells(best);
+  const anchors = best.assignment
+    .slice(0, size * size)
+    .flatMap((source, row) =>
+      source < size * size && !uncertain.includes(row) && best!.costs[row][source] < 0.18 ? [{ row, source }] : [],
+    );
+  const hints = readPuzzleLabels(
+    image,
+    size,
+    best.crop,
+    best.gap,
+    anchors,
+    goalBoard(size, best.assignment[size * size]),
+  );
+  if (hints.size) {
+    const visual = best.costs,
+      costs = visual.map((row) => [...row]),
+      ambiguousSources = new Set(uncertain.map((row) => best!.assignment[row]));
+    ambiguousSources.add(best.assignment[size * size]);
+    for (const [row, source] of hints) {
+      if (visual[row][source] > 0.22) continue;
+      if (source !== best.assignment[row] && (!uncertain.includes(row) || !ambiguousSources.has(source))) continue;
+      for (let col = 0; col < costs[row].length; col++) if (col !== source) costs[row][col] += 0.5;
+    }
+    const assignment = assign(costs),
+      error = assignment.reduce((sum, col, row) => sum + visual[row][col], 0) / (size * size - 1);
+    best = { ...best, costs, assignment, error };
+    uncertain = uncertainCells(best);
+  }
   const cells = size * size,
     goalBlank = best.assignment[cells],
     goal = goalBoard(size, goalBlank),
-    tiles = best.assignment.slice(0, cells).map((source) => (source === cells ? 0 : goal[source])),
-    uncertain: number[] = [];
-  const total = best.error * (cells - 1);
-  for (let row = 0; row < cells; row++) {
-    const column = best.assignment[row],
-      original = best.costs[row][column];
-    best.costs[row][column] = 10000;
-    const alternative = assign(best.costs),
-      delta = alternative.reduce((sum, col, i) => sum + best!.costs[i][col], 0) - total;
-    best.costs[row][column] = original;
-    if (original > 0.22 || delta < 0.035) uncertain.push(row);
-  }
+    tiles = best.assignment.slice(0, cells).map((source) => (source === cells ? 0 : goal[source]));
   return { crop: best.crop, tiles, goalBlank, uncertain, error: best.error };
 }

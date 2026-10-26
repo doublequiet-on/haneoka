@@ -91,6 +91,8 @@ Adjust the square crop when needed and review the layout before applying it;
 select two preview cells to swap them. The importer infers the current empty cell
 and the missing source fragment separately, and checks whether the layout is solvable.
 The goal empty cell follows the current setting, with automatic detection also available.
+Visible tile numbers help distinguish repeated fragments after their shapes are
+calibrated against confident image matches in the same screenshot.
 
 ## Development
 
