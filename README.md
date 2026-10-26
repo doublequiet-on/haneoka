@@ -94,6 +94,9 @@ The goal empty cell follows the current setting, with automatic detection also a
 Visible tile numbers help distinguish repeated fragments after their shapes are
 calibrated against confident image matches in the same screenshot.
 
+Clicks, dragging, undo and solution replay use smooth tile motion.
+Motion follows the system reduced-motion preference.
+
 For 5×5 through 8×8 boards, solving starts with a short optimal search, then
 uses [row/column reduction](https://ianparberry.com/pubs/saml.pdf), paired edge placement and a final 3×3 bidirectional
 search to produce a playable solution. These solutions and proven shortest

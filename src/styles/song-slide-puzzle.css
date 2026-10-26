@@ -99,23 +99,15 @@
   }
 
   .song-slide-puzzle .puzzle-board {
+    --puzzle-track-size: max(var(--md-comp-control-height-touch), 3rem, var(--puzzle-cell-size));
+    --puzzle-gap: calc(var(--md-sys-spacing-1) / 2);
+    --puzzle-step: calc(var(--puzzle-track-size) + var(--puzzle-gap));
     display: grid;
     width: max-content;
     margin-inline: auto;
-    grid-template-columns: repeat(
-      var(--puzzle-columns),
-      max(
-        var(--md-comp-control-height-touch),
-        3rem,
-        var(--puzzle-cell-size, calc(var(--md-comp-control-height-touch) * 2))
-      )
-    );
-    grid-auto-rows: max(
-      var(--md-comp-control-height-touch),
-      3rem,
-      var(--puzzle-cell-size, calc(var(--md-comp-control-height-touch) * 2))
-    );
-    gap: calc(var(--md-sys-spacing-1) / 2);
+    grid-template-columns: repeat(var(--puzzle-columns), var(--puzzle-track-size));
+    grid-template-rows: repeat(var(--puzzle-rows), var(--puzzle-track-size));
+    gap: var(--puzzle-gap);
     padding: var(--md-sys-spacing-1);
     direction: ltr;
     user-select: none;
@@ -124,6 +116,7 @@
   .song-slide-puzzle .puzzle-cell {
     position: relative;
     display: grid;
+    grid-area: 1 / 1;
     min-width: var(--md-comp-control-height-touch);
     min-height: var(--md-comp-control-height-touch);
     place-items: start;
@@ -142,6 +135,18 @@
     scroll-margin: var(--md-sys-spacing-2);
     touch-action: pan-x pan-y pinch-zoom;
     animation: none;
+    transform: translate(
+      calc(var(--puzzle-column) * var(--puzzle-step) + var(--puzzle-drag-x, 0px)),
+      calc(var(--puzzle-row) * var(--puzzle-step) + var(--puzzle-drag-y, 0px))
+    );
+  }
+
+  .song-slide-puzzle .puzzle-board[data-animate="true"] .puzzle-cell:not([data-empty="true"], [data-dragging="true"]) {
+    transition: transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .song-slide-puzzle .puzzle-cell[data-moving="true"] {
+    z-index: var(--md-sys-z-index-local-raised);
   }
 
   .song-slide-puzzle .puzzle-cell[data-empty="true"] {
@@ -213,7 +218,7 @@
   }
   .song-slide-puzzle[data-mode="play"] .puzzle-cell[data-dragging="true"] {
     z-index: var(--md-sys-z-index-local-raised);
-    transform: translate(var(--puzzle-drag-x, 0px), var(--puzzle-drag-y, 0px));
+    transition: none;
     cursor: grabbing;
   }
 

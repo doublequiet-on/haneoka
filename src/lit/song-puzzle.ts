@@ -6,6 +6,7 @@ import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
 import { readPageData } from "../lib/page-data";
 import type { SongPuzzlePageData } from "../server/tool-page-data";
 import { live } from "lit/directives/live.js";
+import { repeat } from "lit/directives/repeat.js";
 import "@material/web/select/outlined-select.js";
 import "@material/web/select/select-option.js";
 import "@material/web/textfield/outlined-text-field.js";
@@ -73,7 +74,20 @@ export class SongPuzzle extends LitElement {
   private mode: "play" | "edit" = "play";
   private selected = -1;
   private dragEnabled = false;
-  private dragStart?: { index: number; pointer: number; x: number; y: number; revision: number; element: HTMLElement; moved: boolean };
+  private dragStart?: {
+    index: number;
+    pointer: number;
+    x: number;
+    y: number;
+    offsetX: number;
+    offsetY: number;
+    step: number;
+    revision: number;
+    element: HTMLElement;
+    moved: boolean;
+  };
+  private animateTiles = false;
+  private movingTiles = new Set<number>();
   private suppressClick = false;
   private numbers = true;
   private reference = true;
@@ -432,6 +446,8 @@ export class SongPuzzle extends LitElement {
   }
   private invalidate() {
     this.clearDrag();
+    this.animateTiles = false;
+    this.movingTiles.clear();
     this.cancel();
     this.pauseReplay();
     this.revision++;
@@ -461,6 +477,11 @@ export class SongPuzzle extends LitElement {
     this.history = [];
     this.requestUpdate();
   }
+  private moveTiles(next: number[]) {
+    this.movingTiles = new Set(next.filter((tile, index) => tile !== 0 && tile !== this.tiles[index]));
+    this.animateTiles = true;
+    this.tiles = next;
+  }
   private activate(index: number) {
     if (this.mode === "edit") {
       if (this.selected < 0) this.selected = index;
@@ -470,7 +491,7 @@ export class SongPuzzle extends LitElement {
         [next[index], next[this.selected]] = [next[this.selected]!, next[index]!];
         this.history.push({ tiles: [...this.tiles], moves: this.moves });
         this.invalidate();
-        this.tiles = next;
+        this.moveTiles(next);
       }
       this.requestUpdate();
       return;
@@ -479,7 +500,7 @@ export class SongPuzzle extends LitElement {
     if (!next || !this.loaded || !this.coverReady) return;
     this.history.push({ tiles: [...this.tiles], moves: this.moves });
     this.invalidate();
-    this.tiles = next;
+    this.moveTiles(next);
     this.moves++;
     this.requestUpdate();
   }
@@ -487,7 +508,7 @@ export class SongPuzzle extends LitElement {
     const previous = this.history.pop();
     if (!previous) return;
     this.invalidate();
-    this.tiles = previous.tiles;
+    this.moveTiles(previous.tiles);
     this.moves = previous.moves;
     this.requestUpdate();
   }
@@ -615,7 +636,7 @@ export class SongPuzzle extends LitElement {
       return;
     }
     this.history.push({ tiles: [...this.tiles], moves: this.moves });
-    this.tiles = next;
+    this.moveTiles(next);
     if (!automated) this.moves++;
     this.replayIndex++;
     this.hint = -1;
@@ -635,6 +656,9 @@ export class SongPuzzle extends LitElement {
   private rewind() {
     this.pauseReplay();
     this.cancel();
+    this.clearDrag();
+    this.animateTiles = false;
+    this.movingTiles.clear();
     if (!this.solution) return;
     this.revision++;
     this.tiles = [...this.solution.start];
@@ -666,7 +690,7 @@ export class SongPuzzle extends LitElement {
       (Math.abs(delta) === 1 && Math.floor(index / this.size) !== Math.floor(target / this.size))
     )
       return;
-    this.querySelectorAll<HTMLButtonElement>(".puzzle-cell")[target]?.focus();
+    this.querySelector<HTMLButtonElement>(`.puzzle-cell[data-index="${target}"]`)?.focus();
   }
   private pointerDown(event: PointerEvent, index: number) {
     if (!event.isPrimary) {
@@ -678,11 +702,23 @@ export class SongPuzzle extends LitElement {
     if (this.dragStart || event.button !== 0 || !this.loaded || !this.coverReady) return;
     if (this.mode === "edit" ? !this.dragEnabled : this.tiles[index] === 0 || !neighbors(this.tiles.indexOf(0), this.size).includes(index)) return;
     const element = event.currentTarget as HTMLElement;
+    const transform = new DOMMatrix(getComputedStyle(element).transform);
+    const gap = parseFloat(getComputedStyle(element.parentElement!).columnGap);
+    const step = element.offsetWidth + gap;
+    const offsetX = transform.e - (index % this.size) * step;
+    const offsetY = transform.f - Math.floor(index / this.size) * (element.offsetHeight + gap);
+    this.pauseReplay();
+    this.animateTiles = true;
+    element.style.setProperty("--puzzle-drag-x", `${offsetX}px`);
+    element.style.setProperty("--puzzle-drag-y", `${offsetY}px`);
     this.dragStart = {
       index,
       pointer: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      offsetX,
+      offsetY,
+      step,
       revision: this.revision,
       element,
       moved: false,
@@ -699,7 +735,7 @@ export class SongPuzzle extends LitElement {
     const delta = this.tiles.indexOf(0) - drag.index;
     const horizontal = Math.abs(delta) === 1;
     const direction = Math.sign(delta);
-    const distance = Math.max(0, Math.min(this.cellSize, (horizontal ? dx : dy) * direction)) * direction;
+    const distance = Math.max(0, Math.min(drag.step, (horizontal ? dx + drag.offsetX : dy + drag.offsetY) * direction)) * direction;
     drag.element.style.setProperty("--puzzle-drag-x", `${horizontal ? distance : 0}px`);
     drag.element.style.setProperty("--puzzle-drag-y", `${horizontal ? 0 : distance}px`);
   }
@@ -744,7 +780,7 @@ export class SongPuzzle extends LitElement {
       [next[index], next[start.index]] = [next[start.index]!, next[index]!];
       this.history.push({ tiles: [...this.tiles], moves: this.moves });
       this.invalidate();
-      this.tiles = next;
+      this.moveTiles(next);
     }
     this.requestUpdate();
   }
@@ -1105,6 +1141,8 @@ export class SongPuzzle extends LitElement {
                       step="8"
                       .value=${this.cellSize}
                       @input=${(e: Event) => {
+                        this.clearDrag();
+                        this.animateTiles = false;
                         this.cellSizeChosen = true;
                         this.cellSize = Number((e.target as HTMLInputElement).value);
                         this.requestUpdate();
@@ -1157,18 +1195,21 @@ export class SongPuzzle extends LitElement {
       <div class="puzzle-board-viewport" role="region" aria-label=${this.text("board")} tabindex="0">
         <div
           class="puzzle-board"
+          data-animate=${String(this.animateTiles)}
           role="group"
           aria-label=${this.text("board")}
           style=${styleMap({ "--puzzle-columns": String(this.size), "--puzzle-rows": String(this.size), "--puzzle-cell-size": `${this.cellSize}px`, "--puzzle-cover": `url(${JSON.stringify(song?.cover || "")})` })}
         >
-          ${this.tiles.map((tile, index) => {
-            const source = goal.indexOf(tile),
+          ${repeat(goal, (tile) => tile, (tile, source) => {
+            const index = this.tiles.indexOf(tile),
               legal = tile !== 0 && neighbors(this.tiles.indexOf(0), this.size).includes(index);
             return html`
               <button
                 type="button"
                 class="puzzle-cell"
                 data-index=${index}
+                data-tile=${tile}
+                data-moving=${String(this.movingTiles.has(tile))}
                 data-empty=${String(tile === 0)}
                 data-hint=${String(index === this.hint)}
                 data-dragging=${String(index === this.dragStart?.index)}
@@ -1176,7 +1217,7 @@ export class SongPuzzle extends LitElement {
                 aria-pressed=${this.mode === "edit" ? String(this.selected === index) : nothing}
                 aria-disabled=${String(this.mode === "play" && !legal)}
                 aria-label=${`${tile === 0 ? this.text("blank") : this.text("tile", { tile })}, ${this.text("position", { row: Math.floor(index / this.size) + 1, column: (index % this.size) + 1 })}`}
-                style=${styleMap({ "--puzzle-fragment-x": `${((source % this.size) / (this.size - 1)) * 100}%`, "--puzzle-fragment-y": `${(Math.floor(source / this.size) / (this.size - 1)) * 100}%` })}
+                style=${styleMap({ "--puzzle-column": String(index % this.size), "--puzzle-row": String(Math.floor(index / this.size)), "--puzzle-fragment-x": `${((source % this.size) / (this.size - 1)) * 100}%`, "--puzzle-fragment-y": `${(Math.floor(source / this.size) / (this.size - 1)) * 100}%` })}
                 @click=${(event: MouseEvent) => {
                   if (this.suppressClick && event.detail > 0) {
                     this.suppressClick = false;
