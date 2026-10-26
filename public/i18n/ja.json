@@ -3095,7 +3095,26 @@
       "stopReplay": "最初から再生",
       "advanced": "設定",
       "steps": "手順",
-      "solution": "解法"
+      "solution": "解法",
+      "imageImport": "スクリーンショットを読み込む",
+      "imageChoose": "画像を選択",
+      "imageEmpty": "画像未選択",
+      "imageCrop": "盤面の範囲",
+      "imageRecognizing": "認識中",
+      "imageReview": "{count}マスを確認",
+      "imageMatched": "配置を認識",
+      "imageScreenshot": "パズルのスクリーンショット",
+      "imageX": "左端",
+      "imageY": "上端",
+      "imageSide": "一辺",
+      "imageLocate": "盤面を検出",
+      "imageRecognize": "範囲を認識",
+      "imagePreview": "配置プレビュー",
+      "imageApply": "配置を適用",
+      "imageError": "画像を読み込めません",
+      "imageNoMatch": "選択したジャケットと一致しません",
+      "imageTooLarge": "画像が20 MBを超えています",
+      "imageAuto": "自動"
     }
   },
   "editors": {

@@ -35,6 +35,7 @@ import {
   type PuzzlePosition,
 } from "../lib/song-puzzle/model";
 import type { SolveProgress, SolveResult } from "../lib/song-puzzle/solver";
+import type { ImportedPuzzle } from "./song-puzzle-import";
 import { LazyImages } from "./ui/lazy-images";
 import { songTile } from "./shared/song-tile";
 import { songPerformerAdornment } from "./shared/song-performer-adornment";
@@ -58,6 +59,8 @@ export class SongPuzzle extends LitElement {
   private song = "";
   private query = "";
   private pickerOpen = false;
+  private importOpen = false;
+  private importLoading = false;
   private pickerFiltersOpen = false;
   private advancedOpen = false;
   private stepsOpen = false;
@@ -70,7 +73,7 @@ export class SongPuzzle extends LitElement {
   private mode: "play" | "edit" = "play";
   private selected = -1;
   private dragEnabled = false;
-  private dragStart?: { index: number; pointer: number; x: number; y: number; revision: number; element: HTMLElement };
+  private dragStart?: { index: number; pointer: number; x: number; y: number; revision: number; element: HTMLElement; moved: boolean };
   private suppressClick = false;
   private numbers = true;
   private reference = true;
@@ -194,6 +197,34 @@ export class SongPuzzle extends LitElement {
     void this.updateComplete.then(() => {
       if (this.isConnected) this.pickerTrigger?.focus();
     });
+  }
+  private async openImport() {
+    this.cancel();
+    this.pauseReplay();
+    this.clearDrag();
+    this.importLoading = true;
+    this.requestUpdate();
+    try {
+      await import("./song-puzzle-import");
+      if (this.isConnected) this.importOpen = true;
+    } catch {
+      this.message = "imageError";
+    } finally {
+      this.importLoading = false;
+      this.requestUpdate();
+    }
+  }
+  private importPuzzle(event: CustomEvent<ImportedPuzzle>) {
+    this.invalidate();
+    this.size = event.detail.size;
+    this.goalBlank = event.detail.goalBlank;
+    this.tiles = [...event.detail.tiles];
+    this.moves = 0;
+    this.history = [];
+    this.mode = "play";
+    this.importOpen = false;
+    this.defaultCellSize();
+    this.requestUpdate();
   }
   private renderSongPicker() {
     const query = this.query.normalize("NFKC").toLocaleLowerCase(this.locale).trim();
@@ -395,6 +426,8 @@ export class SongPuzzle extends LitElement {
   private clearDrag() {
     const drag = this.dragStart;
     this.dragStart = undefined;
+    drag?.element.style.removeProperty("--puzzle-drag-x");
+    drag?.element.style.removeProperty("--puzzle-drag-y");
     if (drag?.element.hasPointerCapture(drag.pointer)) drag.element.releasePointerCapture(drag.pointer);
   }
   private invalidate() {
@@ -636,8 +669,14 @@ export class SongPuzzle extends LitElement {
     this.querySelectorAll<HTMLButtonElement>(".puzzle-cell")[target]?.focus();
   }
   private pointerDown(event: PointerEvent, index: number) {
+    if (!event.isPrimary) {
+      this.clearDrag();
+      this.requestUpdate();
+      return;
+    }
     this.suppressClick = false;
-    if (this.mode !== "edit" || !this.dragEnabled || this.dragStart || event.button !== 0) return;
+    if (this.dragStart || event.button !== 0 || !this.loaded || !this.coverReady) return;
+    if (this.mode === "edit" ? !this.dragEnabled : this.tiles[index] === 0 || !neighbors(this.tiles.indexOf(0), this.size).includes(index)) return;
     const element = event.currentTarget as HTMLElement;
     this.dragStart = {
       index,
@@ -646,27 +685,51 @@ export class SongPuzzle extends LitElement {
       y: event.clientY,
       revision: this.revision,
       element,
+      moved: false,
     };
     element.setPointerCapture(event.pointerId);
     this.requestUpdate();
+  }
+  private pointerMove(event: PointerEvent) {
+    const drag = this.dragStart;
+    if (!drag || drag.pointer !== event.pointerId) return;
+    const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+    if (Math.hypot(dx, dy) >= 8) drag.moved = true;
+    if (this.mode !== "play") return;
+    const delta = this.tiles.indexOf(0) - drag.index;
+    const horizontal = Math.abs(delta) === 1;
+    const direction = Math.sign(delta);
+    const distance = Math.max(0, Math.min(this.cellSize, (horizontal ? dx : dy) * direction)) * direction;
+    drag.element.style.setProperty("--puzzle-drag-x", `${horizontal ? distance : 0}px`);
+    drag.element.style.setProperty("--puzzle-drag-y", `${horizontal ? 0 : distance}px`);
   }
   private pointerUp(event: PointerEvent) {
     const start = this.dragStart;
     if (!start || start.pointer !== event.pointerId) return;
     this.clearDrag();
     if (
-      this.mode !== "edit" ||
-      !this.dragEnabled ||
       start.revision !== this.revision ||
       start.index >= this.tiles.length
     ) {
       this.requestUpdate();
       return;
     }
-    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 8) {
+    const dx = event.clientX - start.x, dy = event.clientY - start.y;
+    if (!start.moved && Math.hypot(dx, dy) < 8) {
       this.requestUpdate();
       return;
     }
+    this.suppressClick = true;
+    if (this.mode === "play") {
+      const delta = this.tiles.indexOf(0) - start.index;
+      const horizontal = Math.abs(delta) === 1;
+      const along = (horizontal ? dx : dy) * Math.sign(delta);
+      const across = Math.abs(horizontal ? dy : dx);
+      if (neighbors(this.tiles.indexOf(0), this.size).includes(start.index) && along >= Math.max(8, this.cellSize * 0.16) && along > across) this.activate(start.index);
+      this.requestUpdate();
+      return;
+    }
+    if (!this.dragEnabled) return;
     const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLButtonElement>(".puzzle-cell");
     const index = Number(target?.dataset.index);
     if (
@@ -683,9 +746,6 @@ export class SongPuzzle extends LitElement {
       this.invalidate();
       this.tiles = next;
     }
-    // Only this pointer gesture's compatibility click is suppressed. Every
-    // subsequent pointerdown clears it; keyboard-generated clicks (detail=0) pass.
-    this.suppressClick = true;
     this.requestUpdate();
   }
   render() {
@@ -824,6 +884,8 @@ export class SongPuzzle extends LitElement {
                     html`<md-select-option value=${String(size)}><span slot="headline">${size} × ${size}</span></md-select-option>`,
                 )}
               </md-outlined-select>
+              <button type="button" class="button button--tonal" ?disabled=${!ready || this.importLoading}
+                @click=${() => void this.openImport()}>${iconFor("image")}${this.text("imageImport")}</button>
               ${segmented({
                 label: this.text("mode"),
                 value: this.mode,
@@ -1084,6 +1146,9 @@ export class SongPuzzle extends LitElement {
             : nothing
         }
         ${this.pickerOpen ? this.renderSongPicker() : nothing}
+        ${this.importOpen && song ? html`<song-puzzle-import .locale=${this.locale} .cover=${song.cover} .songName=${song.name} .size=${this.size} .goalBlank=${this.goalBlank}
+          @puzzle-import=${(event: CustomEvent<ImportedPuzzle>) => this.importPuzzle(event)}
+          @puzzle-import-close=${() => { this.importOpen = false; this.requestUpdate(); }}></song-puzzle-import>` : nothing}
       </section>
     `;
   }
@@ -1107,6 +1172,7 @@ export class SongPuzzle extends LitElement {
                 data-empty=${String(tile === 0)}
                 data-hint=${String(index === this.hint)}
                 data-dragging=${String(index === this.dragStart?.index)}
+                data-slide-axis=${legal ? (Math.abs(this.tiles.indexOf(0) - index) === 1 ? "x" : "y") : nothing}
                 aria-pressed=${this.mode === "edit" ? String(this.selected === index) : nothing}
                 aria-disabled=${String(this.mode === "play" && !legal)}
                 aria-label=${`${tile === 0 ? this.text("blank") : this.text("tile", { tile })}, ${this.text("position", { row: Math.floor(index / this.size) + 1, column: (index % this.size) + 1 })}`}
@@ -1121,8 +1187,16 @@ export class SongPuzzle extends LitElement {
                 }}
                 @keydown=${(e: KeyboardEvent) => this.key(e, index)}
                 @pointerdown=${(e: PointerEvent) => this.pointerDown(e, index)}
+                @pointermove=${(e: PointerEvent) => this.pointerMove(e)}
                 @pointerup=${(e: PointerEvent) => this.pointerUp(e)}
                 @pointercancel=${() => {
+                  if (this.dragStart?.moved) this.suppressClick = true;
+                  this.clearDrag();
+                  this.requestUpdate();
+                }}
+                @lostpointercapture=${() => {
+                  if (!this.dragStart) return;
+                  if (this.dragStart.moved) this.suppressClick = true;
                   this.clearDrag();
                   this.requestUpdate();
                 }}

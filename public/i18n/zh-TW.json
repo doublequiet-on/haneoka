@@ -3095,7 +3095,26 @@
       "stopReplay": "從頭回放",
       "advanced": "設定",
       "steps": "步驟",
-      "solution": "解法"
+      "solution": "解法",
+      "imageImport": "從截圖匯入",
+      "imageChoose": "選擇截圖",
+      "imageEmpty": "未選擇截圖",
+      "imageCrop": "棋盤範圍",
+      "imageRecognizing": "辨識中",
+      "imageReview": "待確認 {count} 格",
+      "imageMatched": "已辨識布局",
+      "imageScreenshot": "華容道截圖",
+      "imageX": "左側",
+      "imageY": "頂部",
+      "imageSide": "邊長",
+      "imageLocate": "定位棋盤",
+      "imageRecognize": "辨識選區",
+      "imagePreview": "布局預覽",
+      "imageApply": "套用布局",
+      "imageError": "無法讀取圖片",
+      "imageNoMatch": "棋盤與所選封面不符",
+      "imageTooLarge": "圖片超過 20 MB",
+      "imageAuto": "自動"
     }
   },
   "editors": {

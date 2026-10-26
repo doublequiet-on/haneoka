@@ -19,6 +19,7 @@ interactive workspaces in `src/lit`, and the Material Design 3 styles in
 - Searchable multilingual game data
 - Audio, video, comic, Live2D, story, and asset viewers
 - Interactive chart and story players
+- Song jacket sliding puzzles with mouse dragging, touch swipes, screenshot layout import and solving
 - ADV story playback and authoring
 - Sonolus-compatible play, watch, preview, and tutorial engines
 - Accounts and community features
@@ -83,6 +84,13 @@ Gekiso, challenge and skip routes. Existing reward weights and CP conversion rem
 Automatic and manual Gekiso scoring use a Luck sample count of 0 for nominal expectations;
 a positive count averages fixed seeds 0 through n-1. Manual Gekiso evaluation
 and replacement suggestions share the selected accuracy, placement and sample count.
+
+For screenshot puzzle imports, select the song and board size, then choose a PNG,
+JPEG or WebP screenshot. Board detection and fragment matching run in the browser.
+Adjust the square crop when needed and review the layout before applying it;
+select two preview cells to swap them. The importer infers the current empty cell
+and the missing source fragment separately, and checks whether the layout is solvable.
+The goal empty cell follows the current setting, with automatic detection also available.
 
 ## Development
 

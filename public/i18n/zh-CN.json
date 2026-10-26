@@ -3095,7 +3095,26 @@
       "stopReplay": "从头回放",
       "advanced": "设置",
       "steps": "步骤",
-      "solution": "解法"
+      "solution": "解法",
+      "imageImport": "从截图导入",
+      "imageChoose": "选择截图",
+      "imageEmpty": "未选择截图",
+      "imageCrop": "棋盘范围",
+      "imageRecognizing": "识别中",
+      "imageReview": "待确认 {count} 格",
+      "imageMatched": "已识别布局",
+      "imageScreenshot": "华容道截图",
+      "imageX": "左侧",
+      "imageY": "顶部",
+      "imageSide": "边长",
+      "imageLocate": "定位棋盘",
+      "imageRecognize": "识别选区",
+      "imagePreview": "布局预览",
+      "imageApply": "应用布局",
+      "imageError": "无法读取图片",
+      "imageNoMatch": "棋盘与所选封面不匹配",
+      "imageTooLarge": "图片超过 20 MB",
+      "imageAuto": "自动"
     }
   },
   "editors": {

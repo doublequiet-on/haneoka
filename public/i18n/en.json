@@ -3095,7 +3095,26 @@
       "stopReplay": "Restart replay",
       "advanced": "Settings",
       "steps": "Steps",
-      "solution": "Solution"
+      "solution": "Solution",
+      "imageImport": "Import screenshot",
+      "imageChoose": "Choose image",
+      "imageEmpty": "No image selected",
+      "imageCrop": "Board area",
+      "imageRecognizing": "Recognizing",
+      "imageReview": "Review {count} cells",
+      "imageMatched": "Layout recognized",
+      "imageScreenshot": "Puzzle screenshot",
+      "imageX": "Left",
+      "imageY": "Top",
+      "imageSide": "Side length",
+      "imageLocate": "Find board",
+      "imageRecognize": "Recognize selection",
+      "imagePreview": "Layout preview",
+      "imageApply": "Apply layout",
+      "imageError": "Unable to read image",
+      "imageNoMatch": "Board does not match selected cover",
+      "imageTooLarge": "Image exceeds 20 MB",
+      "imageAuto": "Auto"
     }
   },
   "editors": {

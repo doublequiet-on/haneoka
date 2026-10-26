@@ -3095,7 +3095,26 @@
       "stopReplay": "처음부터 재생",
       "advanced": "설정",
       "steps": "단계",
-      "solution": "해답"
+      "solution": "해답",
+      "imageImport": "스크린샷 불러오기",
+      "imageChoose": "이미지 선택",
+      "imageEmpty": "선택한 이미지 없음",
+      "imageCrop": "퍼즐 영역",
+      "imageRecognizing": "인식 중",
+      "imageReview": "{count}칸 확인",
+      "imageMatched": "배치 인식 완료",
+      "imageScreenshot": "퍼즐 스크린샷",
+      "imageX": "왼쪽",
+      "imageY": "위쪽",
+      "imageSide": "한 변 길이",
+      "imageLocate": "퍼즐 찾기",
+      "imageRecognize": "선택 영역 인식",
+      "imagePreview": "배치 미리보기",
+      "imageApply": "배치 적용",
+      "imageError": "이미지를 읽을 수 없습니다",
+      "imageNoMatch": "선택한 재킷과 일치하지 않습니다",
+      "imageTooLarge": "이미지가 20 MB를 초과합니다",
+      "imageAuto": "자동"
     }
   },
   "editors": {
