@@ -33,7 +33,7 @@ runs:
           - name: JP-EGRESS
             type: select
             use: [sub]
-            filter: "JP"
+            filter: "JP-M1"
             exclude-filter: "(?i)\\[v6\\]"
         rules:
           - MATCH,JP-EGRESS
