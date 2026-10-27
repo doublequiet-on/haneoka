@@ -49,7 +49,9 @@ await build({
       return { path: path.resolve(source.directory, target) };
     });
     builder.onLoad({ filter: /team-builder\/engine\/client\.ts$/u }, async ({ path: source }) => ({
-      contents: (await readFile(source, "utf8")).replace('new URL("./worker.ts", import.meta.url)', 'new URL(new URL(import.meta.url).pathname.includes("/chunks/") ? "../team-builder-worker.js" : "./team-builder-worker.js", import.meta.url)'),
+      contents: `import { createModuleWorker } from "../../public-tools/module-worker";\n` + (await readFile(source, "utf8"))
+        .replace('new Worker(', 'createModuleWorker(')
+        .replace('new URL("./worker.ts", import.meta.url)', 'new URL(new URL(import.meta.url).pathname.includes("/chunks/") ? "../team-builder-worker.js" : "./team-builder-worker.js", import.meta.url)'),
       loader: "ts", resolveDir: path.dirname(source),
     }));
   } }],

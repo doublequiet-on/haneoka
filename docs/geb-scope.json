@@ -257,6 +257,7 @@
     "src/lib/public-tools/chart-contract.ts",
     "src/lib/public-tools/image-routes.ts",
     "src/lib/public-tools/team-builder.ts",
+    "src/lib/public-tools/module-worker.ts",
     "src/lib/public-tools/images.ts",
     "src/lib/public-tools/gacha.ts",
     "src/lib/public-tools/song-puzzle.ts",
