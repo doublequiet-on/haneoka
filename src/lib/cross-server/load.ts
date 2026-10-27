@@ -61,15 +61,12 @@ export async function loadCrossServerCatalog(
     }
     if (resource === "events" && snapshot.collections.events && options.reader.readEntity) {
       const entries = Object.entries(snapshot.collections.events).filter(([, row]) => row.kind === "game-event");
-      if (entries.length > 64) failures.push({ server, resource, message: "Event identity hydration budget exceeded; entries remain independent" });
+      if (entries.length > 64) failures.push({ server, resource, message: "Event detail hydration budget exceeded; collection summaries retained" });
       else for (let start = 0; start < entries.length; start += 4) {
-        await Promise.all(entries.slice(start, start + 4).map(async ([id, summary]) => {
+        await Promise.all(entries.slice(start, start + 4).map(async ([id]) => {
           try {
             const detail = await options.reader.readEntity!(resource, identity, id);
-            if (!object(detail) || String(detail.id) !== id || detail.kind !== "game-event") throw new Error("Event entity identity mismatch");
-            for (const field of ["title", "image", "backgroundImage", "logo", "startAt", "endAt"])
-              if (summary[field] !== undefined && JSON.stringify(summary[field]) !== JSON.stringify(detail[field]))
-                throw new Error("Event entity disagrees with its pinned collection summary");
+            if (!object(detail) || String(detail.id) !== id) throw new Error("Event entity identity mismatch");
             snapshot.collections.events![id] = detail;
           } catch (error) { failures.push({ server, resource, message: error instanceof Error ? error.message : String(error) }); }
         }));

@@ -24,7 +24,7 @@ function compact(row: CrossCatalogRow, resource: HomeResource): CrossCatalogRow 
   if (images?.thumbnail !== undefined) result.images = { thumbnail: images.thumbnail };
   return structuredClone(result);
 }
-/** Association happens on full source evidence first; compacting must never weaken the matcher. */
+/** Home projections retain merged entries and their per-server rows. */
 export function compactCrossServerHomeCatalog(dto: CrossCatalogDTO): CrossCatalogDTO {
   if (!Object.hasOwn(HOME_FIELDS, dto.resource)) throw new Error("Resource has no compact home projection");
   const output = structuredClone({ ...dto, documents: {} }), resource = dto.resource as HomeResource;

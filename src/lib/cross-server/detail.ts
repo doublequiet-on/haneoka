@@ -1,4 +1,5 @@
 import { crossServerPublicCache } from "./cache";
+import { crossCatalogRowId } from "./definitions";
 import {
   crossServerDetail, type CrossCatalogEntry, type CrossCatalogIdentity, type CrossCatalogResource,
   type CrossCatalogRow, type OfficialCatalogServer,
@@ -8,15 +9,6 @@ export interface CrossDetailReader {
   readEntity(resource: CrossCatalogResource, identity: CrossCatalogIdentity, id: string): Promise<unknown>;
 }
 const object = (value: unknown): value is CrossCatalogRow => !!value && typeof value === "object" && !Array.isArray(value);
-/** Collection summaries are projections of the same immutable entity, not a different edition. */
-function projectionMatches(summary: unknown, full: unknown): boolean {
-  if (summary === full) return true;
-  if (Array.isArray(summary))
-    return Array.isArray(full) && summary.length === full.length && summary.every((value, i) => projectionMatches(value, full[i]));
-  if (!object(summary) || !object(full)) return false;
-  return Object.entries(summary).every(([key, value]) => Object.hasOwn(full, key) && projectionMatches(value, full[key]));
-}
-
 /** Enrich a previously associated entry from each recorded source once.
  * Neither a removed release nor a foreign response may fall back to current.
  */
@@ -34,7 +26,7 @@ export async function loadCrossServerDetail(
     try {
       const value = await reader.readEntity(entry.resource, { ...variant.identity }, variant.id);
       if (!object(value)) throw new Error("Cross-server entity must be an object");
-      if (!projectionMatches(variant.row, value)) throw new Error("Cross-server entity disagrees with its pinned collection projection");
+      if (String(crossCatalogRowId(entry.resource, value)) !== variant.id) throw new Error("Cross-server entity identity mismatch");
       variant.row = structuredClone(value);
       const images = value.images;
       if (images !== undefined) variant.assets.images = structuredClone(images);

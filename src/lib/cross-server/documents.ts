@@ -26,7 +26,8 @@ export function crossCatalogDocuments(dto: CrossCatalogDTO) {
     for (const value of values) {
       if (!isFormalCatalogSource(value.server) && values.some(formal =>
         isFormalCatalogSource(formal.server) && !semanticOwnersConflict(formal.row, value.row, dto.resource))) continue;
-      const owner = semanticOwnerKey(value.row, dto.resource) ?? `source:${value.server}`, group = groups.get(owner) ?? [];
+      const owner = isFormalCatalogSource(value.server) ? "formal" : semanticOwnerKey(value.row, dto.resource) ?? `source:${value.server}`;
+      const group = groups.get(owner) ?? [];
       group.push(value); groups.set(owner, group);
     }
     return [...groups.values()].flatMap(group => {

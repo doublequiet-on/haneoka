@@ -1,5 +1,6 @@
 import { projectHaneokaTranscript } from "@haneoka/vega-plugin-haneoka/transcript";
 import { resolveSongPerformer } from "./song-performer";
+import { storyCharacterIds } from "./story-characters";
 import { itemRelations } from "../server/item-relations";
 import {gekisouMissionIcons} from "./gekisou";
 import {
@@ -542,7 +543,7 @@ function characterAux(graph: Graph, item: RecordValue): { aux: RecordValue; band
   const byKey = (list: Array<[string, RecordValue]>, fields: readonly string[], keep: (row: RecordValue) => boolean) =>
     Object.fromEntries(list.filter(([, row]) => keep(row)).map(([key, row]) => [key, pick(row, fields)]));
 
-  const episodes = entries(graph.stories.episodes).filter(([, row]) => has(row));
+  const episodes = entries(graph.stories.episodes).filter(([, row]) => storyCharacterIds(row).includes(id));
   const storyKeys = new Set(episodes.map(([key, row]) => String(row.storyId || row.storyKey || key)));
   const chapterIds = new Set(episodes.map(([, row]) => Number(row.chapterId)));
   const chapters = rows(graph.stories.chapters)
@@ -910,7 +911,7 @@ async function buildStoryPayloads(server: ReleaseServer, modes: ReadonlyMap<stri
     const included: Record<string, RecordValue> = { [id]: { ...episode, ...details.get(id) } };
     if (successor) included[successor] = episodes[successor] as RecordValue;
     const characterIds = new Set([
-      ...Object.values(included).flatMap((row) => characterIdsOf(row)),
+      ...Object.values(included).flatMap((row) => storyCharacterIds(row)),
       ...numbers(spot?.characterIds),
       ...Object.values(included).flatMap((row) =>
         projectHaneokaTranscript(row).flatMap(({ command }) =>

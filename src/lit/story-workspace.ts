@@ -8,6 +8,7 @@ import { story as zhTWRelationships } from "../../public/i18n/zh-TW.json";
 import { story as zhCNRelationships } from "../../public/i18n/zh-CN.json";
 import { story as koRelationships } from "../../public/i18n/ko.json";
 import { storySourceUrl } from "../lib/story-assets";
+import { storyCharacterIds } from "../lib/story-characters";
 import { episodeArtwork, episodeIdentityArtwork, spotArtwork } from "../lib/story-artwork";
 import "../styles/bestdori-detail.css";
 import "./ui/image-gallery";
@@ -1082,9 +1083,7 @@ export class StoryWorkspace extends LitElement {
     return this.characters.find((item) => Number(item.characterId) === id);
   }
   private characterIds(episode: JsonRecord) {
-    return (
-      Array.isArray(episode.characterIds) ? episode.characterIds : episode.characterId ? [episode.characterId] : []
-    ).map(Number);
+    return storyCharacterIds(episode);
   }
   private releaseValue(item: JsonRecord) {
     const value = item.releaseAt || item.publishedAt || item.startAt;
