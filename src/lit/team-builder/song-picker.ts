@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Scene-specific chart choices, catalogue and browse preferences.
-// Output: Explicit apply/cancel selection transaction with per-chart filters.
+// Output: Explicit apply/cancel selection with band/credit, genre and per-chart filter groups.
 // Pos: [Map](../L2-2.md); shared team workspace chart chooser.
 // Effects/Dependencies: Lit modal, page-local preferences, lazy metadata reads.
 import { matchesSongMissions, matchesSelections } from "../../lib/catalog-filters";
@@ -12,7 +12,7 @@ import {
 } from "../../lib/catalog-query";
 import { html, nothing, type TemplateResult } from "lit";
 import type { SongRef } from "../../lib/team-builder/engine/api";
-import { chooserFacet } from "../ui/chooser-filters";
+import { chooserFacet, chooserGroup } from "../ui/chooser-filters";
 import { filterChip, inputChip, segmented } from "../ui/controls";
 import { actionMenu } from "../ui/action-menu";
 import { asyncRegion } from "../ui/async-region";
@@ -29,7 +29,8 @@ export interface SongPickerState {
   single: boolean;
   query: string;
   filtersOpen: boolean;
-  bands: number[];
+  bands: (number | string)[];
+  categories?: number[];
   attributes: number[];
   gekisouTypes: string[];
   gekisouMatch?: "only" | "contains";
@@ -62,10 +63,11 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   }
   const update = (patch: Partial<SongPickerState>) => {
     const next = (host.songPicker = { ...host.songPicker!, ...patch });
-    const { query, bands, attributes, gekisouTypes, gekisouMatch, difficulties, minLevel, maxLevel, maxSeconds } = next;
+    const { query, bands, categories, attributes, gekisouTypes, gekisouMatch, difficulties, minLevel, maxLevel, maxSeconds } = next;
     host.songPickerPreferences.set(context, {
       query,
       bands,
+      categories,
       attributes,
       gekisouTypes,
       gekisouMatch,
@@ -81,10 +83,34 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
     host.requestUpdate();
     void host.updateComplete.then(() => state.opener?.isConnected && state.opener.focus());
   };
+  const bandValues = (id: number): string[] => {
+    const ids = catalog.songBands(id).map(String);
+    if (ids.length) return ids;
+    const row = catalog.song(id);
+    const names = Array.isArray(row.artistName ?? row.bandName) ? row.artistName ?? row.bandName : [row.artistName ?? row.bandName];
+    const credit = String(row.artistId || (names as unknown[]).find(value => typeof value === "string" && value.trim()) || "").normalize("NFKC");
+    return credit ? [`credit:${credit}`] : [];
+  };
+  const bandOptions = new Map(Object.keys(catalog.data.bands).map(id => [id, { value: id, label: catalog.bandName(Number(id)) }]));
+  const categoryName = (value: string) => {
+    const key = ["original", "virtual", "jpop", "anime", "game"][Number(value) - 1];
+    return key ? host.common(`catalog.songs.types.${key}`, value) : value;
+  };
+  const categoryValues = (id: number): string[] => ((catalog.song(id).musicCategories as number[] | undefined) ?? []).map(String);
+  const categoryOptions = [...new Set(Object.keys(catalog.data.songs).flatMap(id => categoryValues(Number(id))))]
+    .sort((a, b) => Number(a) - Number(b))
+    .map(value => ({ value, label: categoryName(value) }));
+  const credits = new Map<string, number>();
+  for (const id of Object.keys(catalog.data.songs).map(Number)) for (const value of bandValues(id)) {
+    if (!value.startsWith("credit:")) continue;
+    credits.set(value, id);
+    bandOptions.set(value, { value, label: catalog.songArtist(id) });
+  }
   const queryContext: CatalogQueryContext = {
     game: "our-notes",
     kind: "song",
     aliases: [
+      ...[...credits].map(([value, id]) => ({ key: "collectionBand", value, names: catalogQueryNames({ bandName: catalog.song(id).artistName ?? catalog.song(id).bandName }, "band") })),
       ...Object.entries(catalog.data.characters).map(([id, row]) => ({
         key: "character",
         value: id,
@@ -128,11 +154,13 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
     const id = ref.songId,
       song = catalog.song(id);
     if (!difficulties.includes(ref.difficulty)) return false;
-    if (state.bands.length && !catalog.songBands(id).some((band) => state.bands.includes(band))) return false;
+    if (state.bands.length && !bandValues(id).some(value => state.bands.map(String).includes(value))) return false;
+    if (!matchesSelections(categoryValues(id), (state.categories ?? []).map(String))) return false;
     if (state.attributes.length && !state.attributes.includes(Number(song.musicType))) return false;
     if (!matchesSongMissions(song, state.gekisouTypes, missionMode)) return false;
     if (
-      !matchesSelections(catalog.songBands(id).map(String), facets.collectionBand || []) ||
+      !matchesSelections(bandValues(id), facets.collectionBand || []) ||
+      !matchesSelections(categoryValues(id), facets.category || []) ||
       !matchesSelections(
         (Array.isArray(song.vocalCharacterIds) ? song.vocalCharacterIds : []).map(String),
         facets.character || [],
@@ -234,7 +262,13 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
       "collectionBand",
       [...state.bands.map(String), ...(facets.collectionBand ?? [])],
       { bands: [] },
-      (v: string) => catalog.bandName(Number(v)),
+      (v: string) => bandOptions.get(v)?.label ?? catalog.bandName(Number(v)),
+    ],
+    [
+      "category",
+      [...(state.categories ?? []).map(String), ...(facets.category ?? [])],
+      { categories: [] },
+      categoryName,
     ],
     [
       "type",
@@ -268,6 +302,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const clearFilters = () =>
     update({
       bands: [],
+      categories: [],
       attributes: [],
       gekisouTypes: [],
       gekisouMatch: "only",
@@ -322,9 +357,33 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
       </div>
     `,
     filters: html`
-      <div class="stack">
-        ${missionFilters}${missionMatch} ${levelField("minLevel", minLevel, host.t("sc.minLevel", "Minimum level"))}
-        ${levelField("maxLevel", maxLevel, host.t("sc.maxLevel", "Maximum level"))}
+        ${chooserFacet({
+          label: host.common("catalog.songs.fields.genre", "Genre"),
+          value: state.categories?.[0] == null ? "" : String(state.categories[0]),
+          allLabel: all,
+          options: categoryOptions,
+          change: (value) => update({ categories: value ? [Number(value)] : [] }),
+        })}
+        ${chooserFacet({
+          label: host.common("catalog.fields.band", "Band"),
+          value: state.bands[0] == null ? "" : String(state.bands[0]),
+          allLabel: all,
+          options: [...bandOptions.values()].filter(option => option.label),
+          change: (value) => update({ bands: value ? [value.startsWith("credit:") ? value : Number(value)] : [] }),
+        })}
+        ${chooserFacet({
+          label: host.common("catalog.fields.attribute", "Attribute"),
+          value: state.attributes[0] == null ? "" : String(state.attributes[0]),
+          allLabel: all,
+          options: [1, 2, 3, 4, 5].map((id) => ({ value: String(id), label: catalog.attributeName(id) })),
+          change: (value) => update({ attributes: value ? [Number(value)] : [] }),
+        })}
+        ${chooserGroup(host.t("gekiso", "GEKISO"), html`<div class="stack stack--tight">${missionFilters}${missionMatch}</div>`)}
+        ${chooserGroup(host.t("level", "Level"), html`<div class="row">
+          ${levelField("minLevel", minLevel, host.t("sc.minLevel", "Minimum level"))}
+          ${levelField("maxLevel", maxLevel, host.t("sc.maxLevel", "Maximum level"))}
+        </div>`)}
+        ${chooserGroup(host.common("common.fields.duration", "Duration"), html`
         <md-outlined-text-field
           type="number"
           min="1"
@@ -334,25 +393,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
             const raw = (event.target as HTMLInputElement).value;
             update({ maxSeconds: raw === "" ? null : Number(raw) });
           }}
-        ></md-outlined-text-field>
-        ${chooserFacet({
-          label: host.common("catalog.fields.band", "Band"),
-          value: state.bands[0] == null ? "" : String(state.bands[0]),
-          allLabel: all,
-          options: Object.keys(catalog.data.bands)
-            .map(Number)
-            .filter((id) => catalog.bandName(id))
-            .map((id) => ({ value: String(id), label: catalog.bandName(id) })),
-          change: (value) => update({ bands: value ? [Number(value)] : [] }),
-        })}
-        ${chooserFacet({
-          label: host.common("catalog.fields.attribute", "Attribute"),
-          value: state.attributes[0] == null ? "" : String(state.attributes[0]),
-          allLabel: all,
-          options: [1, 2, 3, 4, 5].map((id) => ({ value: String(id), label: catalog.attributeName(id) })),
-          change: (value) => update({ attributes: value ? [Number(value)] : [] }),
-        })}
-      </div>
+        ></md-outlined-text-field>`)}
     `,
     kind: "song",
     items: shown.map((song) => ({
