@@ -135,6 +135,7 @@
     "circle-flags": "2.8.3",
     "echarts": "catalog:",
     "fflate": "catalog:",
+    "html-to-image": "catalog:",
     "lit": "^3.3.3",
     "lit-html": "3.3.3",
     "parse5": "catalog:",

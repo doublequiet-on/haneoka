@@ -2456,3 +2456,35 @@
     }
   }
 }
+
+@layer pages {
+  .team-builder.tb-result-export {
+    position: fixed;
+    top: 0;
+    inset-inline-start: -100000px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
+    margin: 0;
+    padding: var(--md-sys-spacing-4);
+    gap: var(--md-sys-spacing-4);
+    background: var(--md-sys-color-surface);
+    pointer-events: none;
+  }
+  .team-builder.tb-result-export,
+  .team-builder.tb-result-export * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .team-builder .tb-result-export__brand {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-medium-weight) var(--md-sys-typescale-body-medium-size) /
+      var(--md-sys-typescale-body-medium-line-height) var(--app-font);
+    gap: var(--md-sys-spacing-3);
+  }
+  .team-builder .tb-result-export__brand strong {
+    color: var(--md-sys-color-on-surface);
+    font: var(--md-sys-typescale-title-medium-weight) var(--md-sys-typescale-title-medium-size) /
+      var(--md-sys-typescale-title-medium-line-height) var(--app-font);
+  }
+}

@@ -97,6 +97,7 @@
     "src/server/web-build-identity.ts",
     "src/lit/shared/catalog.ts",
     "src/lit/shared/hydrate-workspace.ts",
+    "src/lit/shared/team-result-image.ts",
     "src/lit/catalog-screen.ts",
     "src/lit/community-workspace.ts",
     "src/lit/team-builder.ts",

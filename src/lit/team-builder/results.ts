@@ -9,8 +9,6 @@ import { html, nothing, type TemplateResult } from "lit";
 import type { EngineHit, SongRef, Timeline } from "../../lib/team-builder/engine/api";
 import { cardIdOf } from "../../lib/team-builder/sync/box-view";
 import { downloadBlob } from "../../lib/canvas-capture";
-import { renderTeamResultImage, type ResultImageCard } from "../shared/team-result-image";
-import { cardRarityName } from "../shared/rarity-icon";
 import { accordion } from "../ui/accordion";
 import { collectionList } from "../ui/collection-view";
 import { skillTimeline } from "../shared/skill-timeline";
@@ -814,75 +812,18 @@ function skillOrderView(host: TeamBuilder, hit: EngineHit): TemplateResult {
   `;
 }
 
-async function exportImage(host: TeamBuilder, hit: EngineHit) {
-  const catalog = host.catalog!;
-  const style = getComputedStyle(host);
-  const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-  const card = (kind: "members" | "snaps", key: string, leader: boolean): ResultImageCard => {
-    const id = cardIdOf(key);
-    const entry = kind === "members" ? catalog.member(id) : catalog.snap(id);
-    const characters = catalog.characterIds(kind, id);
-    return {
-      title: catalog.cardName(kind, id),
-      character: characters.map((character) => catalog.characterName(character)).join(" · "),
-      image: entry?.image ?? "",
-      avatars:
-        kind === "members" && entry?.image
-          ? [entry.image]
-          : characters.map((character) => catalog.characterFace(character)).filter(Boolean),
-      attribute: catalog.attributeIcon(entry?.attribute ?? 0) || undefined,
-      rarity: catalog.rarityIcon(entry?.rarity ?? 0) || undefined,
-      attributeLabel: catalog.attributeName(entry?.attribute ?? 0),
-      rarityLabel: cardRarityName(entry?.rarity ?? 0),
-      leader,
-      growth: resultGrowth(host, kind, key),
-      facts: [],
-    };
-  };
-  const main = primary(host, hit);
-  const blob = await renderTeamResultImage({
-    title: host.t("title", "Team builder"),
-    subtitle: hit.song
-      ? `${catalog.songTitle(hit.song.songId)} · ${catalog.difficultyLabel(hit.song.songId, hit.song.difficulty)}`
-      : "",
-    jacket: hit.song ? catalog.songOptions(hit.song.songId, hit.song.difficulty).image : undefined,
-    membersLabel: host.t("members", "Members"),
-    snapshotsLabel: host.t("snapshots", "Snaps"),
-    leaderLabel: host.t("leader", "Leader"),
-    emptyLabel: host.t("noSnap", "No snap"),
-    allEmptyLabel: host.t("allNoSnaps", "No Snapshots in any of the five slots"),
-    imageUnavailableLabel: host.t("imageUnavailable", "Image unavailable"),
-    members: hit.members.map((key, index) => card("members", key, index === 0)),
-    snapshots: hit.snaps.map((key) => (key ? card("snaps", key, false) : null)),
-    metrics: [
-      { label: main.label, value: main.value, detail: "" },
-      ...(resultSettings(host, hit).goal === "power"
-        ? []
-        : [{ label: host.t("power", "Power"), value: format(host, hit.power), detail: "" }]),
-      ...(hit.score
-        ? [
-            {
-              label: host.t("scoreRange", "Range"),
-              value: `${format(host, hit.score.min)} – ${format(host, hit.score.max)}`,
-              detail: "",
-            },
-          ]
-        : []),
-    ],
-    footer: [...conditionLines(host, hit), "haneoka.org"],
-    server: (hit.song ? catalog.songIdentity(hit.song.songId) : catalog.data.identity).server,
-    releaseId: (hit.song ? catalog.songIdentity(hit.song.songId) : catalog.data.identity).releaseId,
-    theme: {
-      surface: token("--md-sys-color-surface", "#fff"),
-      container: token("--md-sys-color-surface-container", "#f3f3f3"),
-      text: token("--md-sys-color-on-surface", "#111"),
-      muted: token("--md-sys-color-on-surface-variant", "#555"),
-      primary: token("--md-sys-color-primary", "#4455aa"),
-      outline: token("--md-sys-color-outline-variant", "#ccc"),
-      font: token("--app-font", "sans-serif"),
-    },
-  });
-  downloadBlob(blob, "team.png");
+async function exportImage(host: TeamBuilder, key: string) {
+  const element = [...host.querySelectorAll<HTMLElement>(".tb-hit")].find((card) => card.dataset.resultKey === key);
+  if (!element) return;
+  try {
+    const { renderTeamResultImage } = await import("../shared/team-result-image");
+    if (!element.isConnected) return;
+    const blob = await renderTeamResultImage(element);
+    await downloadBlob(blob, "team.png");
+  } catch {
+    host.error = host.common("common.states.captureFailed", "The image could not be captured. Try again.");
+    host.requestUpdate();
+  }
 }
 
 function copyText(host: TeamBuilder, hit: EngineHit) {
@@ -986,6 +927,7 @@ export function renderHit(
   const main = primary(host, hit);
   return html`
     <article
+      data-result-key=${key}
       class=${`card card--outlined tb-hit${index === 0 ? " is-best" : ""}`}
       aria-label=${`${options.subtitle ?? `#${index + 1}`} · ${main.label} ${main.value}`}
     >
@@ -1059,7 +1001,7 @@ export function renderHit(
           label: host.common("common.actions.moreActions", "More"),
           items: [
             { label: host.t("copyTeam", "Copy as text"), icon: "content_copy", run: () => copyText(host, hit) },
-            { label: host.t("saveImage", "Save image"), icon: "image", run: () => void exportImage(host, hit) },
+            { label: host.t("saveImage", "Save image"), icon: "image", run: () => void exportImage(host, key) },
             ...(analysisHref
               ? [
                   {

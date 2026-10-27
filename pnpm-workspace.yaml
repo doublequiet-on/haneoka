@@ -75,6 +75,7 @@ catalog:
   '@yume-chan/adb-daemon-webusb': 2.3.2
   fast-png: ^8.0.0
   wanakana: 5.3.1
+  html-to-image: ^1.11.13
 catalogMode: prefer
 cleanupUnusedCatalogs: true
 allowBuilds:
