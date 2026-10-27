@@ -1,22 +1,24 @@
+// L3 — GEB
+// Input: 谱面图片请求、固定 release 读取器与原生渲染回调。
+// Output: 原生 PNG、内嵌同一 PNG 的 SVG、下载和条件读取标头。
+// Pos: [Map](L2.md)；公共谱面图片的请求、预算与响应契约。
+// Effects/Dependencies: 读取 release 谱面并调用浏览器渲染；保留版本身份与 CORS。
 import { negotiateRequestLocale } from "../src/i18n/negotiation.ts";
 import { parseScore, buildChart } from "@haneoka/cassiopeia-plugin-our-notes";
 import {
-  renderStaticChartOverview,
   StaticChartOverviewError,
   STATIC_CHART_OVERVIEW_FONT_STACK,
-  STATIC_CHART_OVERVIEW_RENDERER_VERSION,
+
   type ChartDocument,
-  type StaticChartOverviewMeta,
-  type StaticChartOverviewResult,
 } from "@haneoka/cassiopeia";
 
+import { CHART_IMAGE_RENDERER_VERSION as NATIVE_RENDERER_VERSION } from "../src/lib/public-tools/chart-contract.ts";
 export const CHART_IMAGE_ROUTE = "/api/v1/servers/{server}/songs/{songId}/charts/{difficulty}/image.{format}";
 const SERVER_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u;
 const SONG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,255}$/u;
 const DIFFICULTIES = new Set(["easy", "normal", "hard", "expert", "special", "master"]);
 const LOCALES = ["ja", "en", "zh-TW", "zh-CN", "ko"] as const;
 const MAX_RAW_CHART_BYTES = 2 * 1024 * 1024;
-const MAX_JACKET_BYTES = 1024 * 1024;
 const MAX_HEIGHT = 1_440;
 const DEFAULT_HEIGHT = 720;
 const CACHE_CONTROL = "public, max-age=300, must-revalidate";
@@ -49,8 +51,7 @@ export interface ChartImageSources {
     releasePath: string,
     maxBytes: number,
   ) => Promise<Uint8Array | null>;
-  /** Optional officially-supported SVG-to-PNG capability, injected at root. */
-  readonly rasterizeSvg?: (svg: string, width: number, height: number) => Promise<Uint8Array>;
+  readonly renderNative?: (input: { server: string; songId: string; difficulty: string; release: string; locale: string; height: number; timeZone?: string }) => Promise<{ png: Uint8Array; width: number; height: number }>;
 }
 
 export interface ChartImageRequestOptions {
@@ -98,17 +99,6 @@ function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-function localized(value: unknown, locale: (typeof LOCALES)[number], fallback = ""): string {
-  if (typeof value === "string") return value.trim() || fallback;
-  if (!Array.isArray(value)) return fallback;
-  const index = LOCALES.indexOf(locale);
-  const selected = typeof value[index] === "string" ? value[index].trim() : "";
-  if (selected) return selected;
-  return (
-    value.find((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)?.trim() || fallback
-  );
-}
-
 function localeFor(request: Request): (typeof LOCALES)[number] {
   const requested = new URL(request.url).searchParams.get("locale");
   if (requested && (LOCALES as readonly string[]).includes(requested)) return requested as (typeof LOCALES)[number];
@@ -152,25 +142,6 @@ function chartReleasePath(server: string, difficulty: Record<string, unknown>): 
   return path;
 }
 
-async function jacketDataHref(
-  sources: ChartImageSources,
-  release: ChartImageRelease,
-  value: unknown,
-): Promise<string | undefined> {
-  const path = assetReleasePath(release.server, value);
-  if (!path) return undefined;
-  const bytes = await sources.readReleaseBytes(release, path, MAX_JACKET_BYTES);
-  if (!bytes?.length || bytes.length > MAX_JACKET_BYTES) return undefined;
-  const png = bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71;
-  const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-  if (!png && !jpeg) return undefined;
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 8192) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
-  }
-  return `data:image/${png ? "png" : "jpeg"};base64,${btoa(binary)}`;
-}
-
 function parseChart(bytes: Uint8Array): ChartDocument {
   if (!bytes.length) throw new ChartImageRequestError(502, "chart_invalid", "Latest release chart is empty");
   if (bytes.length > MAX_RAW_CHART_BYTES) {
@@ -186,34 +157,6 @@ function parseChart(bytes: Uint8Array): ChartDocument {
     }
     throw new ChartImageRequestError(502, "chart_invalid", "Latest release chart could not be parsed");
   }
-}
-
-function metaFor(
-  song: ChartImageSong,
-  difficulty: Record<string, unknown>,
-  server: string,
-  locale: (typeof LOCALES)[number],
-  songId: string,
-): StaticChartOverviewMeta {
-  const title = localized(song.musicTitle, locale, songId);
-  const band = localized(song.bandName, locale, typeof song.bandId === "number" ? `Band ${song.bandId}` : "Band");
-  const displayLevel =
-    typeof difficulty.displayLevel === "number" || typeof difficulty.displayLevel === "string"
-      ? difficulty.displayLevel
-      : typeof difficulty.playLevel === "number"
-        ? difficulty.playLevel
-        : "—";
-  const meta = {
-    title,
-    bandName: band,
-    songId,
-    difficultyName: String(difficulty.difficultyName || "chart"),
-    displayLevel,
-    ...(typeof song.attribute === "string" ? { attribute: song.attribute } : {}),
-    server,
-    locale,
-  };
-  return meta;
 }
 
 function parseRoute(
@@ -254,7 +197,7 @@ async function imageResponse(
   // still belongs to distinct current releases.
   const digest = await crypto.subtle.digest("SHA-256", payload);
   const hash = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
-  const etag = `"${release.server}:${release.releaseId}:${songId}:${locale}:${difficulty}:${STATIC_CHART_OVERVIEW_RENDERER_VERSION}:${hash}"`;
+  const etag = `"${release.server}:${release.releaseId}:${songId}:${locale}:${difficulty}:${NATIVE_RENDERER_VERSION}:${hash}"`;
   const download = new URL(request.url).searchParams.get("download") !== "0";
   const filename = `Haneoka-${release.server}-${songId}-${difficulty}-${locale}.${format}`;
   const headers = new Headers({
@@ -266,7 +209,7 @@ async function imageResponse(
     "Content-Length": String(payload.byteLength),
     "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${filename}"`,
     ETag: etag,
-    "X-Haneoka-Chart-Renderer": STATIC_CHART_OVERVIEW_RENDERER_VERSION,
+    "X-Haneoka-Chart-Renderer": NATIVE_RENDERER_VERSION,
     "X-Haneoka-Release-Id": release.releaseId,
     "X-Haneoka-Server": release.server,
     "X-Haneoka-Image-Width": String(width),
@@ -296,7 +239,7 @@ function validatePng(bytes: Uint8Array, width: number, height: number): void {
   }
 }
 
-/** The API entrypoint provides current-release catalog/CAS readers and a PNG rasterizer. */
+/** The entrypoint supplies release readers and the native browser renderer. */
 export async function handleChartImageRequest({
   request,
   sources,
@@ -308,14 +251,14 @@ export async function handleChartImageRequest({
     if (request.method !== "GET" && request.method !== "HEAD")
       throw new ChartImageRequestError(405, "method_not_allowed", "Chart images support GET, HEAD, and OPTIONS");
     const url = new URL(request.url);
-    for (const name of ["locale", "height", "download", "server"]) {
+    for (const name of ["locale", "height", "download", "server", "timeZone"]) {
       if (url.searchParams.getAll(name).length > 1)
         throw new ChartImageRequestError(400, `invalid_${name}`, `${name} must occur once`);
     }
     if (url.searchParams.has("server") && url.searchParams.get("server") !== route.server)
       throw new ChartImageRequestError(400, "invalid_server", "server must match the scoped route");
-    if (url.searchParams.has("release"))
-      throw new ChartImageRequestError(400, "release_not_supported", "Chart images use the current release");
+    if (url.searchParams.has("release") && (url.searchParams.getAll("release").length !== 1 || !/^r-[a-f0-9]{20}$/u.test(url.searchParams.get("release") || "")))
+      throw new ChartImageRequestError(400, "invalid_release", "release must be an immutable release id");
     if (url.searchParams.has("download") && !["0", "1"].includes(url.searchParams.get("download") || ""))
       throw new ChartImageRequestError(400, "invalid_download", "download must be 0 or 1");
     const contentLength = request.headers.get("content-length");
@@ -329,10 +272,12 @@ export async function handleChartImageRequest({
       throw new ChartImageRequestError(400, "invalid_locale", "locale must be ja, en, zh-TW, zh-CN, or ko");
     }
     const height = integerQuery(request, "height", DEFAULT_HEIGHT);
+    const timeZone = url.searchParams.get("timeZone") ?? "Asia/Tokyo";
+    try { new Intl.DateTimeFormat("en", { timeZone }); } catch { throw new ChartImageRequestError(400, "invalid_time_zone", "timeZone must be an IANA time zone"); }
     if (!(await sources.hasServer(route.server)))
       throw new ChartImageRequestError(404, "server_not_found", "Server not found");
     const release = await sources.currentRelease(route.server);
-    if (!release) throw new ChartImageRequestError(503, "release_unavailable", "No latest release is published");
+    if (!release) throw new ChartImageRequestError(url.searchParams.has("release") ? 404 : 503, url.searchParams.has("release") ? "release_not_found" : "release_unavailable", "Resource release is unavailable");
     if (
       release.server !== route.server ||
       !SERVER_PATTERN.test(release.server) ||
@@ -345,51 +290,27 @@ export async function handleChartImageRequest({
     const chartPath = chartReleasePath(release.server, difficulty);
     const bytes = await sources.readReleaseBytes(release, chartPath, MAX_RAW_CHART_BYTES);
     if (!bytes) throw new ChartImageRequestError(404, "chart_not_found", "Chart data not found");
-    const chart = parseChart(bytes);
+    parseChart(bytes);
     const locale = localeFor(request);
-    const baseMeta = metaFor(song, difficulty, release.server, locale, route.songId);
-    const jacketHref = await jacketDataHref(sources, release, song.jacketUrl);
-    const meta = { ...baseMeta, ...(jacketHref ? { jacketHref } : {}) };
-    const rendered: StaticChartOverviewResult = renderStaticChartOverview(chart, meta, {
-      height,
-      maxPanels: 256,
-      maxPixels: 12_000_000,
-      maxSvgBytes: 8 * 1024 * 1024,
-    });
-    if (route.format === "svg")
-      return imageResponse(
-        request,
-        route.format,
-        rendered.svg,
-        release,
-        route.songId,
-        route.difficulty,
-        locale,
-        rendered.width,
-        rendered.height,
-      );
-    if (!sources.rasterizeSvg) {
-      throw new ChartImageRequestError(
-        501,
-        "png_renderer_unavailable",
-        "PNG output requires a Worker-supported SVG rasterizer",
-      );
+    if (!sources.renderNative) throw new ChartImageRequestError(503, "native_renderer_unavailable", "Native chart renderer is not configured");
+    const rendered = await sources.renderNative({ server: release.server, songId: route.songId, difficulty: route.difficulty, release: release.releaseId, locale, height, timeZone });
+    validatePng(rendered.png, rendered.width, rendered.height);
+    if (!Number.isSafeInteger(rendered.width) || !Number.isSafeInteger(rendered.height) || rendered.width * rendered.height > 48_000_000) throw new ChartImageRequestError(413, "chart_render_budget", "Chart image exceeds the pixel budget");
+    let body: string | Uint8Array = rendered.png;
+    if (route.format === "svg") {
+      let binary = "";
+      for (let offset = 0; offset < rendered.png.length; offset += 8192) binary += String.fromCharCode(...rendered.png.subarray(offset, offset + 8192));
+      body = `<svg xmlns="http://www.w3.org/2000/svg" width="${rendered.width}" height="${rendered.height}" viewBox="0 0 ${rendered.width} ${rendered.height}" lang="${locale}"><image width="${rendered.width}" height="${rendered.height}" href="data:image/png;base64,${btoa(binary)}"/></svg>`;
     }
-    const png = await sources.rasterizeSvg(rendered.svg, rendered.width, rendered.height);
-    validatePng(png, rendered.width, rendered.height);
-    return imageResponse(
-      request,
-      route.format,
-      png,
-      release,
-      route.songId,
-      route.difficulty,
-      locale,
-      rendered.width,
-      rendered.height,
-    );
+    return imageResponse(request, route.format, body, release, route.songId, route.difficulty, locale, rendered.width, rendered.height);
+
   } catch (error) {
     if (error instanceof ChartImageRequestError) return jsonError(request, error);
+    if (error instanceof Error && (error.message === "native_renderer_busy" || error.message === "native_renderer_unavailable")) {
+      const response = jsonError(request, new ChartImageRequestError(503, error.message, "Native image renderer is unavailable"));
+      response.headers.set("Retry-After", "60");
+      return response;
+    }
     if (error instanceof RangeError)
       return jsonError(
         request,

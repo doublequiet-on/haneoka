@@ -15,6 +15,7 @@ export type TeamBuilderNativeRuleEvidenceReader = (identity: Parameters<RuntimeM
 const DTO_CACHE_VERSION = "1";
 /** A release's DTO never changes; the edge keeps it a day so a cold colo rebuilds it at most daily. */
 const EDGE_TTL_SECONDS = 86400;
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Expose-Headers": "X-Haneoka-Release-Id, X-Haneoka-Source-Id" };
 const edgeCache = (): Cache | undefined => (typeof caches === "undefined" ? undefined : (caches as unknown as { default?: Cache }).default);
 /** Public wrapper reuses the dispatcher's catalog handler, including its server/pin validation. */
 export async function handleTeamBuilderData(
@@ -27,7 +28,8 @@ export async function handleTeamBuilderData(
   const url = new URL(request.url),
     match = /^\/api\/v1\/team-builder\/([^/]+)\/?$/u.exec(url.pathname);
   if (!match) return null;
-  const error = (status: number, code: string) => Response.json({ error: { code } }, { status });
+  const error = (status: number, code: string) => Response.json({ error: { code } }, { status, headers: CORS });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (!["GET", "HEAD"].includes(request.method)) return error(405, "method_not_allowed");
   let server: string;
   try {
@@ -75,6 +77,7 @@ export async function handleTeamBuilderData(
     const headers = new Headers(response.headers);
     headers.set("cache-control", clientCacheControl);
     headers.set("vary", "accept-encoding");
+    for (const [name, value] of Object.entries(CORS)) headers.set(name, value);
     return new Response(request.method === "HEAD" ? null : response.body, { status: response.status, headers });
   };
   const cache = isPublicResourceServer(server) ? edgeCache() : null;

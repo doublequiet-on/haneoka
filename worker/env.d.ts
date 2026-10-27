@@ -1,4 +1,7 @@
 interface Env {
+  TOOLS_SERVICE_URL?: string;
+  TOOLS_SERVICE_TOKEN?: string;
+  MOENOTES_OPEN_API_TOKEN?: string;
   MOENOTES_PROFILE_API_TOKEN?: string;
   ADMIN_PACKAGE_MAX_BYTES?: string;
   BETTER_AUTH_SECRET?: string;
@@ -20,6 +23,9 @@ interface Env {
 
 declare namespace Cloudflare {
   interface Env {
+    TOOLS_SERVICE_URL?: string;
+    TOOLS_SERVICE_TOKEN?: string;
+    MOENOTES_OPEN_API_TOKEN?: string;
     MOENOTES_PROFILE_API_TOKEN?: string;
     ADMIN_PACKAGE_MAX_BYTES?: string;
     BETTER_AUTH_SECRET?: string;

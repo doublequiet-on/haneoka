@@ -77,12 +77,13 @@ import {
   type OurNotesRenderer,
 } from "@haneoka/cassiopeia-renderer-three";
 import { WEB_HOST, createWebHostPlugin, type MediaClock, type NoteSoundPlayer } from "@haneoka/cassiopeia-host-web";
-import { countNoteKinds, drawDetailedChartOverview, loadDetailedOverviewSkin } from "./chart-overview-renderer";
+import { drawDetailedChartOverview, loadDetailedOverviewSkin } from "./chart-overview-renderer";
 import { PlaybackControlsController } from "../ui/playback-controls";
 import { ViewportFullscreenController } from "./viewport-fullscreen";
 import {
   chartImageFileName,
   composeChartOverviewImage,
+  completeChartOverviewMeta,
   downloadChartOverviewImage,
   type ChartOverviewExportMeta,
 } from "./chart-image-export";
@@ -1742,41 +1743,7 @@ export class ChartSimulator extends LitElement {
     const chart = this.chart;
     if (!canvas || this.phase !== "ready" || !chart) return;
     this.drawOverview();
-    const localize = (value: number) => value.toLocaleString(this.locale || undefined);
-    const stats = meta.stats.map((stat) => {
-      if (stat.value !== "—" || !stat.id) return stat;
-      if (stat.id === "notes") return { ...stat, value: localize(chart.notes.filter(note => note.judged && note.visible).length) };
-      // Older releases ship song-meta without the canonical metrics; the
-      // loaded chart still carries duration, BPM and density.
-      if (stat.id === "time") {
-        const seconds = chart.durationMs / 1000;
-        return { ...stat, value: `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}` };
-      }
-      if (stat.id === "bpm") {
-        const values = chart.bpmChanges.map((change) => change.bpm).filter((value) => value > 0);
-        if (!values.length) return stat;
-        const first = Math.round(values[0]!);
-        const max = Math.round(Math.max(...values));
-        return { ...stat, value: max !== first ? `${first}–${max}` : `${first}` };
-      }
-      if (stat.id === "nps" && chart.durationMs > 0) {
-        const judged = chart.notes.filter((note) => note.judged && note.visible).length;
-        return { ...stat, value: (judged / (chart.durationMs / 1000)).toFixed(2) };
-      }
-      return stat;
-    });
-    if (stats.length) {
-      // The per-kind breakdown follows the total note count (stats[0]).
-      const kinds = countNoteKinds(chart);
-      stats.splice(
-        1,
-        0,
-        { label: this.ui("noteTap"), value: localize(kinds.tap) },
-        { label: this.ui("noteFlick"), value: localize(kinds.flick) },
-        { label: this.ui("noteSlide"), value: localize(kinds.slide) },
-      );
-    }
-    const payload: ChartOverviewExportMeta = { ...meta, stats, locale: this.locale };
+    const payload = completeChartOverviewMeta({ ...meta, locale: this.locale }, chart, key => this.ui(key));
     const blob = await composeChartOverviewImage(canvas, payload);
     if (blob) downloadChartOverviewImage(blob, chartImageFileName(payload));
   }

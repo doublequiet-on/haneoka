@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: 冻结的配队请求、结果、设置与目录。
+// Output: 排名卡片、指标、阵容、细节与含歌曲信息的导出上下文。
+// Pos: [Map](../L2-2.md)；配队结果视图与网页／API 图片共同的展示逻辑。
+// Effects/Dependencies: 渲染 DOM、图表与对话框；图片装饰使用原结果的歌曲及完整成绩指标。
 import { rewardRankingLabel, rewardLabel } from "./reward-plan-view";
 import { cache } from "lit/directives/cache.js";
 import { resultMetric } from "./result-metric";
@@ -5,7 +10,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { actionMenu } from "../ui/action-menu";
 import { improvementPercent } from "../../lib/team-builder/engine/execution";
 /** Search results: ranked team cards, per-song rankings, plan summary, comparison. */
-import { html, nothing, type TemplateResult } from "lit";
+import { html, nothing, render, type TemplateResult } from "lit";
 import type { EngineHit, SongRef, Timeline } from "../../lib/team-builder/engine/api";
 import { cardIdOf } from "../../lib/team-builder/sync/box-view";
 import { downloadBlob } from "../../lib/canvas-capture";
@@ -812,13 +817,38 @@ function skillOrderView(host: TeamBuilder, hit: EngineHit): TemplateResult {
   `;
 }
 
-async function exportImage(host: TeamBuilder, key: string) {
+export function resultImageDecorator(host: TeamBuilder, hit: EngineHit, assetsBase = location.href) {
+  const input = resultInputs(host);
+  const selectedSong = hit.song ?? (input?.goal.kind === "power" ? input.goal.song : input && "songs" in input.goal && input.goal.songs.length === 1 ? input.goal.songs[0]! : null);
+  const song = selectedSong ? resultSong(host, selectedSong) : nothing;
+  const metrics = chips(host, hit);
+  const catalog = host.catalog!;
+  const identities = { ...catalog.data.crossServer?.identities, [catalog.data.identity.server]: catalog.data.identity };
+  return (card: HTMLElement) => {
+    const summary = card.querySelector<HTMLElement>(".tb-hit__chips");
+    if (summary) { summary.replaceChildren(); render(metrics, summary); }
+    if (selectedSong && !card.querySelector(".tb-result-song")) {
+      const header = document.createElement("div"); render(song, header); card.prepend(...Array.from(header.childNodes));
+    }
+    for (const image of card.querySelectorAll<HTMLImageElement>("img")) {
+      const source = image.dataset.src || image.getAttribute("src");
+      if (!source || source.startsWith("data:")) continue;
+      const url = new URL(source, assetsBase);
+      const server = /^\/(?:assets|runtime)\/([^/]+)\//u.exec(url.pathname)?.[1];
+      if (server && identities[server]) url.searchParams.set("release", identities[server]!.releaseId);
+      if (image.dataset.src) image.dataset.src = url.href;
+      else image.src = url.href;
+    }
+  };
+}
+
+async function exportImage(host: TeamBuilder, key: string, hit: EngineHit) {
   const element = [...host.querySelectorAll<HTMLElement>(".tb-hit")].find((card) => card.dataset.resultKey === key);
   if (!element) return;
   try {
     const { renderTeamResultImage } = await import("../shared/team-result-image");
     if (!element.isConnected) return;
-    const blob = await renderTeamResultImage(element);
+    const blob = await renderTeamResultImage(element, { decorate: resultImageDecorator(host, hit) });
     await downloadBlob(blob, "team.png");
   } catch {
     host.error = host.common("common.states.captureFailed", "The image could not be captured. Try again.");
@@ -1001,7 +1031,7 @@ export function renderHit(
           label: host.common("common.actions.moreActions", "More"),
           items: [
             { label: host.t("copyTeam", "Copy as text"), icon: "content_copy", run: () => copyText(host, hit) },
-            { label: host.t("saveImage", "Save image"), icon: "image", run: () => void exportImage(host, key) },
+            { label: host.t("saveImage", "Save image"), icon: "image", run: () => void exportImage(host, key, hit) },
             ...(analysisHref
               ? [
                   {

@@ -11,11 +11,13 @@ export const chartKey = (song: SongRef) => `${song.songId}:${song.difficulty}`;
 
 export async function downloadChart(source: EngineChartSources[string] | undefined, signal?: AbortSignal): Promise<Record<string, unknown>> {
   if (!source?.file) throw new Error("chart-file-missing");
-  const { identity, file } = source;
+  const { identity, file, apiBase } = source;
+  const path = pinnedSongAssetUrl(identity, file);
+  const target = apiBase ? new URL(path, apiBase).href : path;
   const fetchChart = async () => {
     signal?.throwIfAborted();
     const timeout = AbortSignal.timeout(60_000);
-    const response = await fetch(pinnedSongAssetUrl(identity, file), { credentials: "omit", signal: signal ? AbortSignal.any([signal, timeout]) : timeout }).catch(() => null);
+    const response = await fetch(target, { credentials: "omit", signal: signal ? AbortSignal.any([signal, timeout]) : timeout }).catch(() => null);
     signal?.throwIfAborted();
     return response;
   };

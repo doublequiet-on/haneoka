@@ -1,17 +1,17 @@
 // L3 — GEB
-// Input: 当前已渲染的配队结果卡片。
-// Output: 与页面阵容、留影绑定和样式一致，带站点标识的 PNG。
+// Input: 当前已渲染的结果卡片与冻结的图片装饰器。
+// Output: 保留页面阵容、留影绑定、歌曲、成绩指标和站点标识的 PNG。
 // Pos: [Map](../L2-2.md)；配队结果的只读 DOM 快照导出。
 // Effects/Dependencies: 复制结果 DOM、内嵌当前图像与 SVG 图标；按需加载 html-to-image，临时节点在完成或失败后移除。
 import { toCanvas } from "html-to-image";
 import { canvasToPngBlob } from "../../lib/canvas-capture";
 
-const controls = ".tb-hit__actions, .md-accordion";
+const controls = ".tb-hit__actions, .md-accordion, .card-growth";
 
-async function inlineIcons(root: HTMLElement) {
+async function inlineIcons(root: HTMLElement, assetsBase = location.href) {
   const sprites = new Map<string, Promise<Document>>();
   for (const use of root.querySelectorAll<SVGUseElement>("svg use")) {
-    const url = new URL(use.href.baseVal, location.href);
+    const url = new URL(use.href.baseVal, assetsBase);
     const id = url.hash.slice(1);
     url.hash = "";
     let sprite = sprites.get(url.href);
@@ -33,7 +33,7 @@ async function inlineIcons(root: HTMLElement) {
 }
 
 /** Capture the visible result itself, so presentation order and styling have one owner. */
-export async function renderTeamResultImage(source: HTMLElement): Promise<Blob> {
+export async function renderTeamResultImage(source: HTMLElement, options: { assetsBase?: string; decorate?: (card: HTMLElement) => void } = {}): Promise<Blob> {
   const width = source.getBoundingClientRect().width;
   const locale = source.lang || document.documentElement.lang;
   const result = source.cloneNode(true) as HTMLElement;
@@ -78,6 +78,18 @@ export async function renderTeamResultImage(source: HTMLElement): Promise<Blob> 
   result.querySelectorAll(".media-loading__progress").forEach((progress) => progress.remove());
   result.querySelectorAll(controls).forEach((control) => control.remove());
   result.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
+  options.decorate?.(result);
+  for (const image of result.querySelectorAll<HTMLImageElement>("img")) {
+    const source = image.dataset.src || image.getAttribute("src");
+    if (!source || source.startsWith("data:")) continue;
+    image.crossOrigin = "anonymous"; image.loading = "eager";
+    image.src = new URL(source, options.assetsBase ?? location.href).href;
+    await image.decode();
+    const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d"); if (!context) throw new Error("Image capture unavailable");
+    context.drawImage(image, 0, 0); image.src = canvas.toDataURL("image/png");
+    image.classList.add("is-loaded"); image.removeAttribute("data-src"); image.removeAttribute("data-loading");
+  }
 
   const stage = document.createElement("div");
   stage.className = "team-builder tb tb-result-export";
@@ -91,7 +103,7 @@ export async function renderTeamResultImage(source: HTMLElement): Promise<Blob> 
   const identity = document.createElement("span");
   identity.className = "row";
   const logo = document.createElement("img");
-  logo.src = "/favicon.svg";
+  logo.src = new URL("/favicon.svg", options.assetsBase ?? location.href).href;
   logo.width = 36;
   logo.height = 36;
   logo.alt = "";
@@ -104,7 +116,7 @@ export async function renderTeamResultImage(source: HTMLElement): Promise<Blob> 
   stage.append(result, brand);
   document.body.append(stage);
   try {
-    await inlineIcons(stage);
+    await inlineIcons(stage, options.assetsBase);
     if (!stage.isConnected) throw new DOMException("Export cancelled", "AbortError");
     const canvas = await toCanvas(stage, {
       pixelRatio: 2,

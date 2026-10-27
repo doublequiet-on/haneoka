@@ -36,8 +36,29 @@ console.log(song, page.items, next, batch.missing, imageUrl);
 
 `servers()` returns active resource-server slugs. `index`, `entity`, `batch`, `page` and `relation` accept an optional `signal` and `decode(value: unknown)` callback. `view` selects a manifest-declared projection for index/entity/batch/page. Default results are JSON values; `decode` performs business DTO validation. `locale` selects a supported UI language while retaining the catalog's localized values, independently of `server`.
 
-Ordinary reads use the current-data aliases and default `server` to `intl`. Advanced `release` selection automatically uses `/servers/{server}/...`. Pass a returned release identifier. Pagination uses limit 1–100 (default 50), and continuation cursors retain the first snapshot. A short or empty page can continue; end only on `nextCursor === null`. Batch accepts 1–100 submitted IDs. Chart image URLs select current data, use SVG/PNG and panel height 360–1440, and return no bytes until your host fetches them.
+Ordinary reads use the current-data aliases and default `server` to `intl`. Advanced `release` selection automatically uses `/servers/{server}/...`. Pass a returned release identifier. Pagination uses limit 1–100 (default 50), and continuation cursors retain the first snapshot. A short or empty page can continue; end only on `nextCursor === null`. Batch accepts 1–100 submitted IDs. Chart image URLs default to native PNG, accept an optional release pin, and support panel height 360–1440. SVG embeds the same native PNG. The URL builder returns no bytes until your host fetches it.
 
 `ApiClientError` preserves status, method, URL, code, optional request ID, details and retryability. Aborted calls use `request_aborted` and are not retryable. The client does not retry automatically. HTTP failures keep their status even when a gateway returns HTML or malformed JSON. JSON and decoder failures remain distinct from transport errors.
 
 Full examples and current deployment requirements are in the [typed client guide](https://docs.haneoka.org/servers/client/), [catalog guide](https://docs.haneoka.org/servers/catalog/) and [chart image guide](https://docs.haneoka.org/servers/chart-images/).
+
+## Game data and local computation
+
+`createGameClient` is exported from `@haneoka/api-client/game` (and the hosted
+`/tools/api-client.js` module). It uses resource-first paths (`players`, `songs`, `events`, `arena`, `circles`, `gacha`) with a `region` query for
+profiles, batches, favorites, cards, rankings, event decks, arena trends,
+circles, product probabilities and announcements. Game regions are `jp`,
+`tw`, `en`, `kr`; resource servers remain `jp`, `intl`. IDs are decimal strings.
+
+```js
+import { createGameClient } from "@haneoka/api-client/game";
+const game = createGameClient({ region: "jp" });
+const ranking = await game.songRanking("100001");
+const event = await game.eventRanking("1", [1, 100]);
+```
+
+`GET /api/v1` discovers the API catalog, OpenAPI and device tools.
+`/tools/team-builder.js` exposes the website engine on the caller's device;
+`/tools/chart-image.js` exports original-material chart images. Local HTTP
+clients use [tools-service](../tools-service/README.md). Complete request and
+result schemas are generated at `/tools/schema.json`.

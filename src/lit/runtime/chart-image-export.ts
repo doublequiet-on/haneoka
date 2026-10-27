@@ -1,17 +1,15 @@
-/**
- * Composes the simple chart overview into a downloadable PNG.
- *
- * The overview canvas paints each panel on pure black, so the export keeps
- * that colour as an even padding around the whole strip — no visible seam
- * between the chart and its frame. The header pairs the jacket with the song
- * title, artist, difficulty pill, attribute mark and band mark; a full-width
- * stats grid (spread with space-between so it fills the strip) carries the
- * song meta; the Haneoka brand appears top-right and leads the footer.
- * Typography, the difficulty pill and spacing follow Material Design 3
- * (dark, 4dp rhythm, corner-full pill, tone-on-surface emphasis levels).
- */
-
-const FONT_STACK = `"Roboto Variable", "Noto Sans Variable", "Noto Sans JP Variable", "Noto Sans TC Variable", "Noto Sans SC Variable", "Noto Sans KR Variable", sans-serif`;
+// L3 — GEB
+// Input: 原生概览画布、歌曲信息、统计与本地化标签。
+// Output: 补齐的导出信息、PNG Blob 与下载。
+// Pos: [Map](L2-2.md)；网页和程序化导出共用的图片排版。
+// Effects/Dependencies: 解码图片、加载字体、绘制 Canvas；下载创建并回收 Blob URL。
+import type { ChartDocument } from "@haneoka/cassiopeia";
+import { countNoteKinds } from "./chart-overview-renderer";
+const fontStackFor = (locale: string): string => {
+  const preferred = ({ "zh-CN": "SC", "zh-TW": "TC", ko: "KR", ja: "JP", en: "JP" } as Record<string, string>)[locale] || "JP";
+  const families = ["Roboto Variable", "Noto Sans Variable", `Noto Sans ${preferred} Variable`, "Noto Sans JP Variable", "Noto Sans TC Variable", "Noto Sans SC Variable", "Noto Sans KR Variable"];
+  return [...new Set(families)].map(family => `"${family}"`).join(", ") + ", sans-serif";
+};
 const DIFFICULTY_COLORS: Record<string, string> = {
   easy: "#48cadc",
   normal: "#56ce79",
@@ -47,6 +45,31 @@ export interface ChartOverviewExportMeta {
   stats: ChartExportStat[];
   songId?: string | number;
   locale: string;
+}
+
+export function completeChartOverviewMeta(meta: ChartOverviewExportMeta, chart: ChartDocument, label: (key: "noteTap" | "noteFlick" | "noteSlide") => string): ChartOverviewExportMeta {
+  const localize = (value: number) => value.toLocaleString(meta.locale || undefined);
+  const stats = meta.stats.map(stat => {
+    if (stat.value !== "—" || !stat.id) return { ...stat };
+    if (stat.id === "notes") return { ...stat, value: localize(chart.notes.filter(note => note.judged && note.visible).length) };
+    if (stat.id === "time") {
+      const seconds = chart.durationMs / 1000;
+      return { ...stat, value: `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}` };
+    }
+    if (stat.id === "bpm") {
+      const values = chart.bpmChanges.map(change => change.bpm).filter(value => value > 0);
+      if (!values.length) return { ...stat };
+      const first = Math.round(values[0]!); const max = Math.round(Math.max(...values));
+      return { ...stat, value: max !== first ? `${first}–${max}` : `${first}` };
+    }
+    if (stat.id === "nps" && chart.durationMs > 0) return { ...stat, value: (chart.notes.filter(note => note.judged && note.visible).length / (chart.durationMs / 1000)).toFixed(2) };
+    return { ...stat };
+  });
+  if (stats.length) {
+    const kinds = countNoteKinds(chart);
+    stats.splice(1, 0, ...(["tap", "flick", "slide"] as const).map(kind => ({ label: label(({ tap: "noteTap", flick: "noteFlick", slide: "noteSlide" } as const)[kind]), value: localize(kinds[kind]) })));
+  }
+  return { ...meta, stats };
 }
 
 const clampText = (context: CanvasRenderingContext2D, text: string, maxWidth: number): string => {
@@ -92,13 +115,14 @@ type DecodedImage = ImageBitmap | HTMLImageElement;
  * Decodes an image through the element pipeline. `createImageBitmap` fails
  * silently on filter-heavy SVGs in Chromium (the site mark never rendered
  * through it), while `HTMLImageElement.decode()` is the same path `<img>`
- * uses and always works.
+ * uses.
  */
 const loadImage = async (url: string, size?: number): Promise<DecodedImage | undefined> => {
   try {
     if (size === undefined) {
       const image = new Image();
       image.decoding = "async";
+      image.crossOrigin = "anonymous";
       image.src = url;
       await image.decode();
       return image;
@@ -180,12 +204,12 @@ interface StatCell {
   width: number;
 }
 
-const measureStatCells = (context: CanvasRenderingContext2D, stats: ChartExportStat[], scale: number): StatCell[] =>
+const measureStatCells = (context: CanvasRenderingContext2D, stats: ChartExportStat[], scale: number, fontStack: string): StatCell[] =>
   stats.map((stat) => {
-    context.font = `500 ${Math.round(12.5 * scale)}px/${Math.round(16 * scale)}px ${FONT_STACK}`;
+    context.font = `500 ${Math.round(12.5 * scale)}px/${Math.round(16 * scale)}px ${fontStack}`;
     const label = stat.label.toUpperCase();
     const labelWidth = context.measureText(label).width;
-    context.font = `500 ${Math.round(20 * scale)}px/${Math.round(26 * scale)}px ${FONT_STACK}`;
+    context.font = `500 ${Math.round(20 * scale)}px/${Math.round(26 * scale)}px ${fontStack}`;
     const valueWidth = context.measureText(stat.value).width;
     return { label, value: stat.value, width: Math.max(labelWidth, valueWidth) };
   });
@@ -213,6 +237,7 @@ export async function composeChartOverviewImage(
   canvas: HTMLCanvasElement,
   meta: ChartOverviewExportMeta,
 ): Promise<Blob | undefined> {
+  const fontStack = fontStackFor(meta.locale);
   const cssWidth = Number.parseFloat(canvas.style.width || "") || canvas.width;
   const cssHeight = Number.parseFloat(canvas.style.height || "") || canvas.height;
   if (!canvas.width || !canvas.height || !cssWidth || !cssHeight) return undefined;
@@ -245,7 +270,7 @@ export async function composeChartOverviewImage(
   // Two rows keep the stats band dense on every strip width; wider strips
   // simply spread the same cells further apart.
   const statRows = layoutStatRows(
-    measureStatCells(context, meta.stats, scale),
+    measureStatCells(context, meta.stats, scale, fontStack),
     width - padding * 2,
     Math.round(26 * scale),
     2,
@@ -270,7 +295,7 @@ export async function composeChartOverviewImage(
   // brand block on the right edge.
   const textLeft = padding + (jacket ? jacketSize + Math.round(24 * scale) : 0);
   const titleSize = Math.round(40 * scale);
-  context.font = `400 ${titleSize}px/${Math.round(50 * scale)}px ${FONT_STACK}`;
+  context.font = `400 ${titleSize}px/${Math.round(50 * scale)}px ${fontStack}`;
   const titleRowCenter = padding + Math.round(34 * scale);
   const titleMaxWidth = width - padding - textLeft - Math.round(320 * scale);
   const title = clampText(context, meta.title, titleMaxWidth);
@@ -295,7 +320,7 @@ export async function composeChartOverviewImage(
     bandCursor += bandMarkSize + Math.round(14 * scale);
   }
   if (meta.bandName || meta.artist) {
-    context.font = `500 ${Math.round(24 * scale)}px/${Math.round(32 * scale)}px ${FONT_STACK}`;
+    context.font = `500 ${Math.round(24 * scale)}px/${Math.round(32 * scale)}px ${fontStack}`;
     context.fillStyle = "rgba(255,255,255,.82)";
     context.fillText(
       clampText(context, meta.bandName || meta.artist || "", Math.max(0, width - padding - bandCursor)),
@@ -309,7 +334,7 @@ export async function composeChartOverviewImage(
   // left edge.
   const pillTop = padding + pillRowTop;
   const pillLabel = `${meta.difficultyName.toUpperCase()} ${meta.displayLevel}`.trim();
-  context.font = `500 ${Math.round(16 * scale)}px/${pillHeight}px ${FONT_STACK}`;
+  context.font = `500 ${Math.round(16 * scale)}px/${pillHeight}px ${fontStack}`;
   const pillPadding = Math.round(18 * scale);
   const pillWidth = context.measureText(pillLabel).width + pillPadding * 2;
   context.globalAlpha = 0.32;
@@ -336,15 +361,15 @@ export async function composeChartOverviewImage(
   const credits = (meta.credits || []).filter((credit) => credit.value);
   if (credits.length) {
     const creditTop = padding + creditsRowTop;
-    context.font = `500 ${Math.round(13 * scale)}px/${Math.round(20 * scale)}px ${FONT_STACK}`;
+    context.font = `500 ${Math.round(13 * scale)}px/${Math.round(20 * scale)}px ${fontStack}`;
     const labelWidth = Math.max(...credits.map((credit) => context.measureText(credit.label).width));
     context.textBaseline = "middle";
     let creditCursor = textLeft;
     for (const credit of credits) {
-      context.font = `500 ${Math.round(13 * scale)}px/${Math.round(20 * scale)}px ${FONT_STACK}`;
+      context.font = `500 ${Math.round(13 * scale)}px/${Math.round(20 * scale)}px ${fontStack}`;
       context.fillStyle = "rgba(255,255,255,.45)";
       context.fillText(credit.label, creditCursor, creditTop);
-      context.font = `400 ${Math.round(16 * scale)}px/${Math.round(22 * scale)}px ${FONT_STACK}`;
+      context.font = `400 ${Math.round(16 * scale)}px/${Math.round(22 * scale)}px ${fontStack}`;
       context.fillStyle = "rgba(255,255,255,.78)";
       const maxTextWidth = Math.max(0, width - padding - creditCursor - labelWidth - Math.round(10 * scale));
       const text = clampText(context, credit.value, maxTextWidth);
@@ -359,9 +384,9 @@ export async function composeChartOverviewImage(
   // song id, all right-aligned on the shared right edge.
   const brandName = "Haneoka";
   const creditLine = "Powered by Cassiopeia from haneoka";
-  context.font = `500 ${Math.round(18 * scale)}px/${Math.round(26 * scale)}px ${FONT_STACK}`;
+  context.font = `500 ${Math.round(18 * scale)}px/${Math.round(26 * scale)}px ${fontStack}`;
   const brandNameWidth = context.measureText(brandName).width;
-  context.font = `400 ${Math.round(15 * scale)}px/${Math.round(26 * scale)}px ${FONT_STACK}`;
+  context.font = `400 ${Math.round(15 * scale)}px/${Math.round(26 * scale)}px ${fontStack}`;
   const brandUrlWidth = context.measureText("haneoka.org").width;
   const brandGap = Math.round(10 * scale);
   const brandMarkSize = Math.round(26 * scale);
@@ -373,15 +398,15 @@ export async function composeChartOverviewImage(
   }
   brandCursor += brandMarkSize + brandGap;
   context.textBaseline = "middle";
-  context.font = `500 ${Math.round(18 * scale)}px/${Math.round(26 * scale)}px ${FONT_STACK}`;
+  context.font = `500 ${Math.round(18 * scale)}px/${Math.round(26 * scale)}px ${fontStack}`;
   context.fillStyle = "rgba(255,255,255,.92)";
   context.fillText(brandName, brandCursor, padding + Math.round(15 * scale));
   brandCursor += brandNameWidth + brandGap;
-  context.font = `400 ${Math.round(15 * scale)}px/${Math.round(26 * scale)}px ${FONT_STACK}`;
+  context.font = `400 ${Math.round(15 * scale)}px/${Math.round(26 * scale)}px ${fontStack}`;
   context.fillStyle = "rgba(255,255,255,.55)";
   context.fillText("haneoka.org", brandCursor, padding + Math.round(15 * scale));
   context.textAlign = "right";
-  context.font = `400 ${Math.round(14 * scale)}px/${Math.round(20 * scale)}px ${FONT_STACK}`;
+  context.font = `400 ${Math.round(14 * scale)}px/${Math.round(20 * scale)}px ${fontStack}`;
   context.fillStyle = "rgba(255,255,255,.45)";
   context.fillText(creditLine, width - padding, padding + Math.round(42 * scale));
   if (meta.songId !== undefined && meta.songId !== "") {
@@ -399,10 +424,10 @@ export async function composeChartOverviewImage(
     // First cell pins to the shared left edge; the rest spread evenly.
     let rowCursor = padding;
     for (const cell of row) {
-      context.font = `500 ${Math.round(12.5 * scale)}px/${Math.round(16 * scale)}px ${FONT_STACK}`;
+      context.font = `500 ${Math.round(12.5 * scale)}px/${Math.round(16 * scale)}px ${fontStack}`;
       context.fillStyle = "rgba(255,255,255,.5)";
       context.fillText(cell.label, rowCursor, statsTop + Math.round(11 * scale));
-      context.font = `500 ${Math.round(20 * scale)}px/${Math.round(26 * scale)}px ${FONT_STACK}`;
+      context.font = `500 ${Math.round(20 * scale)}px/${Math.round(26 * scale)}px ${fontStack}`;
       context.fillStyle = "rgba(255,255,255,.92)";
       context.fillText(cell.value, rowCursor, statsTop + Math.round(39 * scale));
       rowCursor += cell.width + gap;

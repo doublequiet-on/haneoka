@@ -78,9 +78,9 @@ for (const name of ["core", "vega", "cassiopeia", "home-spot"]) {
 sourceEntries.set("@haneoka/embed-core/branding", path.join(root, "packages/embed-core/src/branding.ts"));
 sourceEntries.set("@haneoka/embed-vega/theme", path.join(root, "packages/embed-vega/src/theme.ts"));
 sourceEntries.set("@haneoka/embed-vega/hosted", path.join(root, "packages/embed-vega/src/hosted.ts"));
-for (const entry of ["index", "haneoka"])
+for (const entry of ["index", "haneoka", "game"])
   sourceEntries.set(
-    `@haneoka/api-client${entry === "index" ? "" : "/haneoka"}`,
+    `@haneoka/api-client${entry === "index" ? "" : `/${entry}`}`,
     path.join(root, `packages/api-client/src/${entry}.ts`),
   );
 
@@ -156,7 +156,7 @@ const compatibility = await restorePublishedEmbedCompatibility(output);
 
 const chartStyle = await readFile(path.join(root, "packages/embed-cassiopeia/src/style.css"), "utf8");
 const entries = {
-  "api-client": `export * from "@haneoka/api-client";export * from "@haneoka/api-client/haneoka";`,
+  "api-client": `export * from "@haneoka/api-client";export * from "@haneoka/api-client/haneoka";export * from "@haneoka/api-client/game";`,
   core: `export * from "@haneoka/embed-core";export * from "@haneoka/embed-core/haneoka";export * from "@haneoka/embed-core/branding";`,
   vega: `export * from "@haneoka/embed-vega";export * from "@haneoka/embed-vega/haneoka";`,
   "home-spot": `export * from "@haneoka/embed-home-spot";export * from "@haneoka/embed-home-spot/haneoka";`,

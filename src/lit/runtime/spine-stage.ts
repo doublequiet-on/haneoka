@@ -283,6 +283,16 @@ export class SpineStage {
   setPaused(value: boolean) {
     this.paused = value;
   }
+  seek(seconds: number) {
+    const stage = this.active;
+    if (!stage || !this.animation) return;
+    stage.mesh.skeleton.setToSetupPose();
+    stage.mesh.state.clearTracks();
+    stage.mesh.state.setAnimation(0, this.animation, this.loop);
+    for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) stage.mesh.update(Math.min(remaining, 1 / 60));
+    stage.mesh.update(0);
+    this.captureFrame();
+  }
   setLoop(value: boolean) {
     this.loop = value;
     if (this.active && this.animation) {

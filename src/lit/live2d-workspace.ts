@@ -84,7 +84,7 @@ type PackagingProgress = {
 const POSE_STORAGE_KEY = "haneoka.live2d.poses";
 const CAPTURE_PIXEL_BUDGET = 4_000_000;
 let live2dAccordionId = 0;
-interface Viewer {
+export interface Viewer {
   readonly ready: boolean;
   readonly isMotionPlaying: boolean;
   readonly isMotionBusy: boolean;

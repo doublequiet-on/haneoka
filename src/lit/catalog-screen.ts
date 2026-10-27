@@ -3,6 +3,7 @@
 // Output: 目录筛选、视图、实体详情、媒体及关联评论交互。
 // Pos: [Map](L2-2.md)；集合与实体资料的 Lit 协调枢纽。
 // Effects/Dependencies: DOM、事件、HTTP／资源加载和页面状态；部分渲染被构建期 SSR 复用。
+import { createChartOverviewMeta } from "../lib/public-tools/chart-meta";
 import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import { withUiMarksProjection } from "../lib/ui-marks";
 import catalogPageRollout from "../../config/catalog-page-rollout.json";
@@ -6105,64 +6106,18 @@ export class CatalogScreen extends LitElement {
       "chart-simulator",
     );
     if (!simulator) return;
-    const chart = this.chartRow(item);
-    const chartMeta = this.songChartMeta(item);
-    const number = (value: unknown) => {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-    };
-    const duration = (seconds: unknown) => {
-      const value = number(seconds);
-      if (!value) return undefined;
-      return `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
-    };
-    const bpm = (() => {
-      const first = number(chartMeta.firstBpm) ?? number(chartMeta.minBpm);
-      const max = number(chartMeta.maxBpm);
-      if (!first) return undefined;
-      return max && max !== first ? `${Math.round(first)}–${Math.round(max)}` : `${Math.round(first)}`;
-    })();
-    const percent = (value: unknown) => {
-      const parsed = number(value);
-      return parsed === undefined ? undefined : `${Math.round(parsed * 100)}%`;
-    };
-    const stat = (id: "time" | "bpm" | "nps" | undefined, label: string, value: string | undefined) => ({
-      id,
-      label,
-      value: value && value !== "—" ? value : "—",
-    });
-    const stats = [
-      stat(undefined, this.label("n", "Notes"), number(chart.noteCount)?.toLocaleString()),
-      stat("time", this.label("time", "Time"), duration(chartMeta.time)),
-      stat("bpm", this.label("bpm", "BPM"), bpm),
-      stat("nps", this.label("nps", "NPS"), number(chartMeta.nps)?.toFixed(2)),
-      stat(undefined, this.label("score", "Score"), number(chartMeta.score)?.toFixed(2)),
-      stat(undefined, this.label("eff", "Efficiency"), number(chartMeta.eff)?.toFixed(2)),
-      stat(undefined, this.label("sr", "Skill ratio"), percent(chartMeta.sr)),
-    ];
     const bandId = Number(item.bandId || 0);
-    const credits = [
-      { label: this.label("composer", "Composer"), value: this.localized(item.composer) },
-      { label: this.label("lyricist", "Lyricist"), value: this.localized(item.lyricist) },
-      { label: this.label("arranger", "Arranger"), value: this.localized(item.arranger) },
-      { label: this.label("release", "Release"), value: this.fieldValue(item, "publishedAt") },
-    ].filter((credit) => credit.value);
-    await simulator.downloadOverview({
-      title: this.itemTitle(item),
-      // Text resolution, not itemArtistContent: the canvas needs a string,
-      // and a Lit template would serialize as "[object Object]".
-      artist: this.itemArtist(item) !== "—" ? this.itemArtist(item) : undefined,
-      jacketUrl: typeof item.jacketUrl === "string" ? item.jacketUrl : undefined,
-      attributeIconUrl: this.attributeMark(item.musicType, true) || undefined,
-      bandIconUrl: this.bandIcon(bandId) || undefined,
-      bandName: this.bandName(bandId) || undefined,
-      credits,
-      difficultyName: String(chart.difficultyName || ""),
-      displayLevel: chart.displayLevel ?? "",
-      songId: item.musicId,
-      stats,
+    const payload = createChartOverviewMeta({
+      song: item, difficulty: this.chartRow(item), chartMeta: this.songChartMeta(item), locale: this.settings.locale,
+      label: key => this.label(key, key), localized: value => this.localized(value),
+      jacket: typeof item.jacketUrl === "string" ? item.jacketUrl : undefined,
+      attributeIcon: this.attributeMark(item.musicType, true) || undefined,
+      bandIcon: this.bandIcon(bandId) || undefined, bandName: this.bandName(bandId) || undefined,
+      publishedAt: this.fieldValue(item, "publishedAt"),
     });
+    await simulator.downloadOverview(payload);
   }
+
   private renderDetailActions(item: Item) {
     if (this.profile.presentation !== "song") return nothing;
     const id = this.itemId(item);

@@ -41,7 +41,7 @@ export function requestedResourceServers(request: Request): string[] {
   const url = new URL(request.url);
   const matches = [
     /^\/(?:assets|runtime|objects|artifacts|game-client|static-views)\/([^/]+)/u.exec(url.pathname),
-    /^\/api\/v1\/(?:servers|team-builder|meta-reference)\/([^/]+)/u.exec(url.pathname),
+    /^\/api\/v1\/(?:servers|team-builder(?!\/image\.png$)|meta-reference)\/([^/]+)/u.exec(url.pathname),
     /^\/([^/]*(?:-test|-cbt)[^/]*)\/(?:.*)?$/u.exec(url.pathname),
     /^\/([^/]+)\/(?:ja|en|ko|zh-CN|zh-TW)(?:\/|$)/u.exec(url.pathname),
   ];

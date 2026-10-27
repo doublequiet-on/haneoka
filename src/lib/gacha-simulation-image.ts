@@ -263,6 +263,7 @@ export async function renderGachaImage(input: GachaImageInput): Promise<Blob> {
   await Promise.all([...sources].map(load));
   await document.fonts?.ready;
   const height = await render(null, theme, input);
+  if (WIDTH * height > 12_000_000) throw new RangeError("Recruitment image exceeds the pixel budget");
   const canvas = document.createElement("canvas");
   canvas.width = WIDTH;
   canvas.height = height;

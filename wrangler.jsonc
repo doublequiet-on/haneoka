@@ -90,6 +90,8 @@
   "durable_objects": {"bindings": [{"name": "MEDIA_PROCESSOR", "class_name": "CommunityMediaContainer"}]},
   "migrations": [{"tag": "community-media-v1", "new_sqlite_classes": ["CommunityMediaContainer"]}],
 
+  "browser": { "binding": "BROWSER" },
+
   "ai": {
     "binding": "AI",
   },
@@ -124,6 +126,8 @@
   ],
 
   "ratelimits": [
+    { "name": "IMAGE_RENDERER_RATE_LIMITER", "namespace_id": "412675", "simple": { "limit": 10, "period": 60 } },
+    { "name": "GAME_API_RATE_LIMITER", "namespace_id": "412674", "simple": { "limit": 20, "period": 60 } },
     {
       "name": "COMMUNITY_RATE_LIMITER",
       "namespace_id": "412673",

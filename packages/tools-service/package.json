@@ -1,0 +1,10 @@
+{
+  "name": "@haneoka/tools-service",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local HTTP API for Haneoka's browser-native team engine and chart images",
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": { "playwright": "^1.61.0" }
+}

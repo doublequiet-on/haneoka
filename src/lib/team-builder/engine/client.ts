@@ -14,7 +14,7 @@ import { chartKey, EngineCharts } from "./charts";
 import engineUrl from "./generated/team-engine.wasm?url";
 
 let compiledEngine: Promise<WebAssembly.Module> | null = null;
-const engineModule = () => compiledEngine ??= WebAssembly.compileStreaming(fetch(engineUrl, { signal: AbortSignal.timeout(60_000) }))
+const engineModule = () => compiledEngine ??= WebAssembly.compileStreaming(fetch(new URL(engineUrl, import.meta.url), { signal: AbortSignal.timeout(60_000) }))
   .catch(error => { compiledEngine = null; throw error; });
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; progress?: (done: number, total: number) => void; snapshot?: (value: EngineSnapshot) => void };
@@ -283,7 +283,7 @@ export class EngineClient {
   private readonly pool: EngineWorker[];
   private readonly dataIdentity: string;
   private readonly downloads: EngineCharts;
-  constructor(private readonly data: TeamBuilderData, changed: () => void = () => {}) {
+  constructor(private readonly data: TeamBuilderData, changed: () => void = () => {}, options: { maxWorkers?: number; apiBase?: string } = {}) {
     this.dataIdentity = JSON.stringify([data.identity, data.crossServer?.identities]);
     const serialized = JSON.stringify(data);
     const charts: EngineChartSources = {};
@@ -292,11 +292,13 @@ export class EngineClient {
       const identity = teamBuilderSourceIdentity(data, "songs", id);
       for (const row of dataRows(song.difficulty)) {
         const key = `${id}:${Number(row.difficulty)}`;
-        charts[key] ??= { identity, file: typeof row.file === "string" ? row.file : "" };
+        charts[key] ??= { identity, file: typeof row.file === "string" ? row.file : "", ...(options.apiBase ? { apiBase: options.apiBase } : {}) };
       }
     }
     this.downloads = new EngineCharts(charts);
-    this.pool = Array.from({ length: poolSize() }, (_, index) => new EngineWorker(serialized, charts, this.downloads, `team-engine-${index + 1}`, changed));
+    const size = options.maxWorkers ?? poolSize();
+    if (!Number.isInteger(size) || size < 1 || size > 8) throw new RangeError("maxWorkers must be between 1 and 8");
+    this.pool = Array.from({ length: size }, (_, index) => new EngineWorker(serialized, charts, this.downloads, `team-engine-${index + 1}`, changed));
   }
   get phases() { return [...new Set(this.pool.map(worker => worker.currentPhase).filter((phase): phase is NonNullable<typeof phase> => phase !== null))]; }
   prefetch(songs: readonly SongRef[]) {

@@ -59,7 +59,9 @@ export interface HaneokaServer {
 }
 
 export interface HaneokaChartImageOptions {
+  readonly timeZone?: string;
   readonly server?: string;
+  readonly release?: string;
   readonly locale?: HaneokaLocale;
   readonly format?: "svg" | "png";
   readonly height?: number;
@@ -280,11 +282,13 @@ export function createHaneokaClient(options: HaneokaClientOptions = {}): Haneoka
         throw new TypeError("Invalid difficulty");
       if (scope.height !== undefined && (!Number.isInteger(scope.height) || scope.height < 360 || scope.height > 1440))
         throw new TypeError("Image height must be 360–1440");
-      const format = scope.format ?? "svg";
+      const format = scope.format ?? "png";
       if (format !== "svg" && format !== "png") throw new TypeError("Invalid image format");
-      return api.url(`songs/${segment(songId, idPattern, "song id")}/charts/${difficulty}/image.${format}`, {
+      const prefix = scope.release ? `servers/${segment(scope.server ?? "intl", serverPattern, "server")}/` : "";
+      return api.url(`${prefix}songs/${segment(songId, idPattern, "song id")}/charts/${difficulty}/image.${format}`, {
         ...scopeQuery(scope),
         height: scope.height,
+        timeZone: scope.timeZone,
         download: scope.download === undefined ? undefined : scope.download ? 1 : 0,
       });
     },

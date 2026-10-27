@@ -3,6 +3,10 @@
 // Output: 静态／API 响应、后台任务及队列处理。
 // Pos: [Map](L2.md)；Cloudflare 生产请求和任务组合根。
 // Effects/Dependencies: HTML 更新基准与 ASSETS 发布绑定；连接 D1、R2、缓存、认证、外部服务与队列／容器。
+import { handleApiDiscovery } from "./api-discovery";
+import { handleResourceImage } from "./resource-image";
+import { handlePublicGameApi } from "./game-public";
+import { handleGamePlatform } from "./game-platform";
 import { semanticOwnersConflict } from "../src/lib/cross-server/content";
 import { handleContentAccessRequest } from "./content-access";
 import { publicStampManifest } from "../src/lib/stamp-maker/public-manifest";
@@ -47,7 +51,7 @@ import {
 import { handleSekaiApi } from "./sekai";
 import { handleStampFontsRequest } from "./stamp-fonts";
 import { handleChartImageRequest } from "./chart-image";
-import { rasterizeChartSvg } from "./chart-image-rasterizer";
+import { renderNativeChart } from "./chart-native-renderer";
 import { negotiateRequestLocale } from "../src/i18n/negotiation";
 import { eventArtworkIndex } from "../src/lib/event-artwork-index";
 import { handleCommunityRequest } from "./community";
@@ -2712,7 +2716,7 @@ async function handleTeamBuilderDataApi(env: Env, ctx: ExecutionContext, request
   );
 }
 
-async function handleChartImageApi(env: Env, request: Request): Promise<Response | null> {
+async function handleChartImageApi(env: Env, ctx: ExecutionContext, request: Request): Promise<Response | null> {
   const url = new URL(request.url);
   let scopedRequest = request;
   const alias = /^\/api\/v1\/songs\/([^/]+)\/charts\/([^/]+)\/image\.([a-z0-9]+)$/u.exec(url.pathname);
@@ -2737,10 +2741,10 @@ async function handleChartImageApi(env: Env, request: Request): Promise<Response
   const response = await handleChartImageRequest({
     request: scopedRequest,
     sources: {
-      hasServer: async (slug) => (await accessibleResourceServer(env, request, slug)) !== null,
+      hasServer: async (slug) => (slug === "jp" || slug === "intl") && (await accessibleResourceServer(env, request, slug)) !== null,
       currentRelease: async (slug) => {
         const server = await accessibleResourceServer(env, request, slug);
-        resolved = server ? await currentRelease(env, server) : null;
+        resolved = server ? (url.searchParams.has("release") ? await requestedRelease(env, server, url.searchParams.get("release")!) : await currentRelease(env, server)) : null;
         return resolved;
       },
       readSong: async (identity, id) => {
@@ -2756,7 +2760,7 @@ async function handleChartImageApi(env: Env, request: Request): Promise<Response
         if (entry && entry.bytes > maxBytes) throw new RangeError("Release object exceeds input budget");
         return readReleaseBytes(env, release, path);
       },
-      rasterizeSvg: (svg, width, height) => rasterizeChartSvg(svg, width, height, env.ASSETS),
+      ...(env.BROWSER || (env.TOOLS_SERVICE_URL && env.TOOLS_SERVICE_TOKEN) ? { renderNative: input => renderNativeChart(env, { ...input, origin: new URL(request.url).origin }, promise => ctx.waitUntil(promise)) } : {}),
     },
   });
   if (!response) return null;
@@ -3739,6 +3743,8 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
 async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  const resourceImage = await handleResourceImage(request, env);
+  if (resourceImage) return resourceImage;
   const segments = url.pathname.split("/").filter(Boolean);
   const documentSource = SERVER_FIRST_LOCALES.has(segments[1] || "") && segments[0] && !isPublicResourceServer(segments[0])
     ? await accessibleResourceServer(env, request, segments[0]) : null;
@@ -3910,6 +3916,12 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
   if (gameClient) return gameClient;
   const sonolus = await handleSonolus(env, ctx, request, url.pathname);
   if (sonolus) return sonolus;
+  const apiDiscovery = await handleApiDiscovery(request, env.ASSETS);
+  if (apiDiscovery) return apiDiscovery;
+  const publicGame = await handlePublicGameApi(request);
+  if (publicGame) return publicGame;
+  const gamePlatform = await handleGamePlatform(request, env);
+  if (gamePlatform) return gamePlatform;
   const gameRecords = await handleGameRecordsApi(ctx, request, url, env);
   if (gameRecords) return gameRecords;
   const bestdori = await handleGarupaBestdoriApi(ctx, request, url, env.BESTDORI_UPSTREAM_BASE);
@@ -3924,7 +3936,7 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
   if (metaReference) return metaReference;
   const teamBuilderData = await handleTeamBuilderDataApi(env, ctx, request);
   if (teamBuilderData) return teamBuilderData;
-  const chartImage = await handleChartImageApi(env, request);
+  const chartImage = await handleChartImageApi(env, ctx, request);
   if (chartImage) return chartImage;
   const latestCatalog = await handleLatestCatalogApi(env, ctx, request, url.pathname);
   if (latestCatalog) return latestCatalog;
@@ -4073,6 +4085,7 @@ const worker: ExportedHandler<Env> = {
             request.method !== "HEAD" &&
             request.method !== "OPTIONS" &&
             response.status < 400 &&
+            !/\/(?:image\.png|images\.zip)$/u.test(new URL(request.url).pathname) &&
             new URL(request.url).pathname.startsWith("/api/")
           )
             ctx.waitUntil(markCommunityMutation(request.url));

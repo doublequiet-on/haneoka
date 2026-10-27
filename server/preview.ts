@@ -250,6 +250,8 @@ function json(
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
     "Cache-Control": cache,
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Expose-Headers": "Content-Length, ETag, X-Haneoka-Release-Id, X-Haneoka-Source-Id",
     ...extraHeaders,
   });
   res.end(res.req?.method === "HEAD" ? undefined : body);
@@ -396,6 +398,7 @@ async function serveTeamBuilderData(req: IncomingMessage, res: ServerResponse, u
       format: "esm",
       platform: "node",
       target: "node24",
+      banner: { js: `import { createRequire as createLocalRequire } from "node:module";const require = createLocalRequire(${JSON.stringify(path.join(ROOT, "package.json"))});` },
       write: false,
       logLevel: "silent",
     });
@@ -431,6 +434,77 @@ async function serveTeamBuilderData(req: IncomingMessage, res: ServerResponse, u
   } finally {
     res.off("close", abort);
   }
+}
+
+type PublicApiModule = {
+  handleResourceImage(request: Request, env: { TOOLS_SERVICE_URL?: string; TOOLS_SERVICE_TOKEN?: string }): Promise<Response | null>;
+  handleChartImageRequest(options: import("../worker/chart-image.ts").ChartImageRequestOptions): Promise<Response | null>;
+  renderNativeChart(env: { TOOLS_SERVICE_URL?: string; TOOLS_SERVICE_TOKEN?: string }, input: { server: string; songId: string; difficulty: string; release: string; locale: string; height: number }): Promise<{ png: Uint8Array; width: number; height: number }>;
+  handleGamePlatform(request: Request, env: { MOENOTES_OPEN_API_TOKEN?: string; MOENOTES_PROFILE_API_TOKEN?: string }): Promise<Response | null>;
+  handlePublicGameApi(request: Request): Promise<Response | null>;
+  handleApiDiscovery(request: Request, assets: { fetch(request: Request): Promise<Response> }): Promise<Response | null>;
+};
+let publicApiModule: Promise<PublicApiModule> | undefined;
+async function servePublicApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+  const image = /^\/api\/v1\/(?:servers\/[^/]+\/)?songs\/[^/]+\/charts\/[^/]+\/image\.[a-z0-9]+$/u.test(url.pathname);
+  if (!url.pathname.startsWith("/api/v1") || url.pathname.startsWith("/api/v1/game/records/")) return false;
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method || "GET") && !/\/(?:image\.png|images\.zip)$/u.test(url.pathname)) return false;
+  const module = await (publicApiModule ??= (async () => {
+    const { build } = await import("esbuild");
+    const result = await build({ stdin: { contents: 'export { handleResourceImage } from "./worker/resource-image.ts";export { handleGamePlatform } from "./worker/game-platform.ts";export { handlePublicGameApi } from "./worker/game-public.ts";export { handleApiDiscovery } from "./worker/api-discovery.ts";export { handleChartImageRequest } from "./worker/chart-image.ts";export { renderNativeChart } from "./worker/chart-native-renderer.ts";', resolveDir: ROOT }, bundle: true, format: "esm", platform: "node", write: false, external: ["@cloudflare/playwright"],
+      banner: { js: `import { createRequire as createLocalRequire } from "node:module";const require = createLocalRequire(${JSON.stringify(path.join(ROOT, "package.json"))});` } });
+    return await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`) as PublicApiModule;
+  })());
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) if (typeof value === "string") headers.set(name, value);
+  const init: RequestInit & { duplex?: string } = { method: req.method || "GET", headers };
+  if (!["GET", "HEAD", "OPTIONS"].includes(init.method!)) { init.body = Readable.toWeb(req) as ReadableStream<Uint8Array<ArrayBuffer>>; init.duplex = "half"; }
+  const request = new Request(new URL(url.pathname + url.search, `http://127.0.0.1:${PORT}`), init);
+  const rendererToken = process.env.TOOLS_SERVICE_TOKEN || (process.env.TOOLS_SERVICE_HEADERS_FILE ? fs.readFileSync(process.env.TOOLS_SERVICE_HEADERS_FILE, "utf8").trim().replace(/^Authorization: Bearer /u, "") : undefined);
+  const resourceImage = await module.handleResourceImage(request, { ...(process.env.TOOLS_SERVICE_URL ? { TOOLS_SERVICE_URL: process.env.TOOLS_SERVICE_URL } : {}), ...(rendererToken ? { TOOLS_SERVICE_TOKEN: rendererToken } : {}) });
+  if (resourceImage) { res.writeHead(resourceImage.status, Object.fromEntries(resourceImage.headers)); res.end(req.method === "HEAD" ? undefined : Buffer.from(await resourceImage.arrayBuffer())); return true; }
+  if (image) {
+    const target = new URL(request.url);
+    if (!target.pathname.startsWith("/api/v1/servers/")) {
+      const server = target.searchParams.get("server") || "intl";
+      if (target.searchParams.getAll("server").length > 1 || !PUBLIC_RELEASE_SERVERS.has(server)) { json(res, 400, { error: { code: "invalid_server", message: "Invalid server" } }); return true; }
+      target.pathname = `/api/v1/servers/${server}${target.pathname.slice("/api/v1".length)}`;
+      target.searchParams.delete("server");
+    }
+    const selected = new Request(target, { method: request.method, headers: request.headers });
+    const pin = target.searchParams.get("release");
+    const read = async (identity: { server: string; releaseId: string }, tail: string) => fetch(new URL(`/api/v1/servers/${identity.server}/${tail}?release=${identity.releaseId}`, request.url));
+    const rendererToken = process.env.TOOLS_SERVICE_TOKEN || (process.env.TOOLS_SERVICE_HEADERS_FILE ? fs.readFileSync(process.env.TOOLS_SERVICE_HEADERS_FILE, "utf8").trim().replace(/^Authorization: Bearer /u, "") : undefined);
+    const response = await module.handleChartImageRequest({ request: selected, sources: {
+      hasServer: async server => PUBLIC_RELEASE_SERVERS.has(server),
+      currentRelease: async server => {
+        const response = await fetch(new URL(`/api/v1/servers/${server}/release?projection=identity${pin ? `&release=${encodeURIComponent(pin)}` : ""}`, request.url));
+        return response.ok ? await response.json() as { server: string; releaseId: string } : null;
+      },
+      readSong: async (identity, id) => { const response = await read(identity, `songs/${id}`); return response.ok ? await response.json() as Record<string, unknown> : null; },
+      readReleaseBytes: async (identity, relative, maxBytes) => {
+        const path = relative.replace(/^assets\//u, `/assets/${identity.server}/`);
+        const response = await fetch(new URL(`${path}?release=${identity.releaseId}`, request.url));
+        if (!response.ok) return null;
+        if (Number(response.headers.get("Content-Length")) > maxBytes) throw new RangeError("chart_too_large");
+        const bytes = new Uint8Array(await response.arrayBuffer()); if (bytes.length > maxBytes) throw new RangeError("chart_too_large"); return bytes;
+      },
+      ...(process.env.TOOLS_SERVICE_URL && rendererToken ? { renderNative: input => module.renderNativeChart({ TOOLS_SERVICE_URL: process.env.TOOLS_SERVICE_URL!, TOOLS_SERVICE_TOKEN: rendererToken }, input) } : {}),
+    } });
+    if (!response) return false;
+    res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(req.method === "HEAD" ? undefined : Buffer.from(await response.arrayBuffer())); return true;
+  }
+  const result = await module.handleApiDiscovery(request, { fetch: async request => {
+    const file = safeFile(path.join(ROOT, "public"), new URL(request.url).pathname.slice(1));
+    return file && fs.existsSync(file) ? new Response(fs.readFileSync(file)) : new Response(null, { status: 404 });
+  } }) || await module.handlePublicGameApi(request) || await module.handleGamePlatform(request, {
+    ...(process.env.MOENOTES_OPEN_API_TOKEN ? { MOENOTES_OPEN_API_TOKEN: process.env.MOENOTES_OPEN_API_TOKEN } : {}),
+    ...(process.env.MOENOTES_PROFILE_API_TOKEN ? { MOENOTES_PROFILE_API_TOKEN: process.env.MOENOTES_PROFILE_API_TOKEN } : {}),
+  });
+  if (!result) return false;
+  res.writeHead(result.status, Object.fromEntries(result.headers));
+  res.end(req.method === "HEAD" ? undefined : Buffer.from(await result.arrayBuffer()));
+  return true;
 }
 
 function isCloudDataRequest(pathname: string): boolean {
@@ -683,6 +757,7 @@ function sendFile(
     );
     return;
   }
+  extraHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Content-Length, Content-Range, ETag, X-Haneoka-Release-Id, X-Haneoka-Source-Id", ...extraHeaders };
   const stat = fs.statSync(file);
   const range = (req.headers.range ?? "").match(/^bytes=(\d*)-(\d*)$/);
   if (range) {
@@ -1482,7 +1557,7 @@ function serveCanonicalResourceDocument(req: IncomingMessage, res: ServerRespons
 function restrictedResourceRequest(url: URL): boolean {
   const matches = [
     /^\/(?:assets|runtime|objects|artifacts|game-client|static-views|asset-static)\/([^/]+)/u.exec(url.pathname),
-    /^\/api\/v1\/(?:servers|team-builder|meta-reference)\/([^/]+)/u.exec(url.pathname),
+    /^\/api\/v1\/(?:servers|team-builder(?!\/image\.png$)|meta-reference)\/([^/]+)/u.exec(url.pathname),
     /^\/([^/]*(?:-test|-cbt)[^/]*)\/(?:.*)?$/u.exec(url.pathname),
   ];
   const servers = matches.flatMap((match) => match?.[1] ? [match[1]] : []);
@@ -1496,6 +1571,15 @@ function restrictedResourceRequest(url: URL): boolean {
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://preview.invalid");
+  if (url.pathname.startsWith("/tools/") && ["GET", "HEAD", "OPTIONS"].includes(req.method || "GET")) {
+    if (req.method === "OPTIONS") { res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS" }); res.end(); return; }
+    const file = safeFile(path.join(ROOT, ".generated-public"), url.pathname.slice(1));
+    if (file) { sendFile(req, res, file, "no-cache"); return; }
+  }
+  if (/^\/(Core|cubism-runtime)\//u.test(url.pathname) && ["GET", "HEAD"].includes(req.method || "GET")) {
+    const file = safeFile(path.join(ROOT, "public"), url.pathname.slice(1));
+    if (file) { sendFile(req, res, file, "no-cache"); return; }
+  }
   if (restrictedResourceRequest(url)) {
     if (AUTHORIZED_WORKER_ORIGIN)
       await proxyApplicationWorker(req, res, url, AUTHORIZED_WORKER_ORIGIN, true);
@@ -1538,6 +1622,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     res.end();
     return;
   }
+  if (await servePublicApi(req, res, url)) return;
   if (isApplicationWorkerRequest(url.pathname) && APPLICATION_WORKER_ORIGIN) {
     await proxyApplicationWorker(req, res, url);
     return;
@@ -1938,15 +2023,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       json(res, 400, { error: { code: "invalid_path", message: "Invalid URL encoding" } });
       return;
     }
-    const workspace = selectedWorkspace(server);
+    const workspace = selectedWorkspace(server, url.searchParams.get("release") || undefined);
     const file = workspace
       ? localizedReleasePaths(url.pathname)
           .map((candidate) => localReleaseFile(workspace, candidate))
           .find((candidate): candidate is string => Boolean(candidate && fs.existsSync(candidate))) || null
       : null;
-    if (file && fs.existsSync(file)) {
-      // Current-release media keeps a stable URL when the pointer changes.
-      sendFile(req, res, file, "public, max-age=0, must-revalidate");
+    if (file && workspace && fs.existsSync(file)) {
+      sendFile(req, res, file, url.searchParams.has("release") ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate", releaseResponseHeaders(workspace));
     } else if (CLOUD_DATA_ORIGIN) {
       const mediaUrl = new URL(url);
       if (workspace && !mediaUrl.searchParams.has("release")) mediaUrl.searchParams.set("release", workspace.releaseId);

@@ -70,7 +70,7 @@ async function loadImage(source: string, signal?: AbortSignal): Promise<HTMLImag
 
 export async function renderGachaHistoryImages(
   report: GachaHistoryReport,
-  { signal }: { signal?: AbortSignal } = {},
+  { signal, page, assetsBase }: { signal?: AbortSignal; page?: number; assetsBase?: string } = {},
 ): Promise<Blob[]> {
   signal?.throwIfAborted();
   await document.fonts.ready;
@@ -93,12 +93,15 @@ export async function renderGachaHistoryImages(
       remaining -= cards.length;
     }
   }
+  if (page !== undefined && (!Number.isInteger(page) || page < 1 || page > pages.length)) throw new RangeError("Unknown report page");
+  const selected = [...pages.entries()].filter(([index]) => page === undefined || index === page - 1);
+  const selectedGroups = selected.flatMap(([, groups]) => groups);
   const images = new Map<string, HTMLImageElement | null>();
   const sources = [
     HANEOKA_EXPORT_BRAND.logo,
-    ...report.groups.map((group) => group.imageUrl).filter((value): value is string => !!value),
+    ...selectedGroups.map((group) => group.imageUrl).filter((value): value is string => !!value),
     ...new Set(
-      report.groups.flatMap((group) =>
+      selectedGroups.flatMap((group) =>
         group.cards
           .flatMap((card) => [card.imageUrl, card.attributeImageUrl, card.rarityImageUrl])
           .filter((source): source is string => Boolean(source)),
@@ -110,12 +113,13 @@ export async function renderGachaHistoryImages(
     Array.from({ length: Math.min(4, sources.length) }, async () => {
       while (cursor < sources.length) {
         const source = sources[cursor++]!;
-        images.set(source, (await loadImage(source, signal)) ?? (await loadImage(source, signal)));
+        const url = assetsBase ? new URL(source, assetsBase).href : source;
+        images.set(source, (await loadImage(url, signal)) ?? (await loadImage(url, signal)));
       }
     }),
   );
   const output: Blob[] = [];
-  for (const [pageIndex, groups] of pages.entries()) {
+  for (const [pageIndex, groups] of selected) {
     signal?.throwIfAborted();
     const canvas = document.createElement("canvas");
     canvas.width = WIDTH;
@@ -142,6 +146,7 @@ export async function renderGachaHistoryImages(
         0,
       ) +
       52;
+    if (canvas.width * canvas.height > 12_000_000) throw new RangeError("Report image exceeds the pixel budget");
     ctx.fillStyle = color("surface");
     ctx.fillRect(0, 0, WIDTH, canvas.height);
     ctx.textBaseline = "top";

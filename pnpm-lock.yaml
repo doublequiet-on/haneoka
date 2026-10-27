@@ -12,6 +12,9 @@ catalogs:
     '@cloudflare/containers':
       specifier: 0.3.7
       version: 0.3.7
+    '@cloudflare/playwright':
+      specifier: ^1.3.6
+      version: 1.3.6
     '@esotericsoftware/spine-threejs':
       specifier: 4.2.119
       version: 4.2.119
@@ -339,6 +342,9 @@ importers:
       '@astrojs/check':
         specifier: ^0.9.4
         version: 0.9.10(prettier@3.9.4)(typescript@6.0.3)
+      '@cloudflare/playwright':
+        specifier: 'catalog:'
+        version: 1.3.6(playwright-core@1.64.1)
       '@fontsource/material-symbols-rounded':
         specifier: 'catalog:'
         version: 5.3.4
@@ -1116,6 +1122,12 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/tools-service:
+    dependencies:
+      playwright:
+        specifier: ^1.61.0
+        version: 1.64.1
+
   packages/ui:
     dependencies:
       '@material/web':
@@ -1288,6 +1300,14 @@ packages:
   '@cloudflare/kv-asset-handler@0.5.0':
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
     engines: {node: '>=22.0.0'}
+
+  '@cloudflare/playwright@1.3.6':
+    resolution: {integrity: sha512-pwNuh5/eUTcVVhXComAWfS9Im0mqBBVoU73dBXPv5cbUyOIuPGxd3bD2GrTgMOe6jJEK4ZHgQBYctYEwkzPH8w==}
+    peerDependencies:
+      playwright-core: '*'
+    peerDependenciesMeta:
+      playwright-core:
+        optional: true
 
   '@cloudflare/unenv-preset@2.16.1':
     resolution: {integrity: sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw==}
@@ -4579,6 +4599,16 @@ packages:
     resolution: {integrity: sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A==}
     engines: {node: '>=12'}
 
+  playwright-core@1.64.1:
+    resolution: {integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.64.1:
+    resolution: {integrity: sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   postcss@8.5.15:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
@@ -5757,6 +5787,10 @@ snapshots:
   '@cloudflare/containers@0.3.7': {}
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
+
+  '@cloudflare/playwright@1.3.6(playwright-core@1.64.1)':
+    optionalDependencies:
+      playwright-core: 1.64.1
 
   '@cloudflare/unenv-preset@2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260710.1)':
     dependencies:
@@ -9021,6 +9055,12 @@ snapshots:
   picomatch@2.3.2: {}
 
   picomatch@4.0.5: {}
+
+  playwright-core@1.64.1: {}
+
+  playwright@1.64.1:
+    dependencies:
+      playwright-core: 1.64.1
 
   postcss@8.5.15:
     dependencies:

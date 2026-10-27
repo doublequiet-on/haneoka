@@ -1,3 +1,8 @@
+// L3 — GEB
+// Input: 固定目录身份与可选 API 根地址。
+// Output: 卡片、角色、歌曲、乐队和图标的显示资料。
+// Pos: [Map](L2-2.md)；网页和公开图片模块的目录显示数据读取。
+// Effects/Dependencies: 并行公开 GET，核对每个响应的同一 release 与 source 身份。
 import { withUiMarksProjection } from "./ui-marks";
 import { objectRow } from "./team-builder/data";
 
@@ -7,14 +12,13 @@ export async function fetchCatalogVisuals(
   signal: AbortSignal,
   cardMetadata = false,
   bandItemMetadata = false,
+  apiBase?: string,
 ) {
   const read = async (resource: string) => {
-    const response = await fetch(
-      withUiMarksProjection(
+    const path = withUiMarksProjection(
         `/api/v1/servers/${encodeURIComponent(identity.server)}/${resource}?release=${encodeURIComponent(identity.releaseId)}`,
-      ),
-      { signal },
     );
+    const response = await fetch(apiBase ? new URL(path, apiBase) : path, { signal });
     if (
       !response.ok ||
       response.headers.get("x-haneoka-release-id") !== identity.releaseId ||

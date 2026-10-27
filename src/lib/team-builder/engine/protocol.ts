@@ -30,7 +30,7 @@ export type ExplainRequest = {
   eventOrder: string[];
   play: PlayModel;
 };
-export type EngineChartSources = Record<string, { identity: TeamBuilderData["identity"]; file: string }>;
+export type EngineChartSources = Record<string, { identity: TeamBuilderData["identity"]; file: string; apiBase?: string }>;
 export type EngineChart = { song: SongRef; chart: Record<string, unknown> };
 export type EngineCall = (
   | { type: "init"; id: number; data: string; charts: EngineChartSources; module: WebAssembly.Module }

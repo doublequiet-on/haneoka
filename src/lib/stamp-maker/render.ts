@@ -81,9 +81,14 @@ export function isStampFontReady(text: StampText, fallback: string): boolean {
 export async function loadStampFont(
   text: StampText,
   fallback: string,
+  assetsBase?: string,
 ): Promise<void> {
-  await loadFontStylesheet(stampFont(text.font));
   const font = stampFont(text.font);
+  await loadFontStylesheet(font && assetsBase ? {
+    ...font,
+    ...(font.source ? { source: new URL(font.source, assetsBase).href } : {}),
+    ...(font.stylesheet ? { stylesheet: new URL(font.stylesheet, assetsBase).href } : {}),
+  } : font);
   if (
     font &&
     ![...document.fonts].some(
