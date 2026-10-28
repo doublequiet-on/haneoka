@@ -7,7 +7,7 @@
 import { dataRows, objectRow, type TeamBuilderData } from "../data";
 import { teamBuilderSourceIdentity } from "../data/source";
 import type { EngineHit, EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline, RewardFloor } from "./api";
-import type { EngineCall, EngineChartSources, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
+import type { EngineCall, EngineChart, EngineChartSources, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
 import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs, requestChartSongs } from "./execution";
 import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
 import { chartKey, EngineCharts } from "./charts";
@@ -157,7 +157,10 @@ class EngineWorker {
       return index < 0;
     });
     let loading = true;
-    const loaded = (songs.length <= 4 ? Promise.all(missing.map(song => this.downloads.load(song))) : Promise.resolve(undefined)).finally(() => { loading = false; });
+    const loaded = (
+      message.loadedCharts
+        ? Promise.resolve(message.loadedCharts)
+        : songs.length <= 4 ? Promise.all(missing.map(song => this.downloads.load(song))) : Promise.resolve(undefined)).finally(() => { loading = false; });
     const initialized = ready.then(() => { if (loading) this.setPhase("networkMs"); });
     try {
       const [, loadedCharts] = await Promise.all([initialized, loaded]);
@@ -182,6 +185,15 @@ class EngineWorker {
   /** Starts the Worker and compiles the release ahead of the first call. */
   warm(): Promise<void> {
     return this.spawn().catch(() => {});
+  }
+  async preload(songs: readonly SongRef[]): Promise<EngineChart[]> {
+    await this.spawn();
+    this.setPhase("networkMs");
+    try {
+      return await this.downloads.loadMany(songs);
+    } finally {
+      this.setPhase(null);
+    }
   }
   cancel() {
     for (const pending of this.pending.values()) pending.reject(new DOMException("Cancelled", "AbortError"));
@@ -408,6 +420,7 @@ export class EngineClient {
         publish({ ...latest, stopReason: reason }, true);
         stopped = true;
         wakeWork?.();
+        this.downloads.cancel();
         for (const worker of this.pool) worker.cancel();
         resolve(latest);
       };
@@ -421,6 +434,31 @@ export class EngineClient {
     const work = async (): Promise<EngineResponse> => {
       if (!remaining(deadline)) { stop("budget"); return latest; }
       if (completeResponse(latest)) return latest;
+      if (request.goal.kind === "gekiso" && request.goal.arena?.mode === "shared") {
+        const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+        const count = request.constraints.leader !== null ? 1 : Math.min(this.pool.length, memory <= 4 ? 1 : 2);
+        const workers = this.pool.slice(0, count);
+        const loadedCharts = await workers[0]!.preload(request.goal.songs);
+        if (stopped) return latest;
+        const parts = workers.map(() => emptyResponse(request));
+        const merged = () => mergeShardResponses(parts, request.k, clock() - started);
+        await Promise.all(
+          workers.map(async (worker, index) => {
+            const part = { ...request, ...(count > 1 ? { shard: { index, count } } : {}) };
+            parts[index] = await worker.send<EngineResponse>(
+              { type: "run", id: 0, request: part, loadedCharts },
+              undefined,
+              (value) => {
+                if (stopped || value.requestId !== request.requestId || value.contextKey !== request.contextKey) return;
+                parts[index] = value.response;
+                publish(merged());
+              },
+            );
+            if (!stopped) publish(merged());
+          }),
+        );
+        return merged();
+      }
       if (request.goal.kind === "event" && request.goal.rewardPlan?.autoCp) {
         const resolved = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, resolveRewardPlan: true } });
         if (stopped) return latest;

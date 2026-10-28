@@ -39,7 +39,7 @@ export function renderCardPicker(host: TeamBuilder): TemplateResult | typeof not
     host.slotFilters = { ...filters, ...patch };
     host.requestUpdate();
   };
-  const theoretical = event || host.tab !== "song-comparison" && host.settings.scope === "theoretical";
+  const theoretical = event || host.tab !== "song-comparison" && host.searchSettings.scope === "theoretical";
   const owned = kind === "members" ? host.view!.members : host.view!.snaps;
   const ids = (
     theoretical

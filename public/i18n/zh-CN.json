@@ -2898,7 +2898,31 @@
       "adjustCardRange": "调整卡牌范围",
       "allNoSnaps": "五人均未配置留影",
       "comparisonValue": "指标值",
-      "playJudgements": "演奏判定"
+      "playJudgements": "演奏判定",
+      "arena": {
+        "tab": "激奏竞技场",
+        "server": "区服",
+        "jp": "日服",
+        "intl": "国际服",
+        "league": "联赛",
+        "season": "第 {count} 赛季",
+        "noSeason": "暂无进行中的赛季",
+        "until": "截至 {time}",
+        "rules": "竞技场规则",
+        "current": "当期规则",
+        "custom": "自定义",
+        "original": "原曲",
+        "needRules": "选择自定义规则或进行中的联赛",
+        "attribute": "歌曲属性",
+        "range": "第 {count} 区间",
+        "objective": "配队目标",
+        "shared": "多曲通用队伍",
+        "individual": "各曲分别配队",
+        "usePool": "选择联赛曲池",
+        "mean": "跨曲平均分",
+        "scoreDetails": "逐曲表现",
+        "meanPower": "平均综合力"
+      }
     },
     "calendar": {
       "title": "日历",

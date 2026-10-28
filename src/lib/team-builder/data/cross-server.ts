@@ -43,6 +43,7 @@ export function mergeTeamBuilderData(sources: readonly TeamBuilderData[], unavai
   for (let index = 0; index < sources.length; index++) {
     const source = structuredClone(sources[index]!);
     const server = source.identity.server;
+    if (source.arena !== undefined) result.arena = { ...result.arena, ...source.arena };
     metadata.identities[server] = source.identity;
     const pinAssets = (value: unknown): unknown => {
       if (typeof value === "string" && value.startsWith(`/assets/${server}/`)) {

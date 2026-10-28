@@ -40,6 +40,14 @@ import { GekisoContextCache } from "./gekiso-context-cache";
 import { deadlineOf, remaining, requestSongs, pendingSong, acceptsReward, excludesBound, type RewardCutoff } from "./execution";
 import type { EngineSnapshot, StopReason } from "./protocol";
 import { isLiveBoostCost } from "./boosts";
+import type { ArenaRule } from "../arena";
+
+export interface ArenaGoal extends ArenaRule {
+  bandId: number;
+  mode: "individual" | "shared";
+  server: string;
+  regulationId: number | null;
+}
 
 export interface SongRef {
   songId: number;
@@ -105,6 +113,7 @@ export type Goal =
     }
   | {
       kind: "gekiso";
+      arena?: ArenaGoal;
       songs: SongRef[];
       criterion: Criterion;
       /** Share of notes hit Great, and of the Just-eligible rest hit Just. */
@@ -189,6 +198,7 @@ export interface HitScore {
 }
 export interface RewardFraction { numerator: string; denominator: string; value: number }
 export interface EngineHit {
+  aggregate?: { kind: "mean"; songs: EngineHit[] };
   rewardRanking?: RewardFraction[];
   /** Base multiplier, including the first-COMBO sustained bonus. */
   comboBonus?: number | null;
@@ -435,6 +445,7 @@ function mergeRewardScoreTies<Detail>(first: readonly SearchHit<Detail>[], tied:
 export const GEKISO_CLOSED_FORM_MARGIN = 3e-5;
 
 export async function runEngine(master: EngineMaster, charts: ChartCache, request: EngineRequest, onProgress?: (done: number, total: number) => void, onSnapshot?: (snapshot: EngineSnapshot) => void): Promise<EngineResponse> {
+  if (request.goal.kind === "gekiso" && request.goal.arena) throw new Error("arena-native-required");
   if (request.goal.kind === "event" && request.goal.rewardPlan) throw new Error("reward-plan-native-required");
   const started = performance.now();
   const deadline = deadlineOf(request);

@@ -2898,7 +2898,31 @@
       "adjustCardRange": "카드 범위 조정",
       "allNoSnaps": "5명 모두 스냅 미설정",
       "comparisonValue": "지표 값",
-      "playJudgements": "연주 판정"
+      "playJudgements": "연주 판정",
+      "arena": {
+        "tab": "격주 아레나",
+        "server": "서버",
+        "jp": "일본",
+        "intl": "글로벌",
+        "league": "리그",
+        "season": "시즌 {count}",
+        "noSeason": "진행 중인 시즌 없음",
+        "until": "{time}까지",
+        "rules": "아레나 규칙",
+        "current": "현재 규칙",
+        "custom": "사용자 설정",
+        "original": "원래 곡",
+        "needRules": "사용자 규칙 또는 진행 중인 리그를 선택하세요",
+        "attribute": "곡 타입",
+        "range": "{count}번째 구간",
+        "objective": "편성 목표",
+        "shared": "여러 곡의 공통 편성",
+        "individual": "곡별 편성",
+        "usePool": "리그 곡 선택",
+        "mean": "전체 곡 평균 점수",
+        "scoreDetails": "곡별 점수",
+        "meanPower": "평균 종합력"
+      }
     },
     "calendar": {
       "title": "달력",

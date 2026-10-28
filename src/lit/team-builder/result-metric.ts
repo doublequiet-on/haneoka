@@ -25,6 +25,7 @@ export function resultMetric(host: TeamBuilder, hit: EngineHit, s: BuildSettings
     unit,
     relative,
   });
+  if (hit.aggregate) return metric("arena-shared-mean", host.t("arena.mean", "Average across songs"), hit.key);
   if (s.goal === "potential" && hit.potential)
     return metric("potential", host.t("potential", "Potential"), hit.potential.value);
   if ((s.goal === "event" || s.goal === "plan") && hit.event) {

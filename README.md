@@ -24,6 +24,7 @@ interactive workspaces in `src/lit`, and the Material Design 3 styles in
 - Sonolus-compatible play, watch, preview, and tutorial engines
 - Accounts and community features
 - Team builder with separate server inventories and reviewed cross-server JSON imports, including MoeNotes card inventories
+- GEKISO ARENA leagues with current schedules, custom song rules, and one formation optimized across selected songs
 - Community chart publishing, cloud drafts, version history, remixes, and Sonolus play
 - App installations and updates through the Haneoka R2 download mirror
 

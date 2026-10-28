@@ -49,7 +49,7 @@ export async function fetchTeamBuilderData(
   // visit is served from the browser cache.
   const current = await fetchCurrentTeamBuilderIdentity(server, signal, fetcher).catch(() => null);
   const compact = await fetcher(
-    `/api/v1/team-builder/${encodeURIComponent(server)}${current ? `?release=${encodeURIComponent(current.releaseId)}` : ""}`,
+    `/api/v1/team-builder/${encodeURIComponent(server)}${current ? `?release=${encodeURIComponent(current.releaseId)}&v=3` : "?v=3"}`,
     current ? { signal } : { cache: "no-store", signal },
   );
   if (compact.ok) {

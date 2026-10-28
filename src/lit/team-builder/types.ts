@@ -1,11 +1,12 @@
-import type { SongRef } from "../../lib/team-builder/engine/api";
+import type { ArenaGoal, SongRef } from "../../lib/team-builder/engine/api";
 import type { Criterion } from "../../lib/team-builder/engine/objectives";
 import type { RewardPlan } from "../../lib/team-builder/reward-plan";
 import { emptyManualEvent, type ManualEventDraft } from "../../lib/team-builder/manual-event";
 
-export type Tab = "build" | "box" | "account" | "teams" | "pt" | "song-comparison";
+export type Tab = "build" | "arena" | "box" | "account" | "teams" | "pt" | "song-comparison";
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
 export interface BuildSettings {
+  arena?: ArenaGoal;
   rewardMode: "recommendation" | "event" | "plan";
   farming: FarmingSettings;
   manualScoreMode: "score" | "gekiso";

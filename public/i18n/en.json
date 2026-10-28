@@ -2898,7 +2898,31 @@
       "adjustCardRange": "Adjust card range",
       "allNoSnaps": "No Snapshots in any of the five slots",
       "comparisonValue": "Value",
-      "playJudgements": "Play judgements"
+      "playJudgements": "Play judgements",
+      "arena": {
+        "tab": "GEKISO ARENA",
+        "server": "Server",
+        "jp": "Japan",
+        "intl": "International",
+        "league": "League",
+        "season": "Season {count}",
+        "noSeason": "No active season",
+        "until": "Until {time}",
+        "rules": "Arena rules",
+        "current": "Current rules",
+        "custom": "Custom",
+        "original": "Original song",
+        "needRules": "Choose custom rules or an active league",
+        "attribute": "Song Type",
+        "range": "Range {count}",
+        "objective": "Team objective",
+        "shared": "One team for all songs",
+        "individual": "A team for each song",
+        "usePool": "Select league song pool",
+        "mean": "Average across songs",
+        "scoreDetails": "Scores by song",
+        "meanPower": "Average power"
+      }
     },
     "calendar": {
       "title": "Calendar",

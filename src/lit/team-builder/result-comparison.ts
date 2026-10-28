@@ -84,7 +84,7 @@ function entry(
   settings = resultSettings(host, hit),
 ): ComparisonEntry {
   const goal = { ...input.goal } as Record<string, unknown>;
-  delete goal.songs;
+  if (!hit.aggregate) delete goal.songs;
   const identity = hit.song ? host.catalog!.songIdentity(hit.song.songId) : host.data!.identity;
   return {
     id: entryId(hit, source, input, session, settings),

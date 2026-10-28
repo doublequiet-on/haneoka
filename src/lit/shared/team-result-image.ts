@@ -5,6 +5,7 @@
 // Effects/Dependencies: 复制结果 DOM、内嵌当前图像与 SVG 图标；按需加载 html-to-image，临时节点在完成或失败后移除。
 import { toCanvas } from "html-to-image";
 import { canvasToPngBlob } from "../../lib/canvas-capture";
+import { LazyImages } from "../ui/lazy-images";
 
 const controls = ".tb-hit__actions, .md-accordion, .card-growth";
 
@@ -45,7 +46,17 @@ export async function renderTeamResultImage(source: HTMLElement, options: { asse
     if (label && value && Math.abs(label.getBoundingClientRect().top - value.getBoundingClientRect().top) < 1)
       chips[index]!.style.flexWrap = "nowrap";
   });
-  await Promise.all(originals.filter((image) => !image.closest(controls)).map((image) => image.decode()));
+  const images = originals.filter((image) => !image.closest(controls));
+  const loader = new LazyImages();
+  try {
+    for (const image of images) {
+      image.loading = "eager";
+      if (image.dataset.src) loader.load(image);
+    }
+    await Promise.all(images.map((image) => image.decode()));
+  } finally {
+    loader.disconnect();
+  }
   await document.fonts.ready;
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   if (!source.isConnected) throw new DOMException("Export cancelled", "AbortError");

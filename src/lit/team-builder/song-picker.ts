@@ -12,6 +12,7 @@ import {
 } from "../../lib/catalog-query";
 import { html, nothing, type TemplateResult } from "lit";
 import type { SongRef } from "../../lib/team-builder/engine/api";
+import { arenaSongView, type ArenaRule } from "../../lib/team-builder/arena";
 import { chooserFacet, chooserGroup } from "../ui/chooser-filters";
 import { filterChip, inputChip, segmented } from "../ui/controls";
 import { actionMenu } from "../ui/action-menu";
@@ -40,6 +41,8 @@ export interface SongPickerState {
   maxLevel?: number | null;
   maxSeconds?: number | null;
   allowedSongIds?: number[];
+  allowedCharts?: SongRef[];
+  arenaRule?: ArenaRule;
   title?: string;
   context?: string;
   initialized?: boolean;
@@ -52,6 +55,8 @@ const DIFFICULTIES = ["EASY", "NORMAL", "HARD", "EXPERT", "SPECIAL"];
 export function renderSongPicker(host: TeamBuilder): TemplateResult {
   let state = host.songPicker!;
   const catalog = host.catalog!;
+  const songView = (id: number) =>
+    state.arenaRule ? arenaSongView(catalog.song(id), state.arenaRule) : catalog.song(id);
   const context = state.context ?? `${host.tab}:${state.single ? "single" : "charts"}`;
   if (!state.initialized) {
     state = host.songPicker = {
@@ -134,6 +139,8 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const difficulties = state.difficulties ?? [state.difficulty];
   const legal = (song: SongRef) =>
     (!state.allowedSongIds || state.allowedSongIds.includes(song.songId)) &&
+    (!state.allowedCharts ||
+      state.allowedCharts.some((ref) => ref.songId === song.songId && ref.difficulty === song.difficulty)) &&
     catalog.difficultyRows(song.songId).some((row) => Number(row.difficulty) === song.difficulty);
   const allCharts = Object.keys(catalog.data.songs)
     .map(Number)
@@ -152,7 +159,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const incomplete = durationLoading || durationError;
   const visible = allCharts.filter((ref) => {
     const id = ref.songId,
-      song = catalog.song(id);
+      song = songView(id);
     if (!difficulties.includes(ref.difficulty)) return false;
     if (state.bands.length && !bandValues(id).some(value => state.bands.map(String).includes(value))) return false;
     if (!matchesSelections(categoryValues(id), (state.categories ?? []).map(String))) return false;
@@ -375,7 +382,8 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
           label: host.common("catalog.fields.attribute", "Attribute"),
           value: state.attributes[0] == null ? "" : String(state.attributes[0]),
           allLabel: all,
-          options: [1, 2, 3, 4, 5].map((id) => ({ value: String(id), label: catalog.attributeName(id) })),
+          options: (state.arenaRule ? [1, 2, 3, 4, 5, 99] : [1, 2, 3, 4, 5]).map((id) => ({ value: String(id), label: catalog.attributeName(id),
+          })),
           change: (value) => update({ attributes: value ? [Number(value)] : [] }),
         })}
         ${chooserGroup(host.t("gekiso", "GEKISO"), html`<div class="stack stack--tight">${missionFilters}${missionMatch}</div>`)}
@@ -407,7 +415,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
         </span>
         <span class="tb-picker-artist">
           ${catalog.songArtist(song.songId)} ·
-          ${catalog.attributeName(Number(catalog.song(song.songId).musicType))}${gekiso ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}
+          ${catalog.attributeName(Number(songView(song.songId).musicType))}${gekiso ? ` · ${missionSummary(songMissions(songView(song.songId)))}` : ""}
         </span>
       `,
     })),

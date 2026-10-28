@@ -59,6 +59,19 @@ export class EngineCharts {
     this.downloads.set(key, download);
     return download;
   }
+  async loadMany(songs: readonly SongRef[]): Promise<EngineChart[]> {
+    const rows = new Array<EngineChart>(songs.length);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(3, songs.length) }, async () => {
+        while (next < songs.length) {
+          const index = next++;
+          rows[index] = await this.load(songs[index]!);
+        }
+      }),
+    );
+    return rows;
+  }
   cancel() {
     for (const [key, download] of this.downloads) if (this.pending.has(download)) this.downloads.delete(key);
     this.lifetime.abort();

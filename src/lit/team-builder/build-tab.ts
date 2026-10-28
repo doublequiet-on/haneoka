@@ -2,6 +2,7 @@ import { farmingMode } from "./workspace-state";
 import { enableManualEvent, renderManualEvent } from "./manual-event";
 import { toolLayout } from "./tool-layout";
 import { songMissions } from "../../lib/catalog-filters";
+import { arenaSongView } from "../../lib/team-builder/arena";
 import { boostControl } from "./boost-control";
 /** Team search: goal, songs, play, candidates and constraints; results beside them. */
 import { html, nothing, type TemplateResult } from "lit";
@@ -36,7 +37,7 @@ export function gekisoSamplesControl(host: TeamBuilder): TemplateResult {
       step="1"
       inputmode="numeric"
       label=${host.t("pt.luckSamples", "Luck samples")}
-      .value=${String(host.settings.gekisoSeeds)}
+      .value=${String(host.searchSettings.gekisoSeeds)}
       @change=${(e: Event) => host.updateSettings({ gekisoSeeds: Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0)) })}
     ></md-outlined-text-field>
   `;
@@ -59,6 +60,63 @@ export function comboBonusControl(host: TeamBuilder): TemplateResult | typeof no
       ?error=${host.submitted && (!Number.isInteger(host.settings.minComboBonus) || host.settings.minComboBonus < 1)}
       @change=${(event: Event) => host.updateSettings({ minComboBonus: (event.target as HTMLInputElement).value === "" ? 1 : Number((event.target as HTMLInputElement).value) })}
     ></md-outlined-text-field>
+  `;
+}
+
+export function placementControl(host: TeamBuilder): TemplateResult {
+  const s = host.searchSettings;
+  const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
+  const missions = (song: SongRef) => {
+    const row = host.catalog!.song(song.songId);
+    return songMissions(s.arena ? arenaSongView(row, s.arena) : row);
+  };
+  return html`
+    <div id="tb-placement" class="stack" tabindex="-1">
+      ${segmented({
+    label: host.t("placementMode", "Placement basis"),
+    value: s.gekisoPlacementMode,
+    options: [
+      { value: "rank", label: host.t("placementRank", "Specified placement") },
+      { value: "opponents", label: host.t("placementOpponents", "Opponent scores") },
+    ],
+    onSelect: (gekisoPlacementMode) => set({ gekisoPlacementMode }),
+  })}
+      ${
+    s.gekisoPlacementMode === "rank"
+      ? segmented({
+          label: host.t("gekisoRank", "Placement in each range"),
+          value: String(s.gekisoRank),
+          options: [1, 2, 3, 4, 5].map((rank) => ({
+            value: String(rank),
+            label: String(rank),
+          })),
+          onSelect: (value) => set({ gekisoRank: Number(value) }),
+        })
+      : html`
+          <div class="tb-number-grid">
+            ${[0, 1, 2].map(
+              (range) => html`
+                <div class="stack">
+                  <md-outlined-text-field
+                    label=${`${host.t("gekisoRange", "Range {n}", { n: range + 1 })} ${missionSummary([...new Set(s.songs.map((song) => missions(song)[range]!))])}`}
+                    .value=${live(s.gekisoOpponents[range])}
+                    ?error=${host.submitted && parseOpponents(s.gekisoOpponents).invalid[range]}
+                    @change=${(event: Event) => {
+                      const next = [...s.gekisoOpponents] as BuildSettings["gekisoOpponents"];
+                      next[range] = (event.target as HTMLInputElement).value;
+                      set({ gekisoOpponents: next });
+                    }}
+                  ></md-outlined-text-field>
+                  <span class="tb-results__meta">
+                    ${parseOpponents(s.gekisoOpponents).ranges[range]!.length ? host.t("opponentCount", "{count} opponents", { count: parseOpponents(s.gekisoOpponents).ranges[range]!.length }) : host.t("emptyOpponentRank", "1st place (no opponents entered)")}
+                  </span>
+                </div>
+              `,
+            )}
+          </div>
+        `
+  }
+    </div>
   `;
 }
 
@@ -86,13 +144,18 @@ export function songList(
   single = false,
   allowedSongIds?: number[],
   fieldId = "tb-songs",
+  allowedCharts?: readonly SongRef[],
 ): TemplateResult {
   const catalog = host.catalog!;
+  const available = (song: SongRef) =>
+    (!allowedSongIds || allowedSongIds.includes(song.songId)) &&
+    (!allowedCharts || allowedCharts.some((ref) => ref.songId === song.songId && ref.difficulty === song.difficulty)) &&
+    catalog.difficultyRows(song.songId).some((row) => Number(row.difficulty) === song.difficulty);
   return html`
     <div class="tb-songs" id=${fieldId} data-tb-field tabindex="-1">
       <div class="row row--between tb-input-summary">
         <span class="tb-results__meta">
-          ${host.t("chartCount", "{count} charts", { count: songs.filter((song) => (!allowedSongIds || allowedSongIds.includes(song.songId)) && catalog.difficultyRows(song.songId).some((row) => Number(row.difficulty) === song.difficulty)).length })}
+          ${host.t("chartCount", "{count} charts", { count: songs.filter(available).length })}
         </span>
         <button
           class="button button--tonal tb-songs__add"
@@ -100,7 +163,7 @@ export function songList(
           @click=${() => {
             host.songPicker = {
               songs: songs.map((song) => ({ ...song })),
-              context: `${host.tab}:${host.searchSettings.goal}:${single ? "single" : allowedSongIds ? "restricted" : "songs"}`,
+              context: `${host.tab}:${host.searchSettings.goal}:${single ? "single" : allowedSongIds ? "restricted" : "songs"}${host.tab === "arena" ? `:${host.arena.draft.leagueId}` : ""}`,
               single,
               query: "",
               filtersOpen: false,
@@ -109,6 +172,8 @@ export function songList(
               gekisouTypes: [],
               difficulty: 3,
               allowedSongIds,
+              allowedCharts: allowedCharts ? [...allowedCharts] : undefined,
+              arenaRule: host.tab === "arena" ? host.arena.rule : undefined,
               change,
             };
             host.requestUpdate();
@@ -130,7 +195,7 @@ export function songList(
                       <span class="list-item__body">
                         <strong class="list-item__headline clamp-1">${catalog.songTitle(song.songId)}</strong>
                         <span class="list-item__supporting">
-                          ${catalog.difficultyLabel(song.songId, song.difficulty)}${host.searchSettings.goal === "gekiso" || (host.tab === "pt" && host.settings.rewardMode === "recommendation" && host.searchSettings.ptMode === "gekiso") ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}${(allowedSongIds && !allowedSongIds.includes(song.songId)) || !catalog.difficultyRows(song.songId).some((row) => Number(row.difficulty) === song.difficulty) ? ` · ${host.t("unavailable", "Unavailable")}` : ""}
+                          ${catalog.difficultyLabel(song.songId, song.difficulty)}${(host.tab !== "arena" && host.searchSettings.goal === "gekiso") || (host.tab === "pt" && host.settings.rewardMode === "recommendation" && host.searchSettings.ptMode === "gekiso") ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}${!available(song) ? ` · ${host.t("unavailable", "Unavailable")}` : ""}
                         </span>
                       </span>
                       <span class="list-item__trailing">
@@ -377,12 +442,18 @@ export function renderCandidates(host: TeamBuilder): TemplateResult {
           ${[1, 2, 3, 4, 5].map((id) => filterChip({ label: catalog.attributeName(id), image: catalog.attributeIcon(id) || undefined, selected: s.attributes.includes(id), onToggle: () => set({ attributes: toggleIn(s.attributes, id) }) }))}
         </div>
       </div>
-      <div class="tb-field">
+      ${
+        host.tab !== "arena"
+          ? html`
+              <div class="tb-field">
         <span class="tb-field__label">${host.t("memberBand", "Member band")}</span>
         <div class="cluster">
           ${bands.map((id) => filterChip({ label: catalog.bandName(id), image: catalog.bandIcon(id) || undefined, selected: s.bands.includes(id), onToggle: () => set({ bands: toggleIn(s.bands, id) }) }))}
         </div>
       </div>
+            `
+          : nothing
+      }
       <div class="tb-field">
         <span class="tb-field__label">${host.t("minRarity", "Minimum rarity")}</span>
         ${segmented({
@@ -712,53 +783,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                 ${
                   s.goal === "gekiso"
                     ? html`
-                        ${comboBonusControl(host)} ${gekisoSamplesControl(host)}
-                        <div id="tb-placement" class="stack" tabindex="-1">
-                          ${segmented({
-                            label: host.t("placementMode", "Placement basis"),
-                            value: s.gekisoPlacementMode,
-                            options: [
-                              { value: "rank", label: host.t("placementRank", "Specified placement") },
-                              { value: "opponents", label: host.t("placementOpponents", "Opponent scores") },
-                            ],
-                            onSelect: (gekisoPlacementMode) => set({ gekisoPlacementMode }),
-                          })}
-                          ${
-                            s.gekisoPlacementMode === "rank"
-                              ? segmented({
-                                  label: host.t("gekisoRank", "Placement in each range"),
-                                  value: String(s.gekisoRank),
-                                  options: [1, 2, 3, 4, 5].map((rank) => ({
-                                    value: String(rank),
-                                    label: String(rank),
-                                  })),
-                                  onSelect: (value) => set({ gekisoRank: Number(value) }),
-                                })
-                              : html`
-                                  <div class="tb-number-grid">
-                                    ${[0, 1, 2].map(
-                                      (range) => html`
-                                        <div class="stack">
-                                          <md-outlined-text-field
-                                            label=${`${host.t("gekisoRange", "Range {n}", { n: range + 1 })} · ${missionSummary([...new Set(s.songs.map((song) => songMissions(host.catalog!.song(song.songId))[range]!))])}`}
-                                            .value=${live(s.gekisoOpponents[range])}
-                                            ?error=${host.submitted && parseOpponents(s.gekisoOpponents).invalid[range]}
-                                            @change=${(event: Event) => {
-                                              const next = [...s.gekisoOpponents] as BuildSettings["gekisoOpponents"];
-                                              next[range] = (event.target as HTMLInputElement).value;
-                                              set({ gekisoOpponents: next });
-                                            }}
-                                          ></md-outlined-text-field>
-                                          <span class="tb-results__meta">
-                                            ${parseOpponents(s.gekisoOpponents).ranges[range]!.length ? host.t("opponentCount", "{count} opponents", { count: parseOpponents(s.gekisoOpponents).ranges[range]!.length }) : host.t("emptyOpponentRank", "1st place (no opponents entered)")}
-                                          </span>
-                                        </div>
-                                      `,
-                                    )}
-                                  </div>
-                                `
-                          }
-                        </div>
+                        ${comboBonusControl(host)} ${gekisoSamplesControl(host)} ${placementControl(host)}
                       `
                     : nothing
                 }
