@@ -2948,7 +2948,10 @@
       "multiSong": {
         "mean": "多曲平均最佳",
         "average": "平均{metric}"
-      }
+      },
+      "selectAllCharts": "全選",
+      "deselectAllCharts": "全不選",
+      "clearAllCharts": "清空全部選擇"
     },
     "calendar": {
       "title": "日曆",

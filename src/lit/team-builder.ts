@@ -594,8 +594,14 @@ export class TeamBuilder extends LitElement {
       if (loadController.signal.aborted) return;
       this.data = data;
       if (!seeded) {
+        const matches = (identity: TeamBuilderData["identity"]) =>
+          identity.server === data.identity.server && identity.releaseId === data.identity.releaseId && identity.sourceId === data.identity.sourceId;
+        const previous = this.catalog && matches(this.catalog.data.identity) ? this.catalog.visuals : null;
+        const embedded = this.pageData?.sources.some(source => matches(source.identity)) ? this.pageData.visuals[server] : undefined;
         this.master = compileFromTeamData(data);
         this.catalog = new Catalog(this, data, this.master);
+        if (previous) this.catalog.setVisuals(previous);
+        else if (embedded) this.catalog.setVisuals({ ...embedded, marks: new Map(embedded.marks) });
       }
       this.pt = new PtController(this);
       await this.updateComplete;
@@ -612,7 +618,7 @@ export class TeamBuilder extends LitElement {
       this.store = new BoxStore({ server });
       this.unsubscribe = this.store.subscribe((snapshot) => this.adopt(snapshot));
       void this.store.start();
-      if (!seeded) void this.loadCatalogMetadata();
+      if (!this.catalog?.visuals?.marks.size) void this.loadCatalogMetadata();
     } catch {
       if (!loadController.signal.aborted) {
         this.loadError = this.t("loadFailed", "Card data could not be loaded.");

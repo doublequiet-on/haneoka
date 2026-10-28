@@ -49,7 +49,7 @@ export async function fetchCatalogVisuals(
     marks: new Map(
       Object.entries(marks)
         .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-        .map(([name, path]) => [name, `/runtime/${identity.server}/${path.replace(/^runtime\//u, "")}`]),
+        .map(([name, path]) => [name, `/runtime/${identity.server}/${path.replace(/^runtime\//u, "")}?release=${encodeURIComponent(identity.releaseId)}`]),
     ),
     characters: Object.fromEntries(
       Object.entries(characters)

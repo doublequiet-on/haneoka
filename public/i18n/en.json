@@ -2948,7 +2948,10 @@
       "multiSong": {
         "mean": "Best average across songs",
         "average": "Average {metric}"
-      }
+      },
+      "selectAllCharts": "Select all",
+      "deselectAllCharts": "Deselect all",
+      "clearAllCharts": "Clear all selections"
     },
     "calendar": {
       "title": "Calendar",

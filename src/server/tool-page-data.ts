@@ -183,7 +183,7 @@ export function teamSource(server: string): Promise<TeamBuilderData> {
       const identity = await staticCatalogRelease(server);
       if (!hasLocalStaticCatalog(server)) {
         const data = (await fetchStaticApplicationJson(
-          `/api/v1/team-builder/${encodeURIComponent(server)}`,
+          `/api/v1/team-builder/${encodeURIComponent(server)}?v=3`,
           identity,
         )) as TeamBuilderData;
         if (

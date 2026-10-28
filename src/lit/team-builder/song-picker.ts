@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Scene-specific chart choices, catalogue and browse preferences.
-// Output: Explicit apply/cancel selection with band/credit, genre and per-chart filter groups.
+// Output: Grid chart selection with visible select-all/clear actions and explicit apply/cancel.
 // Pos: [Map](../L2-2.md); shared team workspace chart chooser.
 // Effects/Dependencies: Lit modal, page-local preferences, lazy metadata reads.
 import { matchesSongMissions, matchesSelections } from "../../lib/catalog-filters";
@@ -18,8 +18,6 @@ import { filterChip, inputChip, segmented } from "../ui/controls";
 import { actionMenu } from "../ui/action-menu";
 import { asyncRegion } from "../ui/async-region";
 import { chartDuration } from "./result-metric";
-import { missionSummary } from "./workspace-state";
-import { songMissions } from "../../lib/catalog-filters";
 import { snackbar } from "../../lib/snackbar";
 import { selectionPane } from "../ui/selection-pane";
 import { chartKey, uniqueCharts } from "./workspace-state";
@@ -198,6 +196,8 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const outside = validSelected.filter((song) => !visibleKeys.has(chartKey(song)));
   const shown = state.view === "outside" ? outside : state.view === "unavailable" ? unavailable : visible;
   const selected = new Set(state.songs.map(chartKey));
+  const shownKeys = new Set(shown.map(chartKey));
+  const selectableShown = shown.filter(legal);
   const replace = (songs: SongRef[]) => {
     update({ songs: uniqueCharts(songs), undo: state.songs });
     snackbar(host.t("selectionUpdated", "Selection updated"));
@@ -210,12 +210,9 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
         : state.single
           ? [song]
           : [...state.songs, song],
+      undo: state.songs,
     });
   };
-  const gekiso =
-    host.tab === "song-comparison" ||
-    host.searchSettings.goal === "gekiso" ||
-    (host.tab === "pt" && host.settings.rewardMode === "recommendation" && host.searchSettings.ptMode === "gekiso");
   const missionFilters = html`
     <div class="cluster">
       ${["Combo", "Luck", "JustCount", "Mix"].map((value, i) =>
@@ -329,7 +326,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
     search: (query) => update({ query }),
     filterLabel: `${host.t("filters", "Filters")}${applied.length ? ` · ${applied.length}` : ""}`,
     filtersOpen: state.filtersOpen,
-    layout: "list",
+    layout: "grid",
     filterCount: applied.length,
     toggleFilters: () => update({ filtersOpen: !state.filtersOpen }),
     filterLayout: "facets",
@@ -404,21 +401,19 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
         ></md-outlined-text-field>`)}
     `,
     kind: "song",
-    items: shown.map((song) => ({
-      ...catalog.songOptions(song.songId, song.difficulty),
-      marks: [],
-      value: chartKey(song),
-      adornment: nothing,
-      subtitle: html`
-        <span class="tb-picker-chart">
-          ${catalog.difficultyLabel(song.songId, song.difficulty)} · ${chartDuration(catalog.chartMetadata(song)?.time)}
-        </span>
-        <span class="tb-picker-artist">
-          ${catalog.songArtist(song.songId)} ·
-          ${catalog.attributeName(Number(songView(song.songId).musicType))}${gekiso ? ` · ${missionSummary(songMissions(songView(song.songId)))}` : ""}
-        </span>
-      `,
-    })),
+    items: shown.map((song) => {
+      const options = catalog.songOptions(song.songId, song.difficulty);
+      const attribute = Number(songView(song.songId).musicType);
+      return {
+        ...options,
+        value: chartKey(song),
+        label: `${catalog.songTitle(song.songId)} ${catalog.difficultyLabel(song.songId, song.difficulty)}`,
+        marks: [
+          { at: "start" as const, image: catalog.attributeIcon(attribute), label: catalog.attributeName(attribute) },
+          ...(options.marks ?? []).filter(mark => mark?.at !== "start"),
+        ],
+      };
+    }),
     selected: "",
     selectedValues: selected,
     select: toggle,
@@ -478,36 +473,34 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
             }
           </div>
           <div class="cluster tb-picker-actions">
-            ${actionMenu({
+            ${!state.single ? html`
+              <button class="button button--text" type="button"
+                ?disabled=${incomplete || !selectableShown.length || selectableShown.every(song => selected.has(chartKey(song)))}
+                @click=${() => replace([...state.songs, ...selectableShown])}>
+                ${host.t("selectAllCharts", "Select all")}
+              </button>
+            ` : nothing}
+            <button class="button button--text" type="button" ?disabled=${!state.songs.some(song => shownKeys.has(chartKey(song)))}
+              @click=${() => replace(state.songs.filter(song => !shownKeys.has(chartKey(song))))}>
+              ${host.t("deselectAllCharts", "Deselect all")}
+            </button>
+            ${!state.single ? actionMenu({
               id: "tb-selection-actions",
               label: host.t("selectionActions", "Selection actions"),
-              items: [
-                ...(state.single
-                  ? []
-                  : [
-                      {
-                        label: host.t("appendMatching", "Add matching charts"),
-                        disabled: incomplete,
-                        run: () => replace([...state.songs, ...visible]),
-                      },
-                      {
-                        label: host.t("replaceSelection", "Use only filtered charts"),
-                        disabled: incomplete,
-                        run: () => replace(visible),
-                      },
-                    ]),
-                { label: host.t("clearSelection", "Clear selection"), run: () => replace([]) },
-              ],
-            })}
-            ${
-              state.undo
-                ? html`
-                    <button class="button button--text" @click=${() => update({ songs: state.undo!, undo: undefined })}>
-                      ${host.t("undoSelection", "Undo")}
-                    </button>
-                  `
-                : nothing
-            }
+              items: [{
+                label: host.t("replaceSelection", "Use only filtered charts"),
+                disabled: incomplete,
+                run: () => replace(visible),
+              }, {
+                label: host.t("clearAllCharts", "Clear all selections"),
+                disabled: !state.songs.length,
+                run: () => replace([]),
+              }],
+            }) : nothing}
+            <button class="button button--text" type="button" ?disabled=${!state.undo}
+              @click=${() => state.undo && update({ songs: state.undo, undo: undefined })}>
+              ${host.t("undoSelection", "Undo")}
+            </button>
           </div>
         </div>
         <button

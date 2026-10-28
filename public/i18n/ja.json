@@ -2948,7 +2948,10 @@
       "multiSong": {
         "mean": "全曲平均で最適編成",
         "average": "平均{metric}"
-      }
+      },
+      "selectAllCharts": "すべて選択",
+      "deselectAllCharts": "すべて解除",
+      "clearAllCharts": "すべての選択をクリア"
     },
     "calendar": {
       "title": "カレンダー",

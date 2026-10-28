@@ -2948,7 +2948,10 @@
       "multiSong": {
         "mean": "전체 곡 평균 최적 편성",
         "average": "평균 {metric}"
-      }
+      },
+      "selectAllCharts": "전체 선택",
+      "deselectAllCharts": "전체 해제",
+      "clearAllCharts": "모든 선택 지우기"
     },
     "calendar": {
       "title": "달력",
