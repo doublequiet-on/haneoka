@@ -212,7 +212,8 @@ export class PtController {
               goal.consumption = this.cycle()!.consumption;
               delete goal.gekiso;
             }
-            this.issues.push(...validatePtRequest(this.host.master, { ...request, goal }));
+            // The native request validates skill programs; retained TS scoring has a smaller skill set.
+            this.issues.push(...validatePtRequest(this.host.master, { ...request, goal }).filter((issue) => issue.code !== "skill"));
           }
         if (this.cycle() && !this.cycle()!.songs.length)
           this.issues.push({ code: "chart", target: "challenge-selection" });
