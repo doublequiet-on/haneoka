@@ -37,8 +37,7 @@ import { buildConnectWallDrawAssets } from "./connect-wall-draw-assets.ts";
 import { buildConnectFrameDrawAssets } from "./connect-frame-draw-assets.ts";
 import { buildNativeRowSliceAssets } from "./native-row-slice-assets.ts";
 import { buildNativeLoopFrameAssets } from "./native-loop-frame-assets.ts";
-import { LOOP_FRAME_EFFECTS } from "../../../.dependencies/sonolus-our-notes/shared/src/engine/data/loopFrameContract.ts";
-import { NATIVE_PARTICLE_OPTIONAL_DRAW_CAPABILITIES } from "../src/shared/nativeDrawCapabilities.ts";
+import { NATIVE_PARTICLE_OPTIONAL_EFFECTS } from "../src/shared/nativeDrawCapabilities.ts";
 
 type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -104,9 +103,7 @@ const out = resolve(root, "packages/sonolus/dist/our-notes");
 const engineRoot = dirname(
   fileURLToPath(import.meta.resolve("@haneoka/sonolus-our-notes/package.json")),
 );
-const optionalDrawCapabilities = new Set(
-  NATIVE_PARTICLE_OPTIONAL_DRAW_CAPABILITIES,
-);
+const optionalCapabilities = new Set(NATIVE_PARTICLE_OPTIONAL_EFFECTS);
 
 function connectWallCacheInput(baseCacheKey: string) {
   const module = resolve(
@@ -431,7 +428,6 @@ try {
   console.log(`Simple row slices: ${rows.mergedTriples} triples merged, unchanged atlas dimensions`);
   const loopFrames = buildNativeLoopFrameAssets(out);
   console.log(`Slide loop frames: ${loopFrames.length} single-cycle effects`);
-  const optionalLoopFrames = new Set<string>(Object.values(LOOP_FRAME_EFFECTS));
 
   const referencedParticleNames = new Set<string>();
 
@@ -538,8 +534,7 @@ try {
         !absent.has(name) &&
         !available.has(name) &&
         !omitted.has(name) &&
-        !optionalLoopFrames.has(name) &&
-        !optionalDrawCapabilities.has(name),
+        !optionalCapabilities.has(name),
     );
     if (missing.length)
       throw new Error(
