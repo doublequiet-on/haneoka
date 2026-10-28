@@ -5,11 +5,11 @@
 // Effects/Dependencies: Pure URL and HTML transformations; no network or storage.
 const LOCALE = "(?:ja|en|zh-TW|zh-CN|ko)";
 const CHART_ID = "[0-9a-f-]{36}";
-const DOCUMENT = new RegExp(`^/(${LOCALE})/charts/(${CHART_ID})(/chart)?/?$`, "u");
-const LEGACY = new RegExp(`^/(?:jp|intl)/(${LOCALE})/charts(?:/(${CHART_ID})(/chart)?)?/?$`, "u");
+const DOCUMENT = new RegExp(`^/(${LOCALE})/community/charts/(${CHART_ID})(/chart)?/?$`, "u");
+const LEGACY = new RegExp(`^/(?:(?:jp|intl)/)?(${LOCALE})/charts(?:/(${CHART_ID})(/chart)?)?/?$`, "u");
 
 export function communityChartPath(_server: string, locale: string, id = ""): string {
-  return `/${locale}/charts/${id ? `${encodeURIComponent(id)}/` : ""}`;
+  return `/${locale}/community/charts/${id ? `${encodeURIComponent(id)}/` : ""}`;
 }
 export function communityChartPlayerPath(server: string, locale: string, id: string): string {
   return `${communityChartPath(server, locale, id)}chart/`;
@@ -25,7 +25,7 @@ export function legacyCommunityChartRedirectTarget(pathname: string, search = ""
 }
 export function communityChartShellPath(pathname: string): string | undefined {
   const route = parseCommunityChartDocument(pathname);
-  return route ? `/${route.locale}/charts/_/` : undefined;
+  return route ? `/${route.locale}/community/charts/_/` : undefined;
 }
 
 /** The shared shell has different metadata for each chart document. */
