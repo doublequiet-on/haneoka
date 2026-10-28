@@ -337,7 +337,7 @@ export class EngineClient {
       || request.shard || request.noFloor || request.seedOnly || request.seedVariant || request.seeded || request.rewardPhase
       || request.resolveRewardPlan || request.floors || request.rewardIncumbent || request.cutoff || request.rewardCutoff !== undefined || request.completed?.length) return null;
     const { timeLimitMs: _time, deadline: _deadline, requestId: _id, contextKey: _context, ...input } = request;
-    return JSON.stringify(input);
+    return JSON.stringify(["native-rewards-signed-v1", input]);
   }
 
   run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler): Promise<EngineResponse> {
@@ -849,7 +849,7 @@ export class EngineClient {
               let response: EngineResponse;
               try {
                 const rewardPhase = request.rewardPhase && request.rewardPhase.kind !== "primary"
-                  ? { ...request.rewardPhase, floor: Math.max(0, job.floor) } : request.rewardPhase;
+                  ? { ...request.rewardPhase, floor: job.floor } : request.rewardPhase;
                 response = await engine.send<EngineResponse>({ type: "run", id: 0, scoredSeeds: [...rewardScores.values()].flat(), request: { ...request, rewardPhase,
                   seeded: sampledRewards || request.rewardPhase ? current.overall.length > 0 : request.seeded,
                   seeds: sampledRewards ? current.overall : seeds, shard: { index, count }, floors: rewardPhase && rewardPhase.kind !== "primary" ? undefined : floors,

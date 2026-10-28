@@ -198,6 +198,7 @@ export interface HitScore {
   ranks: Record<string, number>;
   rangeScores?: number[];
 }
+/** Native settlement may wrap below zero; the denominator stays positive. */
 export interface RewardFraction { numerator: string; denominator: string; value: number }
 export interface EngineHit {
   aggregate?: { kind: "mean"; songs: EngineHit[] };
