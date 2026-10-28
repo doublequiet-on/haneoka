@@ -51,7 +51,7 @@ import {
   type FarmingSettings,
   type Tab,
 } from "./team-builder/types";
-import { farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
+import { farmingConditions, farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
 import { renderBuildTab } from "./team-builder/build-tab";
 import { snackbar } from "../lib/snackbar";
 import { renderBoxTab, renderCardEditor, renderUndoAction } from "./team-builder/box-tab";
@@ -1230,7 +1230,7 @@ export class TeamBuilder extends LitElement {
       members: cards.members,
       snaps: cards.snaps,
       player:
-        this.tab === "pt" && s.rewardMode !== "plan" && (!s.farming.includeMemory || s.rewardMode === "recommendation")
+        this.tab === "pt" && s.rewardMode !== "plan" && (!farmingConditions(s.farming).includeMemory || s.rewardMode === "recommendation")
           ? {
               ...this.view.player,
               characterMemory: Object.fromEntries([...(this.master?.characters.keys() ?? [])].map((id) => [id, 0])),
