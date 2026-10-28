@@ -6,7 +6,7 @@ import { LitElement, html, nothing } from "lit";
 import { readPageData } from "../lib/page-data";
 import { adoptPrerenderedWorkspace } from "../lib/workspace-page-data";
 import type { CatalogSystemPayload } from "../lib/catalog-system-data";
-import { clearAppBarActions, setAppBarActions } from "../lib/app-bar";
+import { clearAppBarActions, clearAppBarIdentity, setAppBarActions, setAppBarIdentity } from "../lib/app-bar";
 import { navigationDocumentUrl } from "../lib/document-url";
 import {
   groupMissions,
@@ -17,7 +17,13 @@ import {
 } from "../lib/mission-groups";
 import { syncEntityNavigation, updateEntityHeading } from "../lib/detail-navigation";
 import { beginLoading, type LoadingReporter } from "../lib/loading-progress";
-import { catalogResourceHref, entityHref, parseResourceRoute, resourcePath, type ReleaseServer } from "../lib/resource-route";
+import {
+  catalogResourceHref,
+  entityHref,
+  parseResourceRoute,
+  resourcePath,
+  type ReleaseServer,
+} from "../lib/resource-route";
 import { isPublicReleaseServer } from "../lib/release-server";
 import { fetchCrossServerCatalog } from "../lib/cross-server/fetch";
 import { crossCatalogPresentation, type CrossCatalogPresentation } from "../lib/cross-server/presentation";
@@ -92,6 +98,9 @@ export class MissionWorkspace extends LitElement {
   private error = "";
   private request?: AbortController;
   private loading?: LoadingReporter;
+  private groupBack?: HTMLAnchorElement;
+  private groupMenu?: { menu: HTMLElement; leading: HTMLElement; group: HTMLElement };
+  private groupHeading?: { node: HTMLElement; children: Node[]; language: string | null };
   private localeListener = () => {
     this.locale = preferredLocale(this.locale);
     this.syncEntityHeading();
@@ -125,7 +134,11 @@ export class MissionWorkspace extends LitElement {
   }
   private applyCatalog(dto: NonNullable<CatalogSystemPayload["catalog"]>): JsonRecord {
     this.unionMissions = crossCatalogPresentation(dto);
-    return { entries: Object.fromEntries(this.unionMissions.items.map((mission) => [this.unionMissions!.entries.get(mission)!.key, mission])) };
+    return {
+      entries: Object.fromEntries(
+        this.unionMissions.items.map((mission) => [this.unionMissions!.entries.get(mission)!.key, mission]),
+      ),
+    };
   }
   private applyDocument(document: JsonRecord) {
     if (this.entityId) {
@@ -149,7 +162,7 @@ export class MissionWorkspace extends LitElement {
     addEventListener(SPOILER_CONTENT_EVENT, this.contentAccessChanged);
     super.connectedCallback();
     this.locale = preferredLocale(this.locale);
-    const url = navigationDocumentUrl();
+    const url = new URL(navigationDocumentUrl());
     const route = parseResourceRoute(url.pathname);
     this.entityId = route?.kind === "missions" ? route.id || "" : "";
     this.server = route?.kind === "missions" ? route.server : (currentReleaseServer() as ReleaseServer);
@@ -180,6 +193,8 @@ export class MissionWorkspace extends LitElement {
     this.request = undefined;
     this.loading?.cancel();
     clearAppBarActions("missions");
+    clearAppBarIdentity("missions");
+    this.restoreGroupShell();
     removeEventListener("popstate", this.popState);
     removeEventListener("haneoka:locale-ready", this.localeListener);
     super.disconnectedCallback();
@@ -219,6 +234,72 @@ export class MissionWorkspace extends LitElement {
     const title = this.name(this.missions[0].title) || this.entityId;
     updateEntityHeading(this, title, this.locale);
     syncEntityNavigation();
+  }
+  updated() {
+    if (!this.isConnected) return;
+    this.renderStaticChrome();
+    const selected = this.groupKey ? this.groups().find((group) => group.key === this.groupKey) : undefined;
+    if (!this.entityId && selected) this.syncGroupShell(selected);
+    else this.restoreGroupShell();
+    this.syncEntityHeading();
+  }
+  private syncGroupShell(group: MissionGroup) {
+    const shell = this.closest("[data-shell]");
+    const heading = shell?.querySelector<HTMLElement>("[data-top-app-bar] h1");
+    if (heading && !this.groupHeading) {
+      this.groupHeading = { node: heading, children: [...heading.childNodes], language: heading.getAttribute("lang") };
+    }
+    updateEntityHeading(this, this.groupTitle(group), this.locale);
+    const leading = shell?.querySelector<HTMLElement>("[data-top-app-bar-leading]");
+    if (!leading) return;
+    if (!this.groupBack) {
+      const back = document.createElement("a");
+      back.className = "icon-button";
+      back.dataset.entityBack = "";
+      back.innerHTML =
+        '<svg class="material-icon" width="24" height="24" aria-hidden="true"><use href="/icons.svg#arrow_back"></use></svg>';
+      back.addEventListener("click", (event) => {
+        if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        this.closeGroup();
+      });
+      leading.prepend(back);
+      this.groupBack = back;
+      const menu = leading.querySelector<HTMLElement>("[data-nav-toggle]");
+      const actions = shell?.querySelector<HTMLElement>("[data-top-app-bar-actions]");
+      if (menu && actions) {
+        const container = document.createElement("div");
+        container.className = "top-app-bar__group";
+        container.append(menu);
+        actions.prepend(container);
+        this.groupMenu = { menu, leading, group: container };
+      }
+    }
+    const url = new URL(navigationDocumentUrl());
+    url.searchParams.delete("group");
+    this.groupBack.href = `${url.pathname}${url.search}`;
+    this.groupBack.dataset.entityFallbackHref = this.groupBack.href;
+    this.groupBack.setAttribute("aria-label", uiText(this.locale, "common.actions.back"));
+  }
+  private restoreGroupShell() {
+    this.groupBack?.remove();
+    this.groupBack = undefined;
+    if (this.groupMenu) {
+      const { menu, leading, group } = this.groupMenu;
+      if (leading.isConnected) leading.append(menu);
+      group.remove();
+      this.groupMenu = undefined;
+    }
+    if (this.groupHeading) {
+      const { node, children, language } = this.groupHeading;
+      if (node.isConnected) {
+        node.replaceChildren(...children);
+        delete node.dataset.entityTitle;
+        if (language) node.lang = language;
+        else node.removeAttribute("lang");
+      }
+      this.groupHeading = undefined;
+    }
   }
   private async load() {
     const page = readPageData<CatalogSystemPayload>(this);
@@ -310,13 +391,16 @@ export class MissionWorkspace extends LitElement {
         const key = `${String(reward.kind || "")}:${String(reward.resourceType ?? "")}:${String(reward.resourceId ?? this.name(reward.name))}`;
         const entry = totals.get(key);
         if (entry) entry.count = Number(entry.count || 0) + Number(reward.count || 1);
-        else totals.set(key, {
-          ...reward,
-          count: Number(reward.count || 1),
-          href: catalogResourceHref(
-            String(reward.href || ""), this.missionEntry(mission)?.displayServer || this.server, this.locale as Locale,
-          ),
-        });
+        else
+          totals.set(key, {
+            ...reward,
+            count: Number(reward.count || 1),
+            href: catalogResourceHref(
+              String(reward.href || ""),
+              this.missionEntry(mission)?.displayServer || this.server,
+              this.locale as Locale,
+            ),
+          });
       }
     return [...totals.values()];
   }
@@ -409,22 +493,6 @@ export class MissionWorkspace extends LitElement {
   private groupView(group: MissionGroup) {
     return html`
       <section class="mission-group">
-        <header class="mission-group__header">
-          <button
-            class="icon-button"
-            type="button"
-            @click=${() => this.closeGroup()}
-            aria-label=${uiText(this.locale, "common.actions.back")}
-          >
-            ${icon("arrow_back", 24)}
-          </button>
-          <span class="mission-group__icon">${categoryIcon(group.category)}</span>
-          <span class="mission-group__heading">
-            <h2>${this.groupTitle(group)}</h2>
-            <small class="mission-group__window">${this.windowText(group)}</small>
-          </span>
-          <span class="mission-group__count tabular">${group.rows.length}</span>
-        </header>
         <ul class="mission-list" role="list">
           ${group.rows.map((mission) => {
             const href = this.entityLink(mission);
@@ -432,7 +500,15 @@ export class MissionWorkspace extends LitElement {
             return html`
               <li class="mission-row">
                 <span class="mission-row__condition">
-                  ${href ? html`<a href=${href}>${title}</a>` : html`<span>${title}</span>`}
+                  ${
+                    href
+                      ? html`
+                          <a href=${href}>${title}</a>
+                        `
+                      : html`
+                          <span>${title}</span>
+                        `
+                  }
                   ${this.goal(mission)}
                   ${(() => {
                     const entry = this.missionEntry(mission);
@@ -536,27 +612,15 @@ export class MissionWorkspace extends LitElement {
   }
   private entityView(mission: Mission) {
     const title = this.name(mission.title) || mission.id;
-    const kind = this.categoryLabel(missionCategory(mission));
-    const window = this.windowText(groupMissions([mission], this.locale)[0]!);
     const description = this.name(mission.description);
     return html`
-      <section class="mission-group mission-group--entity">
-        <header class="mission-group__header">
-          <h2>${title}</h2>
-          <span>${kind}</span>
-          ${
-            window
-              ? html`
-                  <small class="mission-group__window">${window}</small>
-                `
-              : nothing
-          }
-        </header>
+      <section class="mission-group">
         <ul class="mission-list" role="list">
           <li class="mission-row">
             <span class="mission-row__condition">
+              <span>${title}</span>
               ${
-                description
+                description && description !== title
                   ? html`
                       <small>${description}</small>
                     `
@@ -595,9 +659,30 @@ export class MissionWorkspace extends LitElement {
       </div>
     `;
   }
-  render() {
-    if (this.entityId || this.groupKey) clearAppBarActions("missions");
+  renderStaticChrome() {
+    const groups = this.groups();
+    const selected = this.groupKey ? groups.find(group => group.key === this.groupKey) : undefined;
+    const mission = this.entityId ? this.missions[0] : undefined;
+    const group = mission ? groupMissions([mission], this.locale)[0] : selected;
+    const count = selected ? selected.rows.length : groups.reduce((total, value) => total + value.rows.length, 0);
+    setAppBarIdentity("missions", html`
+      <div class="browse__crumbs">
+        ${!mission ? html`
+          <span class="chip chip--static tabular" role="status">
+            ${this.text("missionCount", "{count} missions", { count: count.toLocaleString(this.locale) })}
+          </span>
+        ` : nothing}
+        ${group ? html`
+          <span class="chip chip--static"><span class="chip__label">${this.categoryLabel(mission ? missionCategory(mission) : group.category)}</span></span>
+          <span class="chip chip--static"><span class="chip__label">${this.windowText(group)}</span></span>
+        ` : nothing}
+      </div>
+    `);
+    if (mission || selected) clearAppBarActions("missions");
     else setAppBarActions("missions", this.modeFilter());
+  }
+
+  render() {
     const groups = this.groups();
     const selected = this.groupKey ? groups.find((group) => group.key === this.groupKey) : undefined;
     return html`

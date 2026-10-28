@@ -438,6 +438,14 @@ Set `RESOURCE_RELEASE_ROOT` to select an immutable release directly, or
 
 ## R2 publication
 
+The reviewed `missions` projection in `band-description-projection.yml`
+recompiles mission descriptions and effective periods, adds native event
+missions to the mission catalogue, and resolves event-detail descriptions and
+rewards from `MasterEventMission` and `MasterMissionReward`. It updates the
+catalogue descriptor and summary counts while retaining existing mission reward
+and image records. Run the workflow with publishing disabled to review the
+derived release before promotion.
+
 ### App downloads and native story downloads
 
 `wrangler.downloads.jsonc` deploys the independent download Worker on

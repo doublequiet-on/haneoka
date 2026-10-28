@@ -3064,7 +3064,7 @@ export class CatalogScreen extends LitElement {
       const rightNumber = Array.isArray(right) ? Number(right[0]) : Number(right);
       if (
         this.profile.presentation === "song" &&
-        ["time", "nativeScore", "score", "eff", "bpm", "n", "nps", "sr", "justable", "justableRate", "luck", ...DECK_METRICS].includes(
+        ["level", "time", "nativeScore", "score", "eff", "bpm", "n", "nps", "sr", "justable", "justableRate", "luck", ...DECK_METRICS].includes(
           this.sort,
         )
       ) {
@@ -3627,8 +3627,10 @@ export class CatalogScreen extends LitElement {
       return this.songMetaValue(item, this.sort);
     if (this.sort === "level") {
       const rows = Array.isArray(item.difficulty) ? (item.difficulty as Item[]) : [];
-      const row = this.profile.perDifficulty ? rows[0] : rows[3];
-      return Number(row?.sortLevel ?? row?.displayLevel ?? row?.playLevel ?? -1);
+      const row = this.profile.perDifficulty
+        ? rows[0]
+        : rows.find((row, index) => difficultyKey(row, index) === this.selectedSongDifficulty);
+      return Number(row?.sortLevel ?? row?.displayLevel ?? row?.playLevel ?? Number.NaN);
     }
     if (this.sort === "levels") return Array.isArray(item.levels) ? item.levels.length : 0;
     if (this.sort === "order") return Number(item.displayOrder ?? item.order ?? item.sortOrder ?? this.itemId(item));

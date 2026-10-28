@@ -63,7 +63,7 @@ export class EngineCharts {
     const rows = new Array<EngineChart>(songs.length);
     let next = 0;
     await Promise.all(
-      Array.from({ length: Math.min(3, songs.length) }, async () => {
+      Array.from({ length: Math.min(6, songs.length) }, async () => {
         while (next < songs.length) {
           const index = next++;
           rows[index] = await this.load(songs[index]!);

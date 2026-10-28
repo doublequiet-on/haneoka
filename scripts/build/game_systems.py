@@ -1,6 +1,6 @@
 # L3 — GEB
 # Input: Master tables, localized resources and the caller's asset/time lookups.
-# Output: Rotating-system catalogues and compact history rate, product and exchange rules.
+# Output: Rotating-system catalogues, resolved event missions and compact history rules.
 # Pos: [Build map](L2-2.md); public game-system projections for the API compiler.
 # Effects/Dependencies: Uses supplied Master/resource lookups; writes no account data.
 """Human-readable projections for the game's rotating systems."""
@@ -486,6 +486,24 @@ def _event_cover_image(
     )
 
 
+def _event_mission(
+    data: Any, documents: dict[str, Any], resource_types: dict[int, str],
+    row: dict[str, Any], rewards: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "sourceTable": "MasterEventMission",
+        "sourceId": _number(row, "_id"),
+        "raw": row,
+        "id": f"event-mission-{_number(row, '_id')}",
+        "description": _mission_description(data, row, documents, _number(row, "_missionCategory")),
+        "rewards": [
+            _event_resource(data, documents, resource_types, "MasterEventMission", row, rewards[int(reward_id)])
+            for reward_id in row.get("_missionRewardIds", [])
+            if int(reward_id) in rewards
+        ],
+    }
+
+
 def _event_support(
     data: Any,
     documents: dict[str, Any],
@@ -501,6 +519,9 @@ def _event_support(
         _number(row, "_id"): row
         for row in data.rows("MasterReward")
         if _number(row, "_id")
+    }
+    mission_rewards = {
+        _number(row, "_id"): row for row in data.rows("MasterMissionReward")
     }
 
     def belongs(table: str, row: dict[str, Any]) -> bool:
@@ -664,6 +685,7 @@ def _event_support(
                     value["perRank"] = per_rank
                 effects.append(value)
             elif table == "MasterEventMission":
+                value = _event_mission(data, documents, resource_types, row, mission_rewards)
                 missions.append(value)
             rows.append(value)
         if rows:
@@ -881,6 +903,7 @@ def _events(
                 "MasterGachaPrize",
                 "MasterStoryEpisode",
                 "MasterStoryReward",
+                "MasterMissionReward",
                 "MasterLiveMusicBoostBonus",
                 "MasterChallengeMusicBoostBonus",
                 *support["sourceTables"],
@@ -1728,16 +1751,26 @@ def _missions(
     groups = {
         _number(row, "_id"): row for row in data.rows("MasterLimitedMissionGroup")
     }
+    events = {_number(row, "_id"): row for row in data.rows("MasterEvent")}
     entries = {}
     for table, kind in (
         ("MasterMission", "regular-mission"),
         ("MasterLimitedMission", "limited-mission"),
+        ("MasterEventMission", "event-mission"),
     ):
         for row in data.rows(table):
             identity = _number(row, "_id")
             if not identity:
                 continue
             group = groups.get(_number(row, "_limitedMissionGroupId"))
+            event_id = _number(row, "_eventId")
+            if kind == "event-mission":
+                event = events.get(event_id, {})
+                group = {
+                    "_nameTextID": event.get("_nameTextId"),
+                    "_startAt": event.get("_startAt"),
+                    "_endAt": event.get("_endAt"),
+                }
             group_category = _number(group or {}, "_missionCategory")
             category = _number(row, "_missionCategory") if "_missionCategory" in row else group_category
             prizes = [
@@ -1762,10 +1795,11 @@ def _missions(
                 initialValue=_number(row, "_initialValue"),
                 missionType=_number(row, "_missionType"),
                 category=category,
-                groupId=_number(row, "_limitedMissionGroupId"),
+                groupId=event_id if kind == "event-mission" else _number(row, "_limitedMissionGroupId"),
                 groupCategory=group_category,
                 releaseDay=_number(row, "_releaseDay"),
                 priority=_number(row, "_priority"),
+                **({"eventId": event_id} if kind == "event-mission" else {}),
             )
     return {"entries": entries}
 

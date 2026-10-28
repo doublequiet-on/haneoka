@@ -170,6 +170,7 @@
     "scripts/build/static-build-inputs.mjs",
     "scripts/build/static-build-shards.mjs",
     "scripts/publish/r2.py",
+    "scripts/publish/missions.py",
     "scripts/verify/source.py",
     "scripts/verify/release.py",
     "scripts/deploy/worker-publication.mjs",

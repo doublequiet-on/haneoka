@@ -1633,7 +1633,13 @@ function renderEventMissions(c: Controller, item: Item) {
         ${missions.map(
           (mission) => html`
             <div>
-              <dt>${c.plainGameText(mission.description) || eventText(c, "eventMission", "Event mission")}</dt>
+              <dt>
+                ${mission.id
+                  ? html`<a href=${canonicalHref(c, `/catalog/missions?entry=${encodeURIComponent(String(mission.id))}`)}>
+                      ${c.plainGameText(mission.description)}
+                    </a>`
+                  : c.plainGameText(mission.description) || eventText(c, "eventMission", "Event mission")}
+              </dt>
               <dd>
                 <ul class="detail-object-list">
                   ${eventRows(mission.rewards).map((reward) => eventRewardRow(c, reward))}

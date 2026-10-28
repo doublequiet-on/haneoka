@@ -106,7 +106,7 @@ class EngineWorker {
     return message.type === "run" && !message.request.noFloor && !message.request.seedOnly
       && message.request.k === 1 && (message.request.shard?.count ?? 1) > 1 && (message.request.goal.kind === "event"
         ? (!!message.request.rewardPhase || message.request.rewardLexicographic === true) && !!message.request.goal.gekiso
-        : message.request.goal.kind === "gekiso" && message.request.goal.criterion === "max" && message.request.goal.seeds >= 16 && !message.request.goal.opponents);
+        : message.request.goal.kind === "gekiso" && (message.request.goal.arena?.mode === "shared" || message.request.aggregation === "mean" || (message.request.goal.criterion === "max" && message.request.goal.seeds >= 16 && !message.request.goal.opponents)));
   }
   private call(message: EngineCall, progress?: Pending["progress"], snapshot?: Pending["snapshot"]): Promise<unknown> {
     const id = this.nextId++;
@@ -442,25 +442,78 @@ export class EngineClient {
       }
       if ((request.aggregation === "mean" && (request.goal.kind === "score" || request.goal.kind === "event" || request.goal.kind === "gekiso")) || (request.goal.kind === "gekiso" && request.goal.arena?.mode === "shared")) {
         const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-        const count = request.constraints.leader !== null ? 1 : Math.min(this.pool.length, memory <= 4 ? 1 : 2);
+        const count = request.constraints.leader !== null ? 1 : Math.min(this.pool.length, memory <= 4 ? 1 : request.goal.kind === "gekiso" ? 6 : 2);
         const workers = this.pool.slice(0, count);
         const loadedCharts = await workers[0]!.preload(request.goal.songs);
         if (stopped) return latest;
+        let sharedSeed: EngineHit | undefined;
+        let sharedUnknown: string[] = [];
+        if (count > 1 && request.k === 1 && request.goal.kind === "gekiso" && request.goal.songs.length >= 8
+          && (request.goal.minComboBonus ?? 1) <= 1 && request.goal.arena?.missions.every(type => type > 0)) {
+          const goal = request.goal;
+          const warm = await workers[0]!.send<EngineResponse>({ type: "run", id: 0, loadedCharts,
+            request: { ...request, aggregation: undefined, seedOnly: undefined, seeded: undefined, shard: undefined, floors: undefined,
+              goal: { ...goal, songs: [goal.songs[0]!], arena: { ...goal.arena!, mode: "individual" } } } });
+          if (stopped) return latest;
+          sharedUnknown = warm.unknownCards;
+          const team = warm.overall[0];
+          if (team) {
+            const evaluated = (await Promise.all(workers.map((worker, index) => worker.send<TeamEvaluation[]>({
+              type: "evaluate", id: 0, loadedCharts,
+              request: { songRules: request.songRules, members: request.members, snaps: request.snaps, player: request.player, unknownPolicy: request.unknownPolicy,
+                team: { members: team.members, snaps: team.snaps, leader: team.members[0]! },
+                songs: goal.songs.filter((_, position) => position % count === index),
+                play: { great: 0, good: 0, bad: 0, miss: 0 }, challengeEventId: null, event: null,
+                gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds, arena: goal.arena } },
+            })))).flat();
+            if (stopped) return latest;
+            const bySong = new Map(evaluated.map(value => [chartKey(value.song), value]));
+            const songs: EngineHit[] = goal.songs.map(song => {
+              const value = bySong.get(chartKey(song))!;
+              return { ...team, song, power: value.power, slotPowers: value.slotPowers, key: value.score.mean,
+                score: value.score, event: null, skipScore: value.skipScore, potential: null };
+            });
+            const average = (value: (hit: EngineHit) => number) => songs.reduce((sum, hit) => sum + value(hit), 0) / songs.length;
+            sharedSeed = { ...team, song: null, key: average(hit => hit.score!.mean), power: average(hit => hit.power),
+              slotPowers: team.slotPowers.map((_, index) => average(hit => hit.slotPowers[index]!)),
+              score: { mean: average(hit => hit.score!.mean), min: average(hit => hit.score!.min), max: average(hit => hit.score!.max),
+                median: average(hit => hit.score!.median), orders: [], ranks: {}, bestOrder: [], worstOrder: [] },
+              event: null, skipScore: null, potential: null, aggregate: { kind: "mean", songs } };
+          }
+        }
         const parts = workers.map(() => emptyResponse(request));
-        const merged = () => mergeShardResponses(parts, request.k, clock() - started);
+        const merged = () => {
+          const response = mergeShardResponses(parts, request.k, clock() - started);
+          response.unknownCards = [...new Set([...sharedUnknown, ...response.unknownCards])];
+          if (sharedSeed && (!response.overall[0] || compareHits(sharedSeed, response.overall[0]) < 0)) {
+            response.overall = [sharedSeed];
+            response.results[0]!.hits = [sharedSeed];
+          }
+          return response;
+        };
+        const publishShared = () => {
+          const response = merged();
+          const hit = response.overall[0];
+          if (request.goal.kind === "gekiso" && request.k === 1 && hit)
+            for (const worker of workers) worker.raiseFloor(hit.key);
+          publish(response);
+        };
+        if (sharedSeed) publishShared();
+        if (stopped) return latest;
         await Promise.all(
           workers.map(async (worker, index) => {
-            const part = { ...request, ...(count > 1 ? { shard: { index, count } } : {}) };
+            const part = { ...request, ...(count > 1 ? { shard: { index, count } } : {}),
+              ...(sharedSeed ? { seeded: true, seeds: [sharedSeed], floors: { [chartKey(request.goal.kind === "gekiso" ? request.goal.songs[0]! : requestChartSongs(request)[0]!)]: sharedSeed.key } } : {}) };
             parts[index] = await worker.send<EngineResponse>(
               { type: "run", id: 0, request: part, loadedCharts },
               undefined,
               (value) => {
                 if (stopped || value.requestId !== request.requestId || value.contextKey !== request.contextKey) return;
                 parts[index] = value.response;
-                publish(merged());
+                publishShared();
               },
             );
-            if (!stopped) publish(merged());
+            if (!stopped) publishShared();
           }),
         );
         return merged();
@@ -796,7 +849,7 @@ export class EngineClient {
               let response: EngineResponse;
               try {
                 const rewardPhase = request.rewardPhase && request.rewardPhase.kind !== "primary"
-                  ? { ...request.rewardPhase, floor: Math.max(0, job.floor) } : request.rewardPhase;
+                  ? { ...request.rewardPhase, floor: job.floor } : request.rewardPhase;
                 response = await engine.send<EngineResponse>({ type: "run", id: 0, scoredSeeds: [...rewardScores.values()].flat(), request: { ...request, rewardPhase,
                   seeded: sampledRewards || request.rewardPhase ? current.overall.length > 0 : request.seeded,
                   seeds: sampledRewards ? current.overall : seeds, shard: { index, count }, floors: rewardPhase && rewardPhase.kind !== "primary" ? undefined : floors,
