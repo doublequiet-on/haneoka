@@ -5,6 +5,7 @@
 // Effects/Dependencies: 依赖基础 locale 定义；路径构造／解析本身不发请求。
 import { isLocale, type Locale } from "@haneoka/i18n";
 import { CONTENT_SOURCE_IDS, isContentSourceId } from "./content-access-state.ts";
+import { communityChartPath } from "./community-chart-route.ts";
 
 export const RELEASE_SERVERS = ["jp", "intl"] as const;
 export type ReleaseServer = string;
@@ -109,11 +110,12 @@ export const isAnonTokyoMode = (value: unknown): value is AnonTokyoMode =>
 const isResourceId = (value: string): boolean =>
   value.length > 0 && value !== "." && value !== ".." && !/[\\/\u0000-\u001f\u007f]/u.test(value);
 
-/** Public resource addresses contain identity; content revisions belong in data URLs. */
+/** Public resource addresses contain identity; community charts are shared across servers. */
 export function resourcePath({ server, locale, kind, id }: ResourceRoute): string {
   if (!isContentSourceId(server) || !isLocale(locale) || !isResourceKind(kind))
     throw new TypeError("Invalid resource route");
   if (id !== undefined && !isResourceId(id)) throw new TypeError("Invalid resource identity");
+  if (kind === "charts") return communityChartPath(server, locale, id);
   return `/${server}/${locale}/${kind}/${id === undefined ? "" : `${encodeURIComponent(id)}/`}`;
 }
 
@@ -197,6 +199,7 @@ const SELECTION_PARAMS: Readonly<Partial<Record<ResourceKind, string>>> = {
   "band-items": "item",
   items: "item",
   events: "entry",
+  missions: "entry",
   "real-lives": "entry",
   gacha: "entry",
   "login-campaigns": "entry",
@@ -288,9 +291,9 @@ export function legacyEntityRedirectTarget(pathname: string, search = ""): strin
 /** Map logical catalogue destinations to the selected server's collections. */
 export function resourceCollectionHref(route: string, server: ReleaseServer, locale: Locale): string | undefined {
   const source = new URL(route, "https://route.invalid");
-  if (source.pathname === "/community/charts") return `/${server}/${locale}/charts/${source.search}`;
+  if (source.pathname === "/community/charts") return `${communityChartPath(server, locale)}${source.search}`;
   const parts = source.pathname.replace(/^\/+|\/+$/gu, "").split("/");
-  if (parts.length === 1 && parts[0] === "charts") return `/${server}/${locale}/charts/${source.search}`;
+  if (parts.length === 1 && parts[0] === "charts") return `${communityChartPath(server, locale)}${source.search}`;
   if (parts.length === 1 && parts[0] === "calendar")
     return `/${server}/${locale}/calendar/${source.search}`;
   if (parts[0] !== "catalog") return undefined;

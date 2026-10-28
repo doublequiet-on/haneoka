@@ -6,6 +6,7 @@
 import { fnv1a32Shard } from "./hash-partition.ts";
 import { assetStaticLookupPath } from "./asset-static-routing.ts";
 import { playlistStaticLookupPath } from "./playlists/static-routing.ts";
+import { communityChartShellPath } from "./community-chart-route.ts";
 
 export const STATIC_DOCUMENT_SCHEMA = "haneoka-static-documents-v2";
 export const STATIC_DOCUMENT_INDEX_ROOT = "/provider-static/index";
@@ -154,15 +155,15 @@ export function isCoreFallbackShell(pathname: string): boolean {
   const parts = routePath.split("/").filter(Boolean);
   if (/^(ja|en|ko|zh-CN|zh-TW)$/u.test(parts[0] || "")) {
     if (parts.length <= 2) return true;
-    if (["community/forums", "admin/forums", "catalog/assets"].includes(parts.slice(1).join("/"))) return true;
+    if (["community/forums", "community/charts", "admin/forums", "catalog/assets"].includes(parts.slice(1).join("/"))) return true;
   }
   if (/^\/(jp|intl)\/(ja|en|ko|zh-CN|zh-TW)\/(assets\/|announcements\/detail\/)$/u.test(routePath)) return true;
   if (/^\/(jp|intl)\/(ja|en|ko|zh-CN|zh-TW)\/(?:calendar\/|announcements\/)?$/u.test(routePath)) return true;
   return false;
 }
 export function staticDocumentLookupPath(pathname: string): string | undefined {
-  const chart = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/[0-9a-f-]{36}(?:\/chart)?\/?$/u.exec(pathname);
-  if (chart) return coreStaticDocumentPath(`/${chart[1]}/${chart[2]}/charts/_/`);
+  const chartShell = communityChartShellPath(pathname);
+  if (chartShell) return coreStaticDocumentPath(chartShell);
   if (/^\/data\/chart-rates\/(?:jp|intl)\.json$/u.test(pathname)) return pathname;
   if (/^\/(?:provider-static|asset-static|playlist-static)\//u.test(pathname)) {
     const parts = pathname.split("/").filter(Boolean);

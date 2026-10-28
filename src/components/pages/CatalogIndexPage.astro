@@ -6,14 +6,14 @@ import { localePath, type Locale } from "../../i18n/locales";
 import { resourceCollectionHref } from "../../lib/resource-route";
 import type { ReleaseServer } from "../../lib/release-server";
 import { fetchStaticCatalog } from "../../lib/static-catalog-source";
-const { locale, server = "intl" } = Astro.props as { locale: Locale; server?: ReleaseServer };
+const { locale, server = "intl", embedded = false } = Astro.props as { locale: Locale; server?: ReleaseServer; embedded?: boolean };
 const summary = await fetchStaticCatalog("catalog/summary", server) as { resources?: Record<string, { count?: number }> };
 const counts = summary.resources || {};
 const resources = new Map(CATALOG_HUB.map((item) => [item.route, item.resource]));
 // The catalogue destination's own sections; stories, tools, games and the community have their own destinations.
 const sections = NAV_SECTIONS.filter((section) => section.id === "library");
 ---
-<div class="page catalog-hub">
+<div class:list={["page", "catalog-hub", { "page--embedded": embedded }]}>
   {sections.map((section) => (
     <section class="catalog-hub__section" aria-labelledby={`catalog-hub-${section.id}`}>
       <h2 class="catalog-hub__headline" id={`catalog-hub-${section.id}`}><I18nText keyName={section.label} fallback={section.id} locale={locale} /></h2>

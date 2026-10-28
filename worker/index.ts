@@ -4,6 +4,7 @@
 // Pos: [Map](L2.md)；Cloudflare 生产请求和任务组合根。
 // Effects/Dependencies: HTML 更新基准与 ASSETS 发布绑定；连接 D1、R2、缓存、认证、外部服务与队列／容器。
 import { ARENA_PROJECTION } from "../src/lib/arena";
+import { communityChartDocumentEtag, communityChartPath, communityChartPlayerPath, legacyCommunityChartRedirectTarget, parseCommunityChartDocument, rewriteCommunityChartStructuredData } from "../src/lib/community-chart-route";
 import { readArenaCatalog } from "../src/lib/arena-catalog";
 import { handleApiDiscovery } from "./api-discovery";
 import { handleResourceImage } from "./resource-image";
@@ -3754,15 +3755,25 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   if (restricted && !(await testContentAllowed(request, env)))
     return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   let response = await handleScopedRequest(request, env, ctx);
-  const chartDocument = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/([0-9a-f-]{36})(\/chart)?\/?$/u.exec(new URL(request.url).pathname);
+  const chartDocument = parseCommunityChartDocument(new URL(request.url).pathname);
   if (chartDocument && response.status === 200 && response.headers.get("Content-Type")?.includes("text/html")) {
-    const canonical = `https://${CANONICAL_HOST}/${chartDocument[1]}/${chartDocument[2]}/charts/${chartDocument[3]}/${chartDocument[4] ? "chart/" : ""}`;
+    const path = (locale: string) => chartDocument.player
+      ? communityChartPlayerPath("", locale, chartDocument.id)
+      : communityChartPath("", locale, chartDocument.id);
+    const canonical = `https://${CANONICAL_HOST}${path(chartDocument.locale)}`;
+    let structuredData = "";
     response = new HTMLRewriter()
       .on('link[rel="canonical"]', { element(element) { element.setAttribute("href", canonical); } })
       .on('meta[property="og:url"]', { element(element) { element.setAttribute("content", canonical); } })
       .on('link[rel="alternate"][hreflang]', { element(element) {
-        const locale = element.getAttribute("hreflang");
-        if (locale && SERVER_FIRST_LOCALES.has(locale)) element.setAttribute("href", `https://${CANONICAL_HOST}/${chartDocument[1]}/${locale}/charts/${chartDocument[3]}/${chartDocument[4] ? "chart/" : ""}`);
+        const tag = element.getAttribute("hreflang");
+        const locale = tag === "x-default" ? "en" : tag === "ja-JP" ? "ja" : tag;
+        if (locale && SERVER_FIRST_LOCALES.has(locale)) element.setAttribute("href", `https://${CANONICAL_HOST}${path(locale)}`);
+      } })
+      .on('script[type="application/ld+json"]', { text(text) {
+        structuredData += text.text;
+        text.replace(text.lastInTextNode ? rewriteCommunityChartStructuredData(structuredData, new URL(request.url).pathname, `https://${CANONICAL_HOST}`) : "", { html: true });
+        if (text.lastInTextNode) structuredData = "";
       } })
       .transform(response);
   }
@@ -3771,6 +3782,9 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
 async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  const legacyChart = legacyCommunityChartRedirectTarget(url.pathname, url.search);
+  if (legacyChart && (request.method === "GET" || request.method === "HEAD"))
+    return new Response(null, { status: 308, headers: { Location: legacyChart, "Cache-Control": "public, max-age=86400" } });
   const resourceImage = await handleResourceImage(request, env);
   if (resourceImage) return resourceImage;
   const segments = url.pathname.split("/").filter(Boolean);
@@ -4027,7 +4041,13 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
     })(),
     Promise.resolve(previewSettings),
   ]);
-  const result = await applySiteSettings(request, response, settings, webBuildId, env);
+  const chartEtag = response.headers.get("ETag");
+  const chartPath = parseCommunityChartDocument(url.pathname);
+  const page = chartEtag && chartPath && response.headers.get("Content-Type")?.includes("text/html")
+    ? new Response(response.body, { status: response.status, statusText: response.statusText, headers: new Headers(response.headers) })
+    : response;
+  if (page !== response && chartEtag) page.headers.set("ETag", communityChartDocumentEtag(chartEtag, url.pathname));
+  const result = await applySiteSettings(request, page, settings, webBuildId, env);
   if (
     (result.body || request.method === "HEAD" || result.status === 304) &&
     result.headers.get("Content-Type")?.includes("text/html") &&

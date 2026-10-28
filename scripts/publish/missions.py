@@ -134,6 +134,8 @@ def project(base: dict[str, Any], read_entry, staging: Path) -> dict[str, Any]:
                 row[field] = projected[field]
             else:
                 row.pop(field, None)
+        if projected.get("kind") == "event-mission":
+            row["rewards"] = projected["rewards"]
         updated["entries"][identity] = row
     updated_descriptor, count = _compile_resource("missions", updated, staging / "api/v1/catalog")
     if count != len(updated["entries"]):

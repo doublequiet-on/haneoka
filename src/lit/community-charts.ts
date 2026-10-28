@@ -4,6 +4,8 @@
 // Pos: [Map](L2-2.md)；社区谱面浏览工作区。
 // Effects/Dependencies: 社区 HTTP、应用栏接管、音频与懒加载图片；离开释放请求和应用栏。
 import { LitElement, html, nothing } from "lit";
+import { parseCommunityChartDocument } from "../lib/community-chart-route";
+import { readReleaseServer } from "../lib/release-server";
 import { clientText, initializeI18nClient } from "../i18n/client";
 import { chartRequest, CHART_API } from "../lib/chart-creation/community";
 import {
@@ -117,9 +119,11 @@ export class CommunityCharts extends LitElement {
   }
   override connectedCallback() {
     super.connectedCallback();
+    this.server = readReleaseServer();
     const url = navigationDocumentUrl();
-    this.chartId = /^\/(?:jp|intl)\/[^/]+\/charts\/([0-9a-f-]{36})(?:\/chart)?\/?$/u.exec(url.pathname)?.[1] ?? "";
-    this.chartPage = /\/chart\/?$/u.test(url.pathname);
+    const chartDocument = parseCommunityChartDocument(url.pathname);
+    this.chartId = chartDocument?.id ?? "";
+    this.chartPage = chartDocument?.player ?? false;
     if (this.chartId) {
       const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
       if (canonical)
@@ -155,6 +159,10 @@ export class CommunityCharts extends LitElement {
   }
   protected override updated() {
     this.images.observe(this);
+  }
+  protected override willUpdate() {
+    if (this.sort === "recommended" && !this.matchingCharts().some((row) => this.recommendation(row) !== undefined))
+      this.sort = "new";
   }
   private async load() {
     this.controller?.abort();
@@ -287,6 +295,7 @@ export class CommunityCharts extends LitElement {
   }
   private renderChart(row: CommunityChartItem) {
     const title = `${row.title} — ${row.difficulty.toUpperCase()} ${row.level}`;
+    const back = entityReturnHref() || communityChartPath(this.server, this.locale, row.id);
     return html`
       <section
         class="chart-page"
@@ -294,8 +303,8 @@ export class CommunityCharts extends LitElement {
         ${appBarTakeover({
           title,
           backLabel: clientText(this.locale, "common.actions.back"),
-          onBack: () =>
-            void navigateDetailPage(entityReturnHref() || communityChartPath(this.server, this.locale, row.id)),
+          backHref: back,
+          onBack: () => void navigateDetailPage(back),
           actions: chartPageActions({
             locale: this.locale,
             mode: this.chartMode,
@@ -336,10 +345,8 @@ export class CommunityCharts extends LitElement {
       : undefined;
   }
   private recommendedLevel(row: CommunityChartItem) {
-    return (
-      this.recommendation(row)?.toLocaleString(this.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) ??
-      "—"
-    );
+    const recommendation = this.recommendation(row);
+    return recommendation === undefined ? "—" : `≈${recommendation.toLocaleString(this.locale, { maximumFractionDigits: 0 })}`;
   }
   private chartBadge(row: CommunityChartItem, recommendation = false) {
     const label = `${this.t("recommendedLevel")} ${this.recommendedLevel(row)}`;
@@ -408,6 +415,7 @@ export class CommunityCharts extends LitElement {
         ${appBarTakeover({
           title: row.title,
           backLabel: c("common.actions.back"),
+          backHref: back,
           onBack: () => location.assign(back),
           actions,
         })}
@@ -654,6 +662,17 @@ export class CommunityCharts extends LitElement {
       </div>
     `;
   }
+  private matchingCharts() {
+    const q = this.query.normalize("NFKC").trim().toLocaleLowerCase();
+    return this.items.filter(
+      (row) =>
+        `${row.title} ${row.artist} ${row.charter} ${row.ownerName}`
+          .normalize("NFKC")
+          .toLocaleLowerCase()
+          .includes(q) &&
+        (!this.difficulties.length || this.difficulties.includes(row.difficulty)),
+    );
+  }
   render() {
     const c = (key: string) => clientText(this.locale, key);
     if (this.chartId)
@@ -666,23 +685,15 @@ export class CommunityCharts extends LitElement {
               ? this.renderChart(this.selected)
               : this.detail(this.selected)
             : nothing;
-    const q = this.query.normalize("NFKC").trim().toLocaleLowerCase();
-    const rows = this.items
-      .filter(
-        (row) =>
-          `${row.title} ${row.artist} ${row.charter} ${row.ownerName}`
-            .normalize("NFKC")
-            .toLocaleLowerCase()
-            .includes(q) &&
-          (!this.difficulties.length || this.difficulties.includes(row.difficulty)),
-      )
-      .sort((a, b) =>
-        this.sort === "recommended"
-          ? (this.recommendation(a) ?? Infinity) - (this.recommendation(b) ?? Infinity) || b.updatedAt - a.updatedAt
-          : this.sort === "popular"
-            ? b.likeCount - a.likeCount || b.updatedAt - a.updatedAt
-            : b.updatedAt - a.updatedAt,
-      );
+    const rows = this.matchingCharts();
+    const hasRecommendation = rows.some((row) => this.recommendation(row) !== undefined);
+    rows.sort((a, b) =>
+      this.sort === "recommended"
+        ? (this.recommendation(a) ?? Infinity) - (this.recommendation(b) ?? Infinity) || b.updatedAt - a.updatedAt
+        : this.sort === "popular"
+          ? b.likeCount - a.likeCount || b.updatedAt - a.updatedAt
+          : b.updatedAt - a.updatedAt,
+    );
     const href = (r: CommunityChartItem) => communityChartPath(this.server, this.locale, r.id);
     const subtitle = (r: CommunityChartItem) => `${r.artist || r.ownerName} · ${r.charter || r.ownerName}`;
     const results =
@@ -830,7 +841,7 @@ export class CommunityCharts extends LitElement {
               >
                 <option value="new">${this.t("newest")}</option>
                 <option value="popular">${this.t("popular")}</option>
-                <option value="recommended">${this.t("recommendedLevel")}</option>
+                <option value="recommended" ?disabled=${!hasRecommendation}>${this.t("recommendedLevel")}</option>
               </select>
             </span>
           </label>

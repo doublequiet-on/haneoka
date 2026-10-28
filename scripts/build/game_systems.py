@@ -490,17 +490,21 @@ def _event_mission(
     data: Any, documents: dict[str, Any], resource_types: dict[int, str],
     row: dict[str, Any], rewards: dict[int, dict[str, Any]],
 ) -> dict[str, Any]:
+    projected_rewards = []
+    for reward_id in row.get("_missionRewardIds", []):
+        identity = _number({"value": reward_id}, "value")
+        linked = rewards.get(identity)
+        if linked:
+            projected_rewards.append(_event_resource(data, documents, resource_types, "MasterEventMission", row, linked))
+        else:
+            projected_rewards.append({"rewardId": identity, "unresolvedRewardId": identity})
     return {
         "sourceTable": "MasterEventMission",
         "sourceId": _number(row, "_id"),
         "raw": row,
         "id": f"event-mission-{_number(row, '_id')}",
         "description": _mission_description(data, row, documents, _number(row, "_missionCategory")),
-        "rewards": [
-            _event_resource(data, documents, resource_types, "MasterEventMission", row, rewards[int(reward_id)])
-            for reward_id in row.get("_missionRewardIds", [])
-            if int(reward_id) in rewards
-        ],
+        "rewards": projected_rewards,
     }
 
 
@@ -521,7 +525,9 @@ def _event_support(
         if _number(row, "_id")
     }
     mission_rewards = {
-        _number(row, "_id"): row for row in data.rows("MasterMissionReward")
+        _number(row, "_id"): row
+        for row in data.rows("MasterMissionReward")
+        if _number(row, "_id")
     }
 
     def belongs(table: str, row: dict[str, Any]) -> bool:
@@ -1774,9 +1780,9 @@ def _missions(
             group_category = _number(group or {}, "_missionCategory")
             category = _number(row, "_missionCategory") if "_missionCategory" in row else group_category
             prizes = [
-                rewards[int(value)]
+                rewards[int(value)] if int(value) in rewards else {"unresolvedRewardId": int(value)}
                 for value in row.get("_missionRewardIds", [])
-                if int(value) in rewards
+                if int(value) in rewards or kind == "event-mission"
             ]
             title = _mission_description(data, row, documents, category)
             entries[f"{kind}-{identity}"] = _entry(
@@ -1785,7 +1791,7 @@ def _missions(
                 kind=kind,
                 image=_asset(data, group.get("_bannerAsset"))
                 if group
-                else (prizes[0]["image"] if prizes else ""),
+                else (prizes[0].get("image", "") if prizes else ""),
                 start_at=_mission_window(row, group or {}, "_startAt", stamp),
                 end_at=_mission_window(row, group or {}, "_endAt", stamp),
                 group=data.text(group.get("_nameTextID")) if group else [],
@@ -1942,14 +1948,15 @@ def build_game_systems(
     stamp: Callable[[Any], list[int | None]],
 ) -> dict[str, dict[str, Any]]:
     gacha = _gacha(data, documents, resource_types, stamp)
+    exchange = _exchange(data, documents, resource_types, stamp)
     base = {
-        "events": _events(data, {**documents, "gacha": gacha}, resource_types, stamp),
+        "events": _events(data, {**documents, "gacha": gacha, "exchange": exchange}, resource_types, stamp),
         "real-lives": _real_lives(data, documents, stamp),
         "home-banners": _home_banners(data, stamp),
         "gacha": gacha,
         "login-campaigns": _login(data, documents, resource_types, stamp),
         "shop": _shop(data, documents, resource_types, stamp),
-        "exchange": _exchange(data, documents, resource_types, stamp),
+        "exchange": exchange,
         "circle": _circle(data, documents, resource_types, stamp),
         "challenge": _challenge(data, documents, stamp),
     }
