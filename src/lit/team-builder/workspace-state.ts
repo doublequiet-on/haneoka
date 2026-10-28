@@ -56,7 +56,7 @@ export function farmingConditions(draft: FarmingSettings): FarmingSettings {
 }
 export function farmingMode(draft: FarmingSettings): "recommendation" | "event" {
   const s = farmingConditions(draft);
-  return !s.rewardPlan && (s.play === "solo" || s.play === "gekiso") && s.playMode === "ap" && s.requireGrowth && !s.includeMemory &&
+  return s.aggregation !== "mean" && !s.rewardPlan && (s.play === "solo" || s.play === "gekiso") && s.playMode === "ap" && s.requireGrowth && !s.includeMemory &&
     s.measure !== "challenge-points" && !s.weighted && !s.fullRanking && s.k === 1 && s.timeLimit === null ? "recommendation" : "event";
 }
 export function farmingSettings(settings: BuildSettings): BuildSettings {
@@ -65,10 +65,11 @@ export function farmingSettings(settings: BuildSettings): BuildSettings {
     : settings.farming;
   const s = farmingConditions(draft);
   const mode = farmingMode(s);
-  const rewardPlan = settings.manualEventEnabled && s.rewardPlan
-    ? { ...s.rewardPlan, options: { ...s.rewardPlan.options,
-        "challenge-points": { ...s.rewardPlan.options["challenge-points"], auto: false } } }
-    : s.rewardPlan;
+  const selectedPlan = s.rewardPlan ?? (s.aggregation === "mean" && s.ptCycle ? legacyRewardPlan(s) : null);
+  const rewardPlan = settings.manualEventEnabled && selectedPlan
+    ? { ...selectedPlan, options: { ...selectedPlan.options,
+        "challenge-points": { ...selectedPlan.options["challenge-points"], auto: false } } }
+    : selectedPlan;
   return { ...settings, ...s, rewardPlan, rewardMode: mode, goal: "event",
     farming: draft,
     eventId: settings.manualEventEnabled ? settings.manualEvent.templateId : settings.eventId,

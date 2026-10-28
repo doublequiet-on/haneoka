@@ -995,8 +995,8 @@ export function renderHit(
             <div class="surface stack">
               ${part.song ? resultSong(host, part.song) : nothing}
               <div class="row row--between row--wrap">
-                <span class="supporting-text">${host.t("expectedScore", "Average score")}</span>
-                <strong class="tabular">${format(host, part.score?.mean ?? 0)}</strong>
+                <span class="supporting-text">${resultMetric(host, part, resultSettings(host)).label}</span>
+                <strong class="tabular">${format(host, resultMetric(host, part, resultSettings(host)).value, resultMetric(host, part, resultSettings(host)).digits)}</strong>
               </div>
               <div class="cluster">${chips(host, part, true)}</div>
             </div>

@@ -2944,7 +2944,11 @@
         "scoreDetails": "逐曲表现",
         "meanPower": "平均综合力"
       },
-      "songRules": "歌曲规则"
+      "songRules": "歌曲规则",
+      "multiSong": {
+        "mean": "多曲平均最优",
+        "average": "平均{metric}"
+      }
     },
     "calendar": {
       "title": "日历",

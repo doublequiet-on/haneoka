@@ -2,7 +2,7 @@ import { farmingMode } from "./workspace-state";
 import { enableManualEvent, renderManualEvent } from "./manual-event";
 import { toolLayout } from "./tool-layout";
 import { songMissions } from "../../lib/catalog-filters";
-import { songRulesControl } from "./song-rules";
+import { multiSongControl, songRulesControl } from "./song-rules";
 import { arenaSongView } from "../../lib/team-builder/arena";
 import { boostControl } from "./boost-control";
 /** Team search: goal, songs, play, candidates and constraints; results beside them. */
@@ -735,6 +735,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                     ? html`
                         <md-outlined-select
                           label=${host.t("criterion", "Score goal")}
+                          ?disabled=${s.aggregation === "mean"}
                           .value=${scoreGoal(s)}
                           @change=${(e: Event) => {
                             const value = (e.target as HTMLInputElement).value as keyof typeof SCORE_GOALS;
@@ -872,7 +873,8 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
               <section class="surface stack">
                 ${sectionHeading({ icon: "library_music", label: challenge ? host.t("planChallengeSongs", "Challenge songs") : s.goal === "plan" ? host.t("planNormalSongs", "Normal-live songs") : host.t("songs", "Songs"), count: s.songs.length || undefined })}
                 ${songList(host, s.goal === "power" ? s.songs : host.settings.songs, (songs) => set({ songs }), s.goal === "power", allowedSongIds)}
-                ${songRulesControl(host)}
+                ${multiSongControl(host)}
+              ${songRulesControl(host)}
               </section>
             `
           : nothing

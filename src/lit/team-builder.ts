@@ -944,6 +944,7 @@ export class TeamBuilder extends LitElement {
           : availableSongs;
     return {
       ...settings,
+      ...(settings.aggregation === "mean" && (goal === "score" || goal === "gekiso") ? { criterion: "mean" as const, scoreTarget: "none" as const, gekisoPlacementMode: "rank" as const } : {}),
       minComboBonus: this.hasComboSongs(songs) ? settings.minComboBonus : 1,
       just: this.hasMission("JustCount", songs) ? settings.just : 100,
       ptJust: this.hasMission("JustCount", songs) ? settings.ptJust : 100,
@@ -1171,7 +1172,8 @@ export class TeamBuilder extends LitElement {
                 },
               }
             : {}),
-          ranking: s.fullRanking ? undefined : "primary",
+          ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
+          ranking: s.ptMode === "gekiso" && s.route === "live" ? "pt-only" : s.fullRanking ? undefined : "primary",
           route: s.route,
           eventId: s.eventId,
           songs: s.route === "skip" ? [] : s.songs,
@@ -1218,6 +1220,7 @@ export class TeamBuilder extends LitElement {
             .map((row) => `${kind}${row.cardId}`);
     return {
       songRules: this.songRules(goal),
+      ...(s.aggregation === "mean" && this.tab !== "arena" && (goal.kind === "score" || goal.kind === "gekiso" || (goal.kind === "event" && goal.route !== "skip")) ? { aggregation: "mean" as const } : {}),
       members: cards.members,
       snaps: cards.snaps,
       player:

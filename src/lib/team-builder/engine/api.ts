@@ -144,6 +144,7 @@ export type Goal =
     };
 export type RewardFloor = [number, number, number];
 export interface EngineRequest {
+  aggregation?: "mean";
   songRules?: import("../arena").SongRules;
   resolveRewardPlan?: boolean;
   members: MemberInput[];
@@ -447,6 +448,7 @@ export const GEKISO_CLOSED_FORM_MARGIN = 3e-5;
 
 export async function runEngine(master: EngineMaster, charts: ChartCache, request: EngineRequest, onProgress?: (done: number, total: number) => void, onSnapshot?: (snapshot: EngineSnapshot) => void): Promise<EngineResponse> {
   if (request.songRules) throw new Error("song-rules-native-required");
+  if (request.aggregation === "mean") throw new Error("shared-native-required");
   if (request.goal.kind === "gekiso" && request.goal.arena) throw new Error("arena-native-required");
   if (request.goal.kind === "event" && request.goal.rewardPlan) throw new Error("reward-plan-native-required");
   const started = performance.now();

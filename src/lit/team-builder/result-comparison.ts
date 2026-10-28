@@ -98,6 +98,7 @@ function entry(
       goal,
       input.player,
       input.songRules,
+      input.aggregation,
       input.unknownPolicy,
       result.placements,
       settings.route,

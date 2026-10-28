@@ -2944,7 +2944,11 @@
         "scoreDetails": "곡별 점수",
         "meanPower": "평균 종합력"
       },
-      "songRules": "곡 규칙"
+      "songRules": "곡 규칙",
+      "multiSong": {
+        "mean": "전체 곡 평균 최적 편성",
+        "average": "평균 {metric}"
+      }
     },
     "calendar": {
       "title": "달력",

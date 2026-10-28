@@ -2944,7 +2944,11 @@
         "scoreDetails": "Scores by song",
         "meanPower": "Average power"
       },
-      "songRules": "Song rules"
+      "songRules": "Song rules",
+      "multiSong": {
+        "mean": "Best average across songs",
+        "average": "Average {metric}"
+      }
     },
     "calendar": {
       "title": "Calendar",

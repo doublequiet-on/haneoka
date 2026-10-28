@@ -5,7 +5,7 @@ import { live } from "lit/directives/live.js";
 import "@material/web/progress/linear-progress.js";
 import type { TeamBuilder } from "../team-builder";
 import type { EngineRequest } from "../../lib/team-builder/engine/api";
-import { songRulesControl } from "./song-rules";
+import { multiSongControl, songRulesControl } from "./song-rules";
 import { validatePtRequest, type PtIssue } from "../../lib/team-builder/engine/pt-eligibility";
 import {
   canonical,
@@ -507,6 +507,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                   s.route === "challenge" ? challengeSongs : catalog.normalEventSongIds(s.manualEventEnabled ? null : s.eventId),
                 ),
               )}
+              ${multiSongControl(host)}
               ${songRulesControl(host)}
               ${
                 autoCp

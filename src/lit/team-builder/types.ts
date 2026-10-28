@@ -6,6 +6,7 @@ import { emptyManualEvent, type ManualEventDraft } from "../../lib/team-builder/
 export type Tab = "build" | "arena" | "box" | "account" | "teams" | "pt" | "song-comparison";
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
 export interface BuildSettings {
+  aggregation: "individual" | "mean";
   songRules?: import("../../lib/team-builder/arena").SongRules;
   arena?: ArenaGoal;
   rewardMode: "recommendation" | "event" | "plan";
@@ -74,13 +75,14 @@ export interface BuildSettings {
   gekisoOpponents: [string, string, string];
 }
 export interface FarmingSettings extends Pick<BuildSettings,
-  "playMode" | "great" | "good" | "miss" | "missEvery" | "measure" | "weighted" |
+  "aggregation" | "playMode" | "great" | "good" | "miss" | "missEvery" | "measure" | "weighted" |
   "weightPoints" | "weightItems" | "weightCp" | "rewardPlan" | "unknownPolicy" | "fullRanking" | "k" | "timeLimit" | "ptCycle"> {
   play: "solo" | "gekiso" | "challenge" | "skip";
   requireGrowth: boolean;
   includeMemory: boolean;
 }
 export const DEFAULT_FARMING: FarmingSettings = {
+  aggregation: "individual",
   play: "solo", playMode: "ap", great: 3, good: 0, miss: 0, missEvery: 0,
   measure: "points", weighted: false, weightPoints: 1, weightItems: 0, weightCp: 0,
   rewardPlan: null,
@@ -88,6 +90,7 @@ export const DEFAULT_FARMING: FarmingSettings = {
   fullRanking: false, k: 1, timeLimit: null, ptCycle: false,
 };
 export const DEFAULT_SETTINGS: BuildSettings = {
+  aggregation: "individual",
   rewardMode: "recommendation",
   farming: DEFAULT_FARMING,
   manualScoreMode: "score",

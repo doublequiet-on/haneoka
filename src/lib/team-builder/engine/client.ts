@@ -434,7 +434,13 @@ export class EngineClient {
     const work = async (): Promise<EngineResponse> => {
       if (!remaining(deadline)) { stop("budget"); return latest; }
       if (completeResponse(latest)) return latest;
-      if (request.goal.kind === "gekiso" && request.goal.arena?.mode === "shared") {
+      if (request.goal.kind === "event" && request.goal.rewardPlan?.autoCp) {
+        const resolved = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, resolveRewardPlan: true } });
+        if (stopped) return latest;
+        if (!resolved.resolvedRewardPlan) return { ...latest, stopReason: resolved.stopReason ?? "budget" };
+        request = { ...request, goal: { ...request.goal, rewardPlan: resolved.resolvedRewardPlan } };
+      }
+      if ((request.aggregation === "mean" && (request.goal.kind === "score" || request.goal.kind === "event" || request.goal.kind === "gekiso")) || (request.goal.kind === "gekiso" && request.goal.arena?.mode === "shared")) {
         const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
         const count = request.constraints.leader !== null ? 1 : Math.min(this.pool.length, memory <= 4 ? 1 : 2);
         const workers = this.pool.slice(0, count);
@@ -458,12 +464,6 @@ export class EngineClient {
           }),
         );
         return merged();
-      }
-      if (request.goal.kind === "event" && request.goal.rewardPlan?.autoCp) {
-        const resolved = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, resolveRewardPlan: true } });
-        if (stopped) return latest;
-        if (!resolved.resolvedRewardPlan) return { ...latest, stopReason: resolved.stopReason ?? "budget" };
-        request = { ...request, goal: { ...request.goal, rewardPlan: resolved.resolvedRewardPlan } };
       }
       // Plan shards keep their tuple bounds and lottery state throughout the proof.
       if (request.goal.kind === "event" && request.goal.rewardPlan && request.goal.gekiso)

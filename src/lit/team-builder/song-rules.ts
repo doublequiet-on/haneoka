@@ -1,11 +1,12 @@
 // L3 — GEB
-// Input: Song-rule drafts and the current calculation mode.
-// Output: Shared attribute and three-range overrides for every team-building task.
+// Input: Song-rule drafts, multi-song objective and the current calculation mode.
+// Output: Shared attribute, three-range overrides and multi-song objective controls.
 // Pos: [Map](../L2-2.md); common controls used by Arena, automatic and manual builders.
 // Effects/Dependencies: Saves through the owning controller; uses shared Material selects and accordion.
 import { html, nothing } from "lit";
 import type { TeamBuilder } from "../team-builder";
 import { ORIGINAL_SONG_RULES, type SongRules } from "../../lib/team-builder/arena";
+import { segmented } from "../ui/controls";
 import { accordion } from "../ui/accordion";
 
 export function songRuleFields(
@@ -81,5 +82,21 @@ export function songRulesControl(
     content: html`
       <div class="stack">${songRuleFields(host, rule, (patch) => save({ ...rule, ...patch }), gekiso)}</div>
     `,
+  });
+}
+
+export function multiSongControl(host: TeamBuilder) {
+  const s = host.searchSettings;
+  if (!["score", "gekiso", "event"].includes(s.goal) || (s.goal === "event" && s.route === "skip")) return nothing;
+  return segmented({
+    label: host.t("arena.objective", "Team objective"),
+    value: s.aggregation,
+    options: [
+      { value: "individual", label: host.t("arena.individual", "A team for each song") },
+      { value: "mean", label: host.t("multiSong.mean", "Best average across songs") },
+    ],
+    onSelect: value => host.tab === "pt"
+      ? host.updateFarming({ aggregation: value as "individual" | "mean" })
+      : host.updateSettings({ aggregation: value as "individual" | "mean" }),
   });
 }
