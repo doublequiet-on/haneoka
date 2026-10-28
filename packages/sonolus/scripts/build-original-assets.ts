@@ -36,6 +36,8 @@ import { validateSonolusInputProvenance } from "../src/server/sonolusProvenance.
 import { buildConnectWallDrawAssets } from "./connect-wall-draw-assets.ts";
 import { buildConnectFrameDrawAssets } from "./connect-frame-draw-assets.ts";
 import { buildNativeRowSliceAssets } from "./native-row-slice-assets.ts";
+import { buildNativeLoopFrameAssets } from "./native-loop-frame-assets.ts";
+import { LOOP_FRAME_EFFECTS } from "../../../.dependencies/sonolus-our-notes/shared/src/engine/data/loopFrameContract.ts";
 import { NATIVE_PARTICLE_OPTIONAL_DRAW_CAPABILITIES } from "../src/shared/nativeDrawCapabilities.ts";
 
 type JsonValue =
@@ -191,6 +193,10 @@ if (
           wallMaterial: connectWallMaterialInput(),
           nativeRowsProducerSha256: createHash("sha256")
             .update(readFileSync(resolve(root, "packages/sonolus/scripts/native-row-slice-assets.ts")))
+            .digest("hex"),
+          loopFrameProducerSha256: createHash("sha256")
+            .update(readFileSync(resolve(root, "packages/sonolus/scripts/native-loop-frame-assets.ts")))
+            .update(readFileSync(resolve(engineRoot, "shared/src/engine/data/loopFrameContract.ts")))
             .digest("hex"),
         }),
   );
@@ -423,6 +429,9 @@ try {
 
   const rows = buildNativeRowSliceAssets(out);
   console.log(`Simple row slices: ${rows.mergedTriples} triples merged, unchanged atlas dimensions`);
+  const loopFrames = buildNativeLoopFrameAssets(out);
+  console.log(`Slide loop frames: ${loopFrames.length} single-cycle effects`);
+  const optionalLoopFrames = new Set<string>(Object.values(LOOP_FRAME_EFFECTS));
 
   const referencedParticleNames = new Set<string>();
 
@@ -529,6 +538,7 @@ try {
         !absent.has(name) &&
         !available.has(name) &&
         !omitted.has(name) &&
+        !optionalLoopFrames.has(name) &&
         !optionalDrawCapabilities.has(name),
     );
     if (missing.length)

@@ -23,3 +23,10 @@ Song previews use the game's MusicScoreShort audio, resolved from
 `MasterLiveMusic._jingleSoundID` through its exact sound and cue-sheet records.
 Rebuild the resource catalog to publish `previewUrl`; levels without an available
 preview retain Sonolus's BGM preview behavior.
+
+Long-note frame effects retain one authored animation cycle when every cycle in
+the baked timeline matches. The engine loops that short effect while the legacy
+timeline remains available to older engines. Sprites, particle channels, and
+draw order are preserved; the final particle cache includes this producer and
+its engine contract. Loop endpoints exclude the next cycle to prevent double
+drawing at the seam.
