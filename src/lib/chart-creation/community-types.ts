@@ -14,7 +14,7 @@ export interface CommunityChartAnalysis {
   firstBpm: number;
   minBpm: number;
   maxBpm: number;
-  difficultyEstimate: ChartDifficultyEstimate;
+  difficultyEstimate: ChartDifficultyEstimate | null;
 }
 
 export type ChartMediaRef =
@@ -82,7 +82,4 @@ export const emptyChartPublication = (): ChartPublication => ({
   remix: true,
 });
 export const chartLevelName = (id: string) => `haneoka-community-${id}`;
-export const communityChartPath = (server: string, locale: string, id = "") =>
-  `/${server}/${locale}/charts/${id ? `${encodeURIComponent(id)}/` : ""}`;
-export const communityChartPlayerPath = (server: string, locale: string, id: string) =>
-  `${communityChartPath(server, locale, id)}chart/`;
+export { communityChartPath, communityChartPlayerPath } from "../community-chart-route";

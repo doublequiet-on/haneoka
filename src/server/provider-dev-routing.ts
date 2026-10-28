@@ -1,4 +1,5 @@
 import type { AstroIntegration } from "astro";
+import { communityChartShellPath, legacyCommunityChartRedirectTarget } from "../lib/community-chart-route";
 import fs from "node:fs";
 import path from "node:path";
 import { legacyProviderRedirectTarget, providerEntityFromUrl, providerEntityPhysicalPath } from "../lib/provider-entity-routing";
@@ -16,9 +17,12 @@ export function installProviderDevRouting(server: DevServer): void {
   server.middlewares.use((request, response, next) => {
     try {
       const url = new URL(request.url || "/", "http://localhost");
-      const chart = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/[0-9a-f-]{36}(?:\/chart)?\/?$/u.exec(url.pathname);
-      if (chart) request.url = `/${chart[1]}/${chart[2]}/charts/_/${url.search}`;
-      const legacy = legacyProviderRedirectTarget(url.pathname, url.search);
+      const chartShell = communityChartShellPath(url.pathname);
+      if (chartShell) {
+        request.headers["x-haneoka-chart-path"] = url.pathname;
+        request.url = `${chartShell}${url.search}`;
+      }
+      const legacy = legacyCommunityChartRedirectTarget(url.pathname, url.search) ?? legacyProviderRedirectTarget(url.pathname, url.search);
       if (legacy && (request.method === "GET" || request.method === "HEAD")) {
         response.writeHead(308, { Location: legacy, "Cache-Control": "public, max-age=86400" });
         response.end();

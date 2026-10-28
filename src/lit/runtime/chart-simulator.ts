@@ -2,7 +2,7 @@
 // Input: 正式 SS／SUS、社区 playback 或编辑器内存投影、音频及 release 身份。
 // Output: 共用 2D 概览、3D 观赏、播放控件与谱面图片下载。
 // Pos: [Map](L2-2.md)；歌曲、社区谱面和编辑器观看预览的共用宿主。
-// Effects/Dependencies: Cassiopeia、素材 HTTP、WebGL 和音频；切源与离开取消装载并释放运行资源。
+// Effects/Dependencies: Cassiopeia、素材 HTTP、WebGL 和音频；背景采用当前图集纯白 Sprite 近似，切源与离开取消装载并释放运行资源。
 import { PreparedResource } from "@haneoka/cassiopeia-host-web";
 import { LitElement, html, nothing } from "lit";
 import { NoColorSpace, TextureLoader, type Texture } from "three";
@@ -33,7 +33,6 @@ import {
   OUR_NOTES_NOTE_SE_GROUP_NAMES,
   OUR_NOTES_STAGE_NAMES,
   DEFAULT_RENDER_SETTINGS,
-  OUR_NOTES_LIGHTWEIGHT_BACKGROUND,
   buildOurNotesLightweightBackground,
   NativeIntroPlayback,
   TitleIntroductionPresentation,
@@ -384,6 +383,7 @@ export class ChartSimulator extends LitElement {
   private availableNoteSkins: readonly OurNotesNoteSkin[] = OUR_NOTES_NOTE_SKINS;
   private availableNoteEffectSkins: readonly OurNotesNoteEffectSkin[] = ["effect001"];
   private sourceFilesCache?: { key: string; promise: Promise<Set<string>> };
+  private backgroundLiveAtlas?: { server: string; release: string | undefined; descriptor: RuntimeDescriptor };
   private resumeAfterScrub = false;
   private viewportFullscreen: ViewportFullscreenController;
   private transportVisibility = new PlaybackControlsController((snapshot) => {
@@ -555,12 +555,14 @@ export class ChartSimulator extends LitElement {
     const matches = (descriptor.outputs || []).filter(
       (entry) => entry.type === type && (!name || logicalName(entry) === name),
     );
-    if (matches.length !== 1) throw new Error(`Missing ${type} ${name || ""}`);
+    if (matches.length !== 1) throw new Error(`${matches.length ? "Ambiguous" : "Missing"} ${type} ${name || ""}`);
     return this.pinResourceUrl(
       `/runtime/${encodeURIComponent(this.server)}/${matches[0]!.path.replace(/^runtime\//u, "")}`,
     );
   }
   private async runtimeAssets(signal: AbortSignal) {
+    const server = this.server;
+    const release = this.sourceRelease();
     const files = await this.sourceFiles(signal);
     signal.throwIfAborted();
     const source = (name: string) => this.sourceWithName(files, name);
@@ -583,6 +585,8 @@ export class ChartSimulator extends LitElement {
         : Promise.resolve(undefined),
     ]);
     signal.throwIfAborted();
+    if (server !== this.server || release !== this.sourceRelease()) throw new Error("Chart resource identity changed");
+    this.backgroundLiveAtlas = { server, release, descriptor: live };
     const root = `/assets/${encodeURIComponent(this.server)}`;
     const assetUrl = (path: string) =>
       this.pinResourceUrl(`${root}/${path.split("/").map(encodeURIComponent).join("/")}`);
@@ -937,15 +941,17 @@ export class ChartSimulator extends LitElement {
       if (!stageUrl) {
         this.renderer?.setBackgroundCanvas(undefined);
       } else {
+        const atlas = this.backgroundLiveAtlas;
+        if (!atlas || atlas.server !== this.server || atlas.release !== this.sourceRelease())
+          throw new Error("Missing current background LiveAtlas descriptor");
         const jacketUrl = this.introContent?.jacketUrl;
         const [stage, jacket, baseWhite] = await Promise.all([
           loadBackgroundPixels(stageUrl),
           jacketUrl ? loadBackgroundPixels(this.mediaUrl(jacketUrl)) : undefined,
-          loadBackgroundPixels(
-            this.pinResourceUrl(OUR_NOTES_LIGHTWEIGHT_BACKGROUND.baseWhitePath.replace("{server}", this.server)),
-          ),
+          loadBackgroundPixels(this.output(atlas.descriptor, "Sprite", "live_game_white.png")),
         ]);
-        if (revision !== this.backgroundRevision) return;
+        if (baseWhite.rgba.some((channel) => channel !== 255)) throw new Error("Background white Sprite is not opaque white");
+        if (revision !== this.backgroundRevision || atlas.server !== this.server || atlas.release !== this.sourceRelease()) return;
         const composite = buildOurNotesLightweightBackground({ stage, jacket, baseWhite });
         this.renderer?.setBackgroundCanvas(backgroundPixelsCanvas(composite), 0);
       }
@@ -2150,6 +2156,8 @@ export class ChartSimulator extends LitElement {
     }
   }
   private dispose() {
+    ++this.backgroundRevision;
+    this.backgroundLiveAtlas = undefined;
     ++this.liveModeRevision;
     this.gekisouStage = undefined;
     this.gekisouStageSource = undefined;

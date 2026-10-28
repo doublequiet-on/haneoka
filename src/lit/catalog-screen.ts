@@ -217,6 +217,8 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
   effectsByLevel: "catalog.cards.fields.effectsByLevel",
   empty: "common.states.empty",
   error: "common.states.error",
+  eventBanner: "catalog.events.banner",
+  eventLogo: "catalog.events.logo",
   events: "navigation.events",
   exchange: "navigation.exchange",
   favoriteFood: "catalog.characters.fields.favoriteFood",

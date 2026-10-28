@@ -159,6 +159,9 @@
   margin: 0 auto;
   padding: 16px var(--pane-gutter) 32px;
 }
+.page--embedded {
+  min-height: 0;
+}
 .page--compact {
   max-width: 920px;
 }

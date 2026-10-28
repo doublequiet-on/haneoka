@@ -1,5 +1,6 @@
 import { canonicalEntityTarget, type CommunityEntityTarget } from "./community-entity-guard";
 import { communitySonolusRows } from "./community-charts";
+import { communityChartPath } from "../src/lib/community-chart-route";
 
 type Server = "jp" | "intl";
 type Locale = "ja" | "en" | "zh-TW" | "zh-CN" | "ko";
@@ -321,7 +322,8 @@ export function createCommunityEntityResolver(readCatalog: CommunityEntityCatalo
       const row = (await communitySonolusRows(env, `haneoka-community-${target.originalId}`))[0];
       if (!row || (context.discovery && row.visibility !== "public")) return null;
       const locale = context.locale ?? "en";
-      return { type: target.entityType, originalId: row.id, titles: Object.fromEntries(LOCALES.map(locale => [locale, row.title])), availability: { jp: "present", intl: "present" }, locators: { jp: { routeKind: "charts", routeId: row.id, detailPath: `/jp/${locale}/charts/${row.id}/` }, intl: { routeKind: "charts", routeId: row.id, detailPath: `/intl/${locale}/charts/${row.id}/` } } };
+      const detailPath = communityChartPath("", locale, row.id);
+      return { type: target.entityType, originalId: row.id, titles: Object.fromEntries(LOCALES.map(locale => [locale, row.title])), availability: { jp: "present", intl: "present" }, locators: { jp: { routeKind: "charts", routeId: row.id, detailPath }, intl: { routeKind: "charts", routeId: row.id, detailPath } } };
     }
     if (requestEnv !== undefined && requestEnv !== env) throw new Error("entity-catalog-request-env-changed");
     requestEnv = env;

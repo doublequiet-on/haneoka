@@ -13,6 +13,7 @@ export interface AppBarTakeover {
   title: string;
   titleLanguage?: string;
   backLabel: string;
+  backHref?: string;
   onBack: () => void;
   /** Marks after the title: rarity, chapter, difficulty. */
   identity?: TemplateResult | typeof nothing;
@@ -107,6 +108,7 @@ class TakeoverDirective extends AsyncDirective {
       };
     }
     const saved = this.saved;
+    saved.back.href = options.backHref ?? location.pathname + location.search;
     saved.back.setAttribute("aria-label", options.backLabel);
     for (const back of leading.querySelectorAll<HTMLElement>("[data-entity-back]"))
       if (back !== saved.back && !back.hidden) {

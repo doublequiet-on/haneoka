@@ -2,7 +2,7 @@
 // Input: 社区谱面 HTTP、账户、D1、R2 和受信服务器素材解析。
 // Output: 私有草稿、不可变版本、发布列表、只读播放数据、服务端统计／推荐难度、素材与 Sonolus 关卡投影。
 // Pos: [Map](L2.md)；社区谱面持久化、发布及访问控制所有者。
-// Effects/Dependencies: 认证／限流、D1 原子 CAS、R2 上传和谱面编译；公开读取逐次检查发布与素材状态。
+// Effects/Dependencies: 认证／限流、D1 原子 CAS、R2 上传和谱面编译；公开读取检查发布与素材状态，模型升级期间保留旧版基础统计。
 import { getAuthSession } from "./auth";
 import { communityAccessState } from "./access";
 import { withPrimaryD1 } from "./d1-session";
@@ -27,6 +27,8 @@ import { preserveChartMedia, chartMediaSnapshot, type ChartMediaResolver } from 
 const PREFIX = "/api/v1/community/charts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MAX_AUDIO = 64 * 1024 * 1024;
+const LEGACY_ANALYSIS_VERSIONS = ["ournotes-fc-threshold-v6:community-native-v1", "ournotes-fc-threshold-v6:community-native-v2"];
+const TRANSITION_ANALYSIS_VERSION = "ournotes-fc-threshold-v6:community-native-v3";
 type RecordValue = Record<string, unknown>;
 type Resolver = ChartMediaResolver;
 interface Row {
@@ -60,6 +62,8 @@ interface Row {
   likeCount: number;
   liked: number;
   analysisJson: string | null;
+  legacyAnalysisJson: string | null;
+  analysisCreatedAt: number | null;
 }
 const activeOwner = `EXISTS (SELECT 1 FROM community_profile p WHERE p.user_id = c.owner_id AND p.status = 'active')
  AND NOT EXISTS (SELECT 1 FROM community_entity_thread et JOIN community_post discussion ON discussion.id = et.post_id WHERE et.entity_type = 'community-charts' AND et.original_id = c.id AND (discussion.status <> 'published' OR discussion.moderation_status <> 'allow' OR discussion.deleted_at IS NOT NULL OR discussion.archived_at IS NOT NULL))`;
@@ -68,11 +72,13 @@ const columns = `c.id, c.owner_id AS ownerId, COALESCE(p.display_name, '') AS ow
  c.head, c.version, c.published_revision AS publishedRevision, c.visibility, c.updated_at AS updatedAt,
  r.revision, r.object_key AS objectKey, r.title, r.artist, r.charter, r.difficulty, r.level, r.summary,
  r.audio_json AS audioJson, r.cover_json AS coverJson, r.audio_url AS audioUrl, r.cover_url AS coverUrl,
- analysis.analysis_json AS analysisJson, r.remix, r.upstream_id AS upstreamId, r.created_at AS createdAt, r.published_at AS publishedAt,
+ analysis.analysis_json AS analysisJson, COALESCE(NULLIF(legacy_v2.analysis_json, 'null'), legacy_v1.analysis_json) AS legacyAnalysisJson, analysis.created_at AS analysisCreatedAt, r.remix, r.upstream_id AS upstreamId, r.created_at AS createdAt, r.published_at AS publishedAt,
  r.data_key AS dataKey, r.data_hash AS dataHash,
  (SELECT count(*) FROM community_chart_like l WHERE l.chart_id = c.id) AS likeCount,
  EXISTS (SELECT 1 FROM community_chart_like l WHERE l.chart_id = c.id AND l.user_id = ?1) AS liked`;
-const joined = `FROM community_chart c JOIN community_profile p ON p.user_id = c.owner_id JOIN community_identity identity ON identity.user_id = c.owner_id JOIN community_chart_revision r ON r.chart_id = c.id LEFT JOIN community_chart_analysis analysis ON analysis.chart_id = r.chart_id AND analysis.revision = r.revision AND analysis.model_version = '${COMMUNITY_CHART_ANALYSIS_VERSION}'`;
+const joined = `FROM community_chart c JOIN community_profile p ON p.user_id = c.owner_id JOIN community_identity identity ON identity.user_id = c.owner_id JOIN community_chart_revision r ON r.chart_id = c.id LEFT JOIN community_chart_analysis analysis ON analysis.chart_id = r.chart_id AND analysis.revision = r.revision AND analysis.model_version = '${COMMUNITY_CHART_ANALYSIS_VERSION}'
+ LEFT JOIN community_chart_analysis legacy_v1 ON legacy_v1.chart_id = r.chart_id AND legacy_v1.revision = r.revision AND legacy_v1.model_version = '${LEGACY_ANALYSIS_VERSIONS[0]}' AND '${COMMUNITY_CHART_ANALYSIS_VERSION}' = '${TRANSITION_ANALYSIS_VERSION}' AND r.published_at IS NOT NULL
+ LEFT JOIN community_chart_analysis legacy_v2 ON legacy_v2.chart_id = r.chart_id AND legacy_v2.revision = r.revision AND legacy_v2.model_version = '${LEGACY_ANALYSIS_VERSIONS[1]}' AND '${COMMUNITY_CHART_ANALYSIS_VERSION}' = '${TRANSITION_ANALYSIS_VERSION}' AND r.published_at IS NOT NULL`;
 const json = (request: Request, value: unknown, status = 200) =>
   new Response(request.method === "HEAD" ? null : JSON.stringify(value), {
     status,
@@ -150,6 +156,27 @@ async function writer(request: Request, env: Env) {
     throw new Error("rate_limit_exceeded");
   return user;
 }
+function chartAnalysis(row: Row): CommunityChartItem["analysis"] {
+  if (row.analysisJson && row.analysisJson !== "null") return JSON.parse(row.analysisJson);
+  if (!row.legacyAnalysisJson || row.legacyAnalysisJson === "null") return null;
+  const value: unknown = JSON.parse(row.legacyAnalysisJson);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const legacy = value as RecordValue;
+  if (typeof legacy.version !== "string" || !LEGACY_ANALYSIS_VERSIONS.includes(legacy.version) || !Number.isSafeInteger(legacy.n) || Number(legacy.n) < 0)
+    return null;
+  for (const key of ["time", "nps", "firstBpm", "minBpm", "maxBpm"])
+    if (typeof legacy[key] !== "number" || !Number.isFinite(legacy[key]) || Number(legacy[key]) < 0) return null;
+  return {
+    version: legacy.version,
+    n: legacy.n as number,
+    time: legacy.time as number,
+    nps: legacy.nps as number,
+    firstBpm: legacy.firstBpm as number,
+    minBpm: legacy.minBpm as number,
+    maxBpm: legacy.maxBpm as number,
+    difficultyEstimate: null,
+  };
+}
 const item = (r: Row, owner = ""): CommunityChartItem => ({
   id: r.id,
   title: r.title,
@@ -174,10 +201,11 @@ const item = (r: Row, owner = ""): CommunityChartItem => ({
   likeCount: r.likeCount,
   liked: !!r.liked,
   upstreamId: r.upstreamId,
-  analysis: r.analysisJson ? JSON.parse(r.analysisJson) : null,
+  analysis: chartAnalysis(r),
 });
 async function ensureAnalysis(env: Env, row: Row): Promise<void> {
-  if (row.analysisJson !== null) return;
+  if (row.analysisJson !== null && row.analysisJson !== "null") return;
+  if (row.analysisCreatedAt !== null && row.analysisCreatedAt > Date.now() - 60 * 60 * 1000) return;
   const object = await env.COMMUNITY_UPLOADS.get(row.objectKey);
   if (!object) return;
   const { project } = await object.json<{ project: Project }>();
@@ -193,10 +221,13 @@ async function ensureAnalysis(env: Env, row: Row): Promise<void> {
     );
   }
   row.analysisJson = JSON.stringify(analysis);
+  row.analysisCreatedAt = Date.now();
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO community_chart_analysis(chart_id,revision,model_version,analysis_json,created_at) VALUES(?,?,?,?,?)",
+    `INSERT INTO community_chart_analysis(chart_id,revision,model_version,analysis_json,created_at) VALUES(?,?,?,?,?)
+     ON CONFLICT(chart_id,revision,model_version) DO UPDATE SET analysis_json=excluded.analysis_json, created_at=excluded.created_at
+     WHERE community_chart_analysis.analysis_json = 'null'`,
   )
-    .bind(row.id, row.revision, COMMUNITY_CHART_ANALYSIS_VERSION, row.analysisJson, Date.now())
+    .bind(row.id, row.revision, COMMUNITY_CHART_ANALYSIS_VERSION, row.analysisJson, row.analysisCreatedAt)
     .run();
 }
 async function find(env: Env, id: string, owner = "", draft = false, revision?: number): Promise<Row | null> {
@@ -830,7 +861,10 @@ export async function communitySonolusRows(env: Env, name?: string) {
 }
 
 export async function cleanupCommunityCharts(env: Env) {
-  for (const row of (await communityChartRows(env)).filter((row) => row.analysisJson === null).slice(0, 5))
+  const retryBefore = Date.now() - 60 * 60 * 1000;
+  for (const row of (await communityChartRows(env))
+    .filter((row) => row.analysisJson === null || (row.analysisJson === "null" && (row.analysisCreatedAt ?? 0) <= retryBefore))
+    .sort((a, b) => (a.analysisCreatedAt ?? 0) - (b.analysisCreatedAt ?? 0)).slice(0, 5))
     await ensureAnalysis(env, row);
   const now = Date.now(),
     day = 24 * 60 * 60 * 1000;

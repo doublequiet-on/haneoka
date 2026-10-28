@@ -649,7 +649,7 @@ export class CharacterDetailArchive extends LitElement {
     const rewards = values(associations?.rewards).filter((row) => Number(row.rank) === rank);
     return html`
       <section class="detail-section character-rank-rewards">
-        ${this.sectionHeading(c.label("characterRankRewards", "Character rank rewards"), "rewards")}
+        ${this.sectionHeading(c.label("catalog.characters.fields.characterRankRewards", "Character rank rewards"), "rewards")}
         ${renderLevelSwitch(
           c.label("rank", "Rank"),
           ranks.map((row) => Number(row.rank)),

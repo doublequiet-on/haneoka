@@ -1,7 +1,6 @@
 ---
 import { staticBuildPaths } from "../../../../server/static-build";
 import CatalogEntityPage from "../../../../components/entities/CatalogEntityPage.astro";
-import CommunityChartEntityPage from "../../../../components/entities/CommunityChartEntityPage.astro";
 import CatalogSystemEntityPage from "../../../../components/entities/CatalogSystemEntityPage.astro";
 import HelpEntityPage from "../../../../components/entities/HelpEntityPage.astro";
 import Live2DEntityPage from "../../../../components/entities/Live2DEntityPage.astro";
@@ -37,7 +36,6 @@ type RouteProps = {
 export async function getStaticPaths() {
   const output: Array<{ params: Record<string, string>; props: RouteProps }> = [];
   for (const server of await staticCatalogPageServers(true)) {
-    for (const locale of LOCALES) output.push({ params: { server, locale, kind: "charts", id: "_" }, props: { server, locale, kind: "charts", page: null } });
     const [catalog, models, stories, help, skills] = await Promise.all([
       searchableCatalogPages(server),
       searchableModelPages(server),
@@ -151,7 +149,6 @@ const skillPage = page as SkillPage;
 {kind === "help" && (
   <HelpEntityPage topic={helpPage} locale={locale} server={server} canonical returnTo={returnTo} previous={previous} next={next} />
 )}
-{kind === "charts" && <CommunityChartEntityPage locale={locale} server={server} />}
 {kind === "stories" && (
   <StoryEntityPage page={storyPage} locale={locale} server={server} canonical returnTo={returnTo} previous={previous} next={next} />
 )}

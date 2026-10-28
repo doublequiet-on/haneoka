@@ -580,7 +580,8 @@ export class MissionWorkspace extends LitElement {
       );
   }
   private reward(reward: JsonRecord, server = this.server) {
-    const title = this.name(reward.name);
+    const title = this.name(reward.name) ||
+      (reward.unresolvedRewardId !== undefined ? this.text("rewardUnavailable", "Reward unavailable") : "");
     if (!title) return nothing;
     const image = this.image(reward);
     const count = Number(reward.count || 0);

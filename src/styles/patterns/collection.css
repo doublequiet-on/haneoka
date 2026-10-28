@@ -180,7 +180,7 @@
 }
 .tile__media-state {
   position: relative;
-  z-index: 2;
+  z-index: 0;
   display: none;
   grid-area: 1 / 1;
   place-items: center;
