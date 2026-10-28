@@ -42,7 +42,7 @@ export interface SongPickerState {
   maxSeconds?: number | null;
   allowedSongIds?: number[];
   allowedCharts?: SongRef[];
-  arenaRule?: ArenaRule;
+  songRules?: ArenaRule;
   title?: string;
   context?: string;
   initialized?: boolean;
@@ -56,7 +56,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   let state = host.songPicker!;
   const catalog = host.catalog!;
   const songView = (id: number) =>
-    state.arenaRule ? arenaSongView(catalog.song(id), state.arenaRule) : catalog.song(id);
+    state.songRules ? arenaSongView(catalog.song(id), state.songRules) : catalog.song(id);
   const context = state.context ?? `${host.tab}:${state.single ? "single" : "charts"}`;
   if (!state.initialized) {
     state = host.songPicker = {
@@ -382,7 +382,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
           label: host.common("catalog.fields.attribute", "Attribute"),
           value: state.attributes[0] == null ? "" : String(state.attributes[0]),
           allLabel: all,
-          options: (state.arenaRule ? [1, 2, 3, 4, 5, 99] : [1, 2, 3, 4, 5]).map((id) => ({ value: String(id), label: catalog.attributeName(id),
+          options: (state.songRules ? [1, 2, 3, 4, 5, 99] : [1, 2, 3, 4, 5]).map((id) => ({ value: String(id), label: catalog.attributeName(id),
           })),
           change: (value) => update({ attributes: value ? [Number(value)] : [] }),
         })}

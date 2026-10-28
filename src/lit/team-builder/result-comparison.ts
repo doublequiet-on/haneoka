@@ -97,6 +97,7 @@ function entry(
       hit.song,
       goal,
       input.player,
+      input.songRules,
       input.unknownPolicy,
       result.placements,
       settings.route,

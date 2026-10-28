@@ -3,6 +3,7 @@
 // Output: 固定激奏请求、最终结果校验、房间贡献指标与歌曲分组。
 // Pos: [Map](L2-2.md)；激奏选曲对比的输入和结果边界。
 // Effects/Dependencies: 复用 Box 最低档解析和房间门槛公式；不执行搜索或持久化。
+import { activeSongRules, readSongRules, type SongRules } from "./arena";
 import { roomRequiredScore } from "../chart-rates";
 import type { EngineHit, EngineRequest, EngineResponse, SongRef } from "./engine/api";
 import { resolveBox } from "./engine/box";
@@ -12,6 +13,7 @@ import type { TeamBuilderData } from "./data";
 import { engineInputs, type BoxView } from "./sync/box-view";
 
 export interface ComparisonSettings {
+  songRules?: SongRules;
   songs: SongRef[];
   target: "S" | "SS";
   players: number;
@@ -65,6 +67,7 @@ export function readComparisonSettings(value: unknown): ComparisonSettings {
       ...new Map(songs.map((song) => [chartKey(song), { songId: song.songId, difficulty: song.difficulty }])).values(),
     ],
     players,
+    songRules: readSongRules(saved.songRules),
     target: saved.target === "S" ? "S" : "SS",
     mode: saved.mode === "ap" || saved.mode === "custom" ? saved.mode : null,
     great: percent(saved.great) ? saved.great : null,
@@ -135,6 +138,7 @@ export function comparisonRequest(
   contextKey: string,
 ): EngineRequest {
   return {
+    songRules: activeSongRules(s.songRules,true),
     members: team.members,
     snaps: team.snaps,
     player: team.player,
@@ -173,12 +177,12 @@ export function availableOnServer(data: TeamBuilderData, collection: string, id:
     ? !!data.crossServer.availability[collection]?.[String(id)]?.includes(data.identity.server)
     : true;
 }
-export function chartIssue(master: EngineMaster, data: TeamBuilderData, song: SongRef, rank: number): string | null {
+export function chartIssue(master: EngineMaster, data: TeamBuilderData, song: SongRef, rank: number, rules?: SongRules): string | null {
   const row = master.songs.get(song.songId);
   if (!row || !availableOnServer(data, "songs", song.songId) || !["jp", "intl"].includes(data.identity.server))
     return "source";
   if (!row.difficulties.find((level) => level.difficulty === song.difficulty)?.file) return "chart";
-  const missions = row.gekisoMissions;
+  const missions = row.gekisoMissions.map((mission,index)=>rules?.missions[index] || mission);
   if (missions.length !== 3 || missions.some((mission) => ![1, 2, 3].includes(mission))) return "missions";
   const pattern = missionPattern(missions[0]!, missions[1]!, missions[2]!);
   if (

@@ -2943,7 +2943,8 @@
         "mean": "Average across songs",
         "scoreDetails": "Scores by song",
         "meanPower": "Average power"
-      }
+      },
+      "songRules": "Song rules"
     },
     "calendar": {
       "title": "Calendar",

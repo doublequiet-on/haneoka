@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Release-pinned Arena Master rows and a server timestamp.
-// Output: League schedules, effective song overrides and their next transition.
+// Output: League schedules, shared song overrides and their next transition.
 // Pos: [Map](L2-2.md); shared Arena rules for the workspace and calculation contract.
 // Effects/Dependencies: Pure projection; schedules remain owned by their source server.
 import { dataRows, nativeRow, objectRow, type TeamBuilderData } from "./data";
@@ -15,6 +15,20 @@ export const ARENA_MASTER_TABLES = {
 export interface ArenaRule {
   musicType: number;
   missions: [number, number, number];
+}
+export type SongRules = ArenaRule;
+export const ORIGINAL_SONG_RULES: SongRules = { musicType: 0, missions: [0, 0, 0] };
+export function readSongRules(value: unknown): SongRules {
+  const row = objectRow(value);
+  const musicType = Number(row.musicType);
+  const missions = Array.isArray(row.missions) ? row.missions : [];
+  return {musicType: [0,1,2,3,4,5,99].includes(musicType) ? musicType : 0,
+    missions: [0,1,2].map(index => [0,1,2,3].includes(Number(missions[index])) ? Number(missions[index]) : 0) as SongRules["missions"]};
+}
+export function activeSongRules(rule: SongRules | undefined, gekiso: boolean): SongRules | undefined {
+  if (!rule) return undefined;
+  const missions: SongRules["missions"] = gekiso ? [...rule.missions] : [0, 0, 0];
+  return rule.musicType || missions.some(Boolean) ? { musicType: rule.musicType, missions } : undefined;
 }
 export function arenaReleaseAt(row: Record<string, unknown>): number | null {
   const value = row.publishedAt ?? row.releasedAt;

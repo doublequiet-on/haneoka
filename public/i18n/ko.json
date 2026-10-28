@@ -2943,7 +2943,8 @@
         "mean": "전체 곡 평균 점수",
         "scoreDetails": "곡별 점수",
         "meanPower": "평균 종합력"
-      }
+      },
+      "songRules": "곡 규칙"
     },
     "calendar": {
       "title": "달력",

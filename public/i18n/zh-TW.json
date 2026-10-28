@@ -2943,7 +2943,8 @@
         "mean": "跨曲平均分",
         "scoreDetails": "各曲表現",
         "meanPower": "平均綜合力"
-      }
+      },
+      "songRules": "歌曲規則"
     },
     "calendar": {
       "title": "日曆",

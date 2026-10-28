@@ -10,6 +10,7 @@ import type { PlayModel } from "./live";
 import type { PlayerInput } from "./api";
 
 export type EvaluateRequest = {
+  songRules?: import("../arena").SongRules;
   members: MemberInput[];
   snaps: SnapInput[];
   player: PlayerInput;
@@ -22,6 +23,7 @@ export type EvaluateRequest = {
   event: { eventId: number; route: "live" | "challenge"; consumption: number; eventEffects?: readonly import("./master").EventEffectRow[] } | null;
 };
 export type ExplainRequest = {
+  songRules?: import("../arena").SongRules;
   arena?: import("./api").ArenaGoal;
   members: MemberInput[];
   snaps: SnapInput[];

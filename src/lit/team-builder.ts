@@ -65,6 +65,7 @@ import { PtController, renderPtTab } from "./team-builder/pt-tab";
 import { SongComparison } from "./team-builder/song-comparison";
 import { ArenaController, renderArenaTab } from "./team-builder/arena-tab";
 import { availableOnServer } from "../lib/team-builder/song-comparison";
+import { activeSongRules } from "../lib/team-builder/arena";
 import { arenaReleased } from "../lib/team-builder/arena";
 
 /** Message paths for this view's finite control/metadata identifiers. */
@@ -857,6 +858,7 @@ export class TeamBuilder extends LitElement {
       this.manual,
       this.manualInputs(),
       this.manualGoal(),
+      this.songRules(this.manualGoal()),
     ]);
   }
   manualSuggestionContext() {
@@ -868,7 +870,7 @@ export class TeamBuilder extends LitElement {
         ? this.arena.settings
         : this.tab === "pt" && this.settings.rewardMode !== "plan" ? farmingSettings(this.settings) : this.settings;
     const goal =
-      this.tab === "build" && this.buildMode === "manual"
+      ((this.tab === "build" && this.buildMode === "manual") || this.tab === "teams")
         ? settings.manualScoreMode
         : this.tab === "pt"
           ? settings.rewardMode === "plan"
@@ -877,9 +879,23 @@ export class TeamBuilder extends LitElement {
           : settings.goal;
     return this.compatibleSettings({ ...settings, goal });
   }
+  songRules(goal?: Goal | null) {
+    if (this.tab === "arena") return undefined;
+    if (this.tab === "song-comparison") return activeSongRules(this.songComparison.settings.songRules, true);
+    if (goal !== undefined) {
+      if (!goal || goal.kind === "potential" || (goal.kind === "power" && !goal.song)) return undefined;
+      return activeSongRules(this.settings.songRules, goal.kind === "gekiso" || (goal.kind === "event" && !!goal.gekiso));
+    }
+    const s = this.settings;
+    const mode = this.tab === "teams" || (this.tab === "build" && this.buildMode === "manual")
+      ? s.manualScoreMode : this.tab === "pt" ? s.rewardMode === "plan" ? "plan" : "event" : s.goal;
+    if (mode === "potential" || (mode === "power" && !s.powerSong)) return undefined;
+    return activeSongRules(s.songRules, mode === "gekiso" || (mode === "event" && s.farming.play === "gekiso"));
+  }
   hasMission(type: string, songs = this.effectiveSettings().songs): boolean {
-    if (this.tab === "arena")
-      return this.arena.rule.missions.some((mission, index) =>
+    const rule = this.tab === "arena" ? this.arena.rule : this.songRules();
+    if (rule)
+      return rule.missions.some((mission, index) =>
         mission === 0
           ? songs.some((song) => songMissions(this.catalog!.song(song.songId))[index] === type)
           : ["", "Combo", "Luck", "JustCount"][mission] === type,
@@ -1201,6 +1217,7 @@ export class TeamBuilder extends LitElement {
             .filter((row) => row.lock && row.use)
             .map((row) => `${kind}${row.cardId}`);
     return {
+      songRules: this.songRules(goal),
       members: cards.members,
       snaps: cards.snaps,
       player:

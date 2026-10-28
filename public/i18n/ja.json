@@ -2943,7 +2943,8 @@
         "mean": "楽曲全体の平均スコア",
         "scoreDetails": "楽曲ごとのスコア",
         "meanPower": "平均総合力"
-      }
+      },
+      "songRules": "楽曲ルール"
     },
     "calendar": {
       "title": "カレンダー",

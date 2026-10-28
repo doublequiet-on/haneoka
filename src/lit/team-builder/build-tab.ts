@@ -2,6 +2,7 @@ import { farmingMode } from "./workspace-state";
 import { enableManualEvent, renderManualEvent } from "./manual-event";
 import { toolLayout } from "./tool-layout";
 import { songMissions } from "../../lib/catalog-filters";
+import { songRulesControl } from "./song-rules";
 import { arenaSongView } from "../../lib/team-builder/arena";
 import { boostControl } from "./boost-control";
 /** Team search: goal, songs, play, candidates and constraints; results beside them. */
@@ -173,7 +174,7 @@ export function songList(
               difficulty: 3,
               allowedSongIds,
               allowedCharts: allowedCharts ? [...allowedCharts] : undefined,
-              arenaRule: host.tab === "arena" ? host.arena.rule : undefined,
+              songRules: host.tab === "arena" ? host.arena.rule : host.songRules(),
               change,
             };
             host.requestUpdate();
@@ -195,7 +196,7 @@ export function songList(
                       <span class="list-item__body">
                         <strong class="list-item__headline clamp-1">${catalog.songTitle(song.songId)}</strong>
                         <span class="list-item__supporting">
-                          ${catalog.difficultyLabel(song.songId, song.difficulty)}${(host.tab !== "arena" && host.searchSettings.goal === "gekiso") || (host.tab === "pt" && host.settings.rewardMode === "recommendation" && host.searchSettings.ptMode === "gekiso") ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}${!available(song) ? ` · ${host.t("unavailable", "Unavailable")}` : ""}
+                          ${catalog.difficultyLabel(song.songId, song.difficulty)}${(host.tab !== "arena" && host.searchSettings.goal === "gekiso") || (host.tab === "pt" && host.settings.rewardMode === "recommendation" && host.searchSettings.ptMode === "gekiso") ? ` · ${missionSummary(songMissions(host.songRules() ? arenaSongView(catalog.song(song.songId), host.songRules()!) : catalog.song(song.songId)))}` : ""}${!available(song) ? ` · ${host.t("unavailable", "Unavailable")}` : ""}
                         </span>
                       </span>
                       <span class="list-item__trailing">
@@ -871,6 +872,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
               <section class="surface stack">
                 ${sectionHeading({ icon: "library_music", label: challenge ? host.t("planChallengeSongs", "Challenge songs") : s.goal === "plan" ? host.t("planNormalSongs", "Normal-live songs") : host.t("songs", "Songs"), count: s.songs.length || undefined })}
                 ${songList(host, s.goal === "power" ? s.songs : host.settings.songs, (songs) => set({ songs }), s.goal === "power", allowedSongIds)}
+                ${songRulesControl(host)}
               </section>
             `
           : nothing

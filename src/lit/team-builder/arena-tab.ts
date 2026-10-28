@@ -13,6 +13,7 @@ import type { BoxValue } from "../../lib/team-builder/sync/box-doc";
 import type { BuildSettings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 import { restoreBuildSettings } from "./workspace-state";
+import { songRuleFields } from "./song-rules";
 import { toolLayout } from "./tool-layout";
 import { sectionHeading } from "./catalog";
 import {
@@ -227,8 +228,6 @@ export function renderArenaTab(host: TeamBuilder) {
       <div slot="headline">${label}</div>
     </md-select-option>
   `;
-  const missionLabel = (value: number) =>
-    value === 1 ? "COMBO" : value === 2 ? "LUCK" : value === 3 ? "JUST" : host.t("arena.original", "Original song");
   return toolLayout(
     host,
     html`
@@ -273,30 +272,7 @@ export function renderArenaTab(host: TeamBuilder) {
           ],
           onSelect: (value) => arena.update({ automatic: value === "auto" }),
         })}
-        <md-outlined-select
-          label=${host.t("arena.attribute", "Song attribute")}
-          .value=${String(rule.musicType)}
-          @change=${(e: Event) => arena.updateRule({ musicType: Number((e.target as HTMLInputElement).value) })}
-        >
-          ${option(0, host.t("arena.original", "Original song"))}${[1, 2, 3, 4, 5].map((value) => option(value, catalog.attributeName(value), catalog.attributeIcon(value)))}${option(99, "ALL")}
-        </md-outlined-select>
-        <div class="stack">
-          ${rule.missions.map(
-            (mission, index) => html`
-              <md-outlined-select
-                label=${host.t("arena.range", "Range {count}", { count: index + 1 })}
-                .value=${String(mission)}
-                @change=${(e: Event) => {
-                  const missions = [...rule.missions] as ArenaRule["missions"];
-                  missions[index] = Number((e.target as HTMLInputElement).value);
-                  arena.updateRule({ missions });
-                }}
-              >
-                ${[0, 1, 2, 3].map((value) => option(value, missionLabel(value)))}
-              </md-outlined-select>
-            `,
-          )}
-        </div>
+        ${songRuleFields(host, rule, patch => arena.updateRule(patch))}
       </section>
       <section class="surface stack">
         ${sectionHeading({ icon: "groups", label: host.t("arena.objective", "Team objective") })}

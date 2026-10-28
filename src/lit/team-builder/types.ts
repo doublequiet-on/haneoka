@@ -6,6 +6,7 @@ import { emptyManualEvent, type ManualEventDraft } from "../../lib/team-builder/
 export type Tab = "build" | "arena" | "box" | "account" | "teams" | "pt" | "song-comparison";
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
 export interface BuildSettings {
+  songRules?: import("../../lib/team-builder/arena").SongRules;
   arena?: ArenaGoal;
   rewardMode: "recommendation" | "event" | "plan";
   farming: FarmingSettings;
