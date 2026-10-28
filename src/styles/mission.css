@@ -85,8 +85,7 @@
     justify-content: space-between;
     gap: 12px;
   }
-  .mission-card__icon,
-  .mission-group__icon {
+  .mission-card__icon {
     display: grid;
     width: 48px;
     height: 48px;
@@ -140,53 +139,6 @@
     color: var(--md-sys-color-on-surface-variant);
     font: var(--md-sys-typescale-label-large-weight) var(--md-sys-typescale-label-large-size) /
       var(--md-sys-typescale-label-large-line-height) var(--app-font);
-  }
-
-  /* ---- One group ---- */
-  .mission-group__header {
-    display: flex;
-    flex-wrap: wrap;
-    min-height: 56px;
-    align-items: center;
-    gap: 12px;
-  }
-  .mission-group__icon {
-    width: 40px;
-    height: 40px;
-  }
-  .mission-group__heading {
-    display: grid;
-    min-width: 0;
-    flex: 1;
-  }
-  .mission-group__count {
-    padding: 2px 10px;
-    border-radius: var(--md-sys-shape-corner-full);
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
-      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
-  }
-  .mission-group__header h2 {
-    margin: 0;
-    font: var(--md-sys-typescale-emphasized-title-large-weight, 600) var(--md-sys-typescale-title-large-size) /
-      var(--md-sys-typescale-title-large-line-height) var(--app-font);
-  }
-  .mission-group--entity .mission-group__header > span {
-    padding: 2px 10px;
-    border-radius: var(--md-sys-shape-corner-full);
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
-      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
-  }
-  .mission-group--entity .mission-group__window {
-    margin-inline-start: auto;
-  }
-  .mission-group__window {
-    color: var(--md-sys-color-on-surface-variant);
-    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
-      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
   }
 
   .mission-list {

@@ -8554,7 +8554,7 @@ def _feature_status(data: BuildData) -> dict[str, Any]:
         "login": ("MasterLoginBonus", "MasterLoginBonusSlot"),
         "missions": (
             "MasterMission", "MasterMissionReward", "MasterLimitedMission",
-            "MasterLimitedMissionGroup",
+            "MasterLimitedMissionGroup", "MasterEventMission",
         ),
         "shop": ("MasterShop", "MasterShopProduct", "MasterShopTrigger"),
         "exchange": (
