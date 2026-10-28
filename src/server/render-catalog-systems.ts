@@ -4,6 +4,7 @@ import type { Locale } from "../i18n/locales";
 
 export async function renderCatalogSystem(payload: CatalogSystemPayload, locale: Locale): Promise<StaticWorkspacePage> {
   const constructors = {
+    arena: () => import("../lit/arena-workspace").then(module => module.ArenaWorkspace),
     missions: () => import("../lit/mission-workspace").then(module => module.MissionWorkspace),
     studio: () => import("../lit/studio-workspace").then(module => module.StudioWorkspace),
     "tgw-card": () => import("../lit/tgw-card-workspace").then(module => module.TgwCardWorkspace),

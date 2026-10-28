@@ -18,6 +18,7 @@ interactive workspaces in `src/lit`, and the Material Design 3 styles in
 - [Catalog](https://haneoka.org/catalog)
 - Searchable multilingual game data
 - Audio, video, comic, Live2D, story, and asset viewers
+- Gekiso Arena schedule with all five leagues, every published rotation, current-period highlighting, local times, ranks, rewards, and calendar links
 - Interactive chart and story players
 - Song jacket sliding puzzles with mouse dragging, touch swipes, screenshot layout import and solving
 - ADV story playback and authoring

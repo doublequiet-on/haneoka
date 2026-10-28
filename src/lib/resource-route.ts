@@ -31,6 +31,7 @@ export const RESOURCE_KINDS = [
   "band-items",
   "items",
   "events",
+  "arena",
   "real-lives",
   "gacha",
   "login-campaigns",

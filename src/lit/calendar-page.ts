@@ -68,6 +68,8 @@ const copy: Record<string, string> = {
   pass: "Pass",
   live: "Live",
   "game-live": "Game live event",
+  arena: "Arena",
+  "arena-rotation": "Arena rotation",
   allDay: "All day",
   empty: "No events",
   more: "{count} more",
@@ -89,6 +91,8 @@ const facetLabels: Record<CalendarFacet, string> = {
   login: "login",
   pass: "pass",
   "game-live": "game-live",
+  arena: "arena",
+  "arena-rotation": "arena-rotation",
   "external-live": "externalLive",
 };
 let sequence = 0;
@@ -147,6 +151,8 @@ export class CalendarPage extends LitElement {
       this.removeAttribute("data-prerendered");
     }
     const query = navigationDocumentUrl().searchParams;
+    const facets = query.get("kinds")?.split(",").filter((key): key is CalendarFacet => CALENDAR_FACETS.includes(key as CalendarFacet));
+    if (facets?.length) this.categories = new Set(facets);
     const requested = query.get("date") || "";
     if (parseCalendarDate(requested)) this.selected = requested as CalendarDate;
     const view = query.get("view");

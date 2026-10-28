@@ -265,7 +265,8 @@
     "games": "Games",
     "gbpArchive": "GBP archive",
     "projectSekai": "Project Sekai",
-    "chatCustomizations": "Chat customizations"
+    "chatCustomizations": "Chat customizations",
+    "arena": "Gekiso Arena"
   },
   "settings": {
     "labels": {
@@ -1333,6 +1334,26 @@
       "bubble": "Bubble",
       "frame": "Avatar frame",
       "initialOwnership": "Owned by default"
+    },
+    "arena": {
+      "plays": "{count} plays",
+      "currentRule": "Current rules",
+      "originalRule": "Original song",
+      "schedule": "Rotation schedule",
+      "period": "Period",
+      "noSchedule": "Schedule pending",
+      "songs": "Challenge songs",
+      "rewards": "Rewards",
+      "dailyRewards": "Daily rewards",
+      "promotionRewards": "First promotion rewards",
+      "seasonRewards": "Season best point rewards",
+      "points": "Arena pt",
+      "exchange": "Arena exchange",
+      "calendar": "Event calendar",
+      "rotation": "Arena rotation",
+      "events": "Concurrent events",
+      "previousSeason": "Previous season",
+      "nextSeason": "Next season"
     }
   },
   "story": {
@@ -2956,7 +2977,9 @@
       "ourNotesCastBirthday": "Our Notes voice actor birthdays",
       "garupaCharacterBirthday": "GBP character birthdays",
       "garupaCastBirthday": "GBP voice actor birthdays",
-      "externalLive": "External live events"
+      "externalLive": "External live events",
+      "arena": "Gekiso Arena",
+      "arena-rotation": "Arena rotation"
     },
     "eventTracker": {
       "title": "Event tracker",

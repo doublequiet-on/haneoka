@@ -1,6 +1,6 @@
 /** Civil dates stay separate from instants: adding a calendar day must survive DST. */
 export type CalendarDate = `${number}-${number}-${number}`;
-export type CalendarKind = "character" | "cast" | "event" | "gacha" | "login" | "pass" | "live" | "game-live";
+export type CalendarKind = "character" | "cast" | "event" | "gacha" | "login" | "pass" | "live" | "game-live" | "arena" | "arena-rotation";
 export const CALENDAR_FACETS = [
   "our-notes:character",
   "our-notes:cast",
@@ -11,6 +11,8 @@ export const CALENDAR_FACETS = [
   "login",
   "pass",
   "game-live",
+  "arena",
+  "arena-rotation",
   "external-live",
 ] as const;
 export type CalendarFacet = (typeof CALENDAR_FACETS)[number];

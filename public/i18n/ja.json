@@ -265,7 +265,8 @@
     "games": "ゲーム",
     "gbpArchive": "ガルパ資料",
     "projectSekai": "プロジェクトセカイ",
-    "chatCustomizations": "チャットカスタマイズ"
+    "chatCustomizations": "チャットカスタマイズ",
+    "arena": "撃奏アリーナ"
   },
   "settings": {
     "labels": {
@@ -1333,6 +1334,26 @@
       "bubble": "吹き出し",
       "frame": "アイコンフレーム",
       "initialOwnership": "初期所持"
+    },
+    "arena": {
+      "plays": "{count} 回",
+      "currentRule": "現在のルール",
+      "originalRule": "元の楽曲",
+      "schedule": "ローテーション",
+      "period": "期間",
+      "noSchedule": "スケジュール未発表",
+      "songs": "課題楽曲",
+      "rewards": "報酬",
+      "dailyRewards": "デイリー報酬",
+      "promotionRewards": "初回ランク昇格報酬",
+      "seasonRewards": "シーズン最高アリーナpt報酬",
+      "points": "アリーナpt",
+      "exchange": "撃奏アリーナ交換所",
+      "calendar": "イベントカレンダー",
+      "rotation": "アリーナ切替",
+      "events": "同時開催イベント",
+      "previousSeason": "前のシーズン",
+      "nextSeason": "次のシーズン"
     }
   },
   "story": {
@@ -2956,7 +2977,9 @@
       "ourNotesCastBirthday": "Our Notes 声優の誕生日",
       "garupaCharacterBirthday": "GBP キャラクターの誕生日",
       "garupaCastBirthday": "GBP 声優の誕生日",
-      "externalLive": "外部ライブ"
+      "externalLive": "外部ライブ",
+      "arena": "撃奏アリーナ",
+      "arena-rotation": "アリーナ切替"
     },
     "eventTracker": {
       "title": "イベント追跡",

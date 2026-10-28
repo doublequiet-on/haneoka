@@ -3,6 +3,8 @@
 // Output: 静态／API 响应、后台任务及队列处理。
 // Pos: [Map](L2.md)；Cloudflare 生产请求和任务组合根。
 // Effects/Dependencies: HTML 更新基准与 ASSETS 发布绑定；连接 D1、R2、缓存、认证、外部服务与队列／容器。
+import { ARENA_PROJECTION } from "../src/lib/arena";
+import { readArenaCatalog } from "../src/lib/arena-catalog";
 import { handleApiDiscovery } from "./api-discovery";
 import { handleResourceImage } from "./resource-image";
 import { handlePublicGameApi } from "./game-public";
@@ -2494,6 +2496,29 @@ async function handleCatalogApiRequest(
       errorResponse(request, 502, "catalog_manifest_missing", "Catalog storage manifest is missing"),
       release,
     );
+  }
+  if (tail === "arena" || /^arena\/season-\d+$/u.test(tail)) {
+    const cacheUrl = new URL(request.url);
+    cacheUrl.searchParams.set("__arena_projection", String(ARENA_PROJECTION));
+    return releaseResponseHeaders(await edgeCached(
+      releaseCacheRequest(new Request(cacheUrl, request), release.releaseId), ctx, API_CACHE_TTL,
+      async () => {
+        const catalog = await readArenaCatalog({ server: release.server, releaseId: release.releaseId, sourceId: release.sourceId }, {
+          master: (table) => readReleaseJson(env, release, `objects/master/${table}.json`),
+          source: (path) => readReleaseJson(env, release, `metadata/sources/${path}.json`),
+          catalog: async (resource) => {
+            const entry = storage.resources[resource];
+            if (!entry) throw new Error(`Arena dependency missing: ${resource}`);
+            const value = await readReleaseJson(env, release, entry.index);
+            if (value === null) throw new Error(`Arena dependency unavailable: ${resource}`);
+            return value;
+          },
+        });
+        const id = tail.split("/")[1];
+        if (id && !catalog.entries[id]) return errorResponse(request, 404, "entity_not_found", "Arena season not found");
+        return jsonResponse(request, (id ? catalog.entries[id] : catalog) as unknown as JsonObject);
+      }, CATALOG_API_CACHE_CONTROL,
+    ), release);
   }
   if (tail === "stamps/textless") {
     const cacheUrl = new URL(request.url);

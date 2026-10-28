@@ -265,7 +265,8 @@
     "games": "游戏",
     "gbpArchive": "GBP 资料",
     "projectSekai": "世界计划",
-    "chatCustomizations": "聊天装扮"
+    "chatCustomizations": "聊天装扮",
+    "arena": "激奏竞技场"
   },
   "settings": {
     "labels": {
@@ -1333,6 +1334,26 @@
       "bubble": "气泡",
       "frame": "头像框",
       "initialOwnership": "初始拥有"
+    },
+    "arena": {
+      "plays": "{count} 次",
+      "currentRule": "当前规则",
+      "originalRule": "原曲",
+      "schedule": "轮换排期",
+      "period": "时段",
+      "noSchedule": "排期待公布",
+      "songs": "课题歌曲",
+      "rewards": "奖励",
+      "dailyRewards": "每日奖励",
+      "promotionRewards": "首次晋级奖励",
+      "seasonRewards": "赛季最高积分奖励",
+      "points": "竞技场 pt",
+      "exchange": "竞技场兑换所",
+      "calendar": "活动日历",
+      "rotation": "竞技场轮换",
+      "events": "同期活动",
+      "previousSeason": "上一赛季",
+      "nextSeason": "下一赛季"
     }
   },
   "story": {
@@ -2956,7 +2977,9 @@
       "ourNotesCastBirthday": "Our Notes 声优生日",
       "garupaCharacterBirthday": "GBP 角色生日",
       "garupaCastBirthday": "GBP 声优生日",
-      "externalLive": "外部演出"
+      "externalLive": "外部演出",
+      "arena": "激奏竞技场",
+      "arena-rotation": "竞技场轮换"
     },
     "eventTracker": {
       "title": "活动追踪",

@@ -117,7 +117,7 @@ export async function prepareStaticInputs(): Promise<void> {
         )
           tasks.push(() => catalogCollectionData(route.resource!, server, locale));
       }
-      for (const kind of ["missions", "studio", "tgw-card"] as const)
+      for (const kind of ["missions", "studio", "tgw-card", "arena"] as const)
         tasks.push(() => catalogSystemData(kind, server, locale));
       for (const mode of ANON_TOKYO_MODES) tasks.push(() => catalogSystemData("anon-tokyo", server, locale, mode));
       for (const resource of ["stories", "live2d", "spine", "help"] as const)

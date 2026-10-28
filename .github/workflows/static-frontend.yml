@@ -32,6 +32,7 @@ jobs:
       STATIC_PAGE_GROUPS: ${{ inputs.page_groups }}
       STATIC_RESOURCE_SERVERS: ${{ inputs.resource_servers }}
       STATIC_CATALOG_SOURCE: http
+      STATIC_ARENA_MASTER_INPUTS: ${{ !inputs.verification_only && 'data/static-arena' || '' }}
       STATIC_BUILD_INPUT_MODE: capture
       STATIC_BUILD_INPUT_ROOT: data/static-build/inputs
       PROVIDER_STATIC_SNAPSHOT: data/provider-static/snapshots/${{ github.run_id }}
@@ -198,6 +199,17 @@ jobs:
           pnpm prepare:frontend
           pnpm build:embeds
           pnpm build:provider-static
+      - name: Stage immutable Arena Master inputs
+        if: ${{ !inputs.verification_only }}
+        env:
+          PYTHONPATH: scripts
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          python -m pip install boto3==1.43.47 py3rijndael==0.3.3
+          python scripts/build/arena_inputs.py
       - name: Collect all production data and route matrices
         run: |
           node scripts/build/prepare-static-inputs.mjs

@@ -6,7 +6,7 @@ import { difficultyEstimatesEnabled } from "../lib/difficulty-display";
 import "../styles/song-gekisou.css";
 import { gekisouMission } from "../lib/gekisou";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
-import { icon } from "./ui/icon";
+import { icon, gameGlyph } from "./ui/icon";
 import "./song-skill-points";
 import { byScoreRank, isSongScoreRank, roomRequiredScore, scoreRankName } from "../lib/chart-rates";
 import { clientText } from "../i18n/client";
@@ -233,17 +233,7 @@ export function renderGekisouStages({
     const image = missionIcons[mission.icon];
     return html`
       <li>
-        ${
-          image
-            ? html`
-                <span
-                  class="song-gekisou-stage__icon"
-                  style=${`mask-image:url("${image}");-webkit-mask-image:url("${image}")`}
-                  aria-hidden="true"
-                ></span>
-              `
-            : nothing
-        }
+        ${image ? gameGlyph(image) : nothing}
         <span>
           <small>${label("gekisouSegment", "Gekisou stage")} ${index + 1}</small>
           <strong>${label(mission.key, mission.fallback)}</strong>
