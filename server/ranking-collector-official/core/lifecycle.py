@@ -57,21 +57,23 @@ def read_credentials(path, region='jp'):
     if len(raw)>65536:raise ValueError('invalid credential file')
     value=json.loads(raw.decode('utf-8-sig'))
     if not isinstance(value,dict):raise ValueError('invalid credential document')
-    if value.get('region')!=configured.credential_region or value.get('origin')!=configured.origin:
+    if value.get('region')!=configured.credential_region or value.get('origin') not in configured.credential_origins:
         raise ValueError('credential origin mismatch')
     credentials=value.get('credentials',{})
     if not isinstance(credentials,dict):raise ValueError('invalid credential document')
     for key in ('player_id','credential'):
         if not isinstance(credentials.get(key),str) or not credentials[key]:raise ValueError('incomplete credential')
     if region=='jp' and credentials.get('bid'):raise ValueError('international identity rejected')
-    identity=hashlib.sha256(credentials['player_id'].encode()).hexdigest()
+    account=credentials['player_id'] if region=='jp' else region+'\0'+credentials['player_id']
+    identity=hashlib.sha256(account.encode()).hexdigest()
     auth={key:credentials[key] for key in ('player_id','credential')}
     auth['device_id']=credentials.get('device_id') or None
     if auth['device_id'] is not None and not isinstance(auth['device_id'],str):raise ValueError('invalid device identity')
     if region!='jp' and credentials.get('bid'):
         if not isinstance(credentials['bid'],str):raise ValueError('invalid SDK identity')
         auth['bid']=credentials['bid']
-    generation=hashlib.sha256(json.dumps(auth,sort_keys=True).encode()).hexdigest()
+    generation=hashlib.sha256(json.dumps(auth if region=='jp' else {'region':region,'origin':value['origin'],'auth':auth},sort_keys=True).encode()).hexdigest()
+    auth['origin']=value['origin']
     return identity,generation,auth
 
 def credential_generation(path, region='jp'):

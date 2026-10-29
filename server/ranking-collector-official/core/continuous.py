@@ -10,7 +10,7 @@ import time
 from types import SimpleNamespace
 import uuid
 from history import History
-from lifecycle import accept_catalog, targets, credential_generation, credential_ready, retry_delay
+from lifecycle import accept_catalog, targets, read_credentials, credential_ready, retry_delay
 from sample import run as sample
 from official_catalog import CatalogRequestError
 from transport import VersionError
@@ -31,10 +31,13 @@ def atomic_json(path,value):
     os.replace(temp,path)
 
 def refresh_catalog(args,history,state,discover_fn=None):
+    region=getattr(args,'region','jp')
+    if state.get('region','jp' if state else region)!=region:raise ValueError('catalog state region changed')
     if discover_fn is None:
         from official_catalog import OfficialCatalog
         discover_fn=OfficialCatalog(args.master_config,args.output,args.proxy,args.client_version,
-            stop_file=Path(args.output)/'STOP',deadline=state.get('deadline'),region=getattr(args,'region','jp'))
+            stop_file=Path(args.output)/'STOP',deadline=state.get('deadline'),region=getattr(args,'region','jp'),
+            api_origin=getattr(args,'api_origin',None))
     previous=history.catalog()
     definition=accept_catalog(previous,discover_fn())
     highest=max(state.get('highestEventId',0),(previous or {}).get('highestEventId',0))
@@ -47,6 +50,7 @@ def refresh_catalog(args,history,state,discover_fn=None):
     # The catalog commit must preserve this even if the separate state checkpoint is lost.
     definition['highestEventId']=highest
     history.catalog(definition)
+    state['region']=region
     state['highestEventId']=highest
     event=definition.get('event')
     state['eventId']=event['id'] if event else None
@@ -58,9 +62,11 @@ def refresh_catalog(args,history,state,discover_fn=None):
 def cycle(args,history,state,discover_fn=None,sample_fn=sample):
     now=time.time();status='waiting';detail=None
     if now<state.get('retryAfter',0):return 'cooldown',None
-    identity,generation=credential_generation(args.credentials,getattr(args,'region','jp'))
+    identity,generation,auth=read_credentials(args.credentials,getattr(args,'region','jp'))
     if not credential_ready(state,identity,generation):return 'credentials_required',None
-    try:definition=refresh_catalog(args,history,state,discover_fn)
+    state['apiOrigin']=auth['origin']
+    catalog_args=SimpleNamespace(**{**vars(args),'api_origin':auth['origin']})
+    try:definition=refresh_catalog(catalog_args,history,state,discover_fn)
     except InterruptedError:
         return ('stopped' if (Path(args.output)/'STOP').exists() else 'deadline'),None
     except CatalogRequestError as error:
@@ -71,15 +77,16 @@ def cycle(args,history,state,discover_fn=None,sample_fn=sample):
     if not targets(definition,int(time.time()*1000)):return 'between_events',None
     if (Path(args.output)/'STOP').exists():return 'stopped',None
     if time.time()>=state['deadline']:return 'deadline',None
-    identity,generation=credential_generation(args.credentials,getattr(args,'region','jp'))
+    identity,generation,auth=read_credentials(args.credentials,getattr(args,'region','jp'))
     if not credential_ready(state,identity,generation):return 'credentials_required',None
+    state['apiOrigin']=auth['origin']
     event_file=Path(args.output)/'discovered-event.json'
     with history.connect() as db:
         cursor=db.execute('SELECT COALESCE(MAX(sequence),0) FROM observations').fetchone()[0]
     try:
         acquired=sample_fn(SimpleNamespace(region=getattr(args,'region','jp'),credentials=args.credentials,event=str(event_file),
             output=args.output,client_version=args.client_version,proxy=args.proxy,rounds=1,
-            interval=args.interval,credential_identity=identity,deadline=state['deadline']))
+            interval=args.interval,credential_identity=identity,deadline=state['deadline'],api_origin=auth['origin']))
         status=('success' if acquired else 'stopped' if (Path(args.output)/'STOP').exists()
                 else 'deadline' if time.time()>=state['deadline'] else 'between_events')
     except (RuntimeError,ValueError,OSError,subprocess.SubprocessError) as error:
@@ -110,21 +117,25 @@ def cycle(args,history,state,discover_fn=None,sample_fn=sample):
 
 def run(args):
     output=Path(args.output).resolve();output.mkdir(parents=True,exist_ok=True)
+    region=getattr(args,'region','jp')
     state_file=output/'collector-state.json'
     with process_lock(output/'continuous.lock',timeout=1):
-        history=History(output/'history.sqlite3')
         if state_file.exists():
             state=json.loads(state_file.read_text(encoding='utf-8'))
+            if state.get('region','jp')!=region:raise ValueError('run region changed')
             if state['status']=='complete':raise ValueError('completed run requires a new output directory')
         else:
             state=dict(runId=uuid.uuid4().hex,startedAt=time.time(),deadline=time.time()+args.hours*3600,
                 cycles=0,status='starting',interval=args.interval,codeIdentity=code_identity(args),
-                configIdentity=args.config_identity)
+                configIdentity=args.config_identity,region=region)
         if state.get('configIdentity')!=args.config_identity:raise ValueError('resume configuration changed')
         if state['interval']!=args.interval:raise ValueError('resume interval changed')
         if state.get('codeIdentity')!=code_identity(args):raise ValueError('run source changed; use a new output directory')
-        identity,generation=credential_generation(args.credentials,getattr(args,'region','jp'))
+        state['region']=region
+        history=History(output/'history.sqlite3',region=region)
+        identity,generation,auth=read_credentials(args.credentials,getattr(args,'region','jp'))
         credential_ready(state,identity,generation)
+        state['apiOrigin']=auth['origin']
         with history.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS collector_cycles(id INTEGER PRIMARY KEY,run_id TEXT,started REAL,finished REAL,status TEXT,detail TEXT)')
             db.execute("UPDATE collector_cycles SET status='interrupted',finished=? WHERE finished IS NULL",(time.time(),))

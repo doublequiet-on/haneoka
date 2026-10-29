@@ -6,7 +6,7 @@
 
 推荐使用与仓库管线一致的 Python 3.13，最低支持 Python 3.12；Python TLS 需要支持 ALPN。运行依赖固定在 `requirements.txt`，通过离线安装入口创建独立虚拟环境。
 
-游戏凭据使用获授权的日服导出文件，包含 `region=jp`、`origin=https://api.bang-dream-on.jp`，以及 `credentials` 中的 `player_id`、`credential` 和可选 `device_id`。Master 私有配置包含：
+游戏凭据使用对应区服的获授权导出文件，包含 `region`、固定官方 API `origin`，以及 `credentials` 中的 `player_id`、`credential` 和可选 `device_id`。日服使用 `region=jp` 与 `origin=https://api.bang-dream-on.jp`。日服 Master 私有配置包含：
 
 - `masterRemoteRoot`：`https://static.bang-dream-on.jp/master`；
 - `cdnUsername`：从获授权客户端取得的 CDN 用户名；
@@ -18,9 +18,11 @@
 
 `init` 和 `catalog` 使用 `--region tw|en|kr`，缺省仍为 `jp`。繁中网站标识为 `tw`，已有游戏凭据文件中的标识为 `hk`；英文和韩文分别为 `en`、`kr`。三服沿用各自已有游戏身份，工具不执行 SDK 登录或创建账号。
 
-国际服先调用所选分区的匿名 Version，再通过官方 GetServerList 的 areaID（繁中 2、英文 3、韩文 4）发现该区 CDN。发现结果必须匹配固定官方 API、CDN 主机和区域路径，随后匿名获取 Master 清单和三张表。国际服外置配置只需 `masterCrypto`，不使用日服 CDN 用户名或密码；Master 版本与资源版本分别保留，榜单请求同时发送。目录时间沿用游戏 Master 的 UTC+9 时间基准，不按网页语言或操作者时区转换。
+国际服先调用所选分区的匿名 Version，再通过官方 GetServerList 的 areaID（繁中 2、英文 3、韩文 4）发现该区 CDN。发现结果必须匹配固定官方 API、CDN 主机和区域路径，随后匿名获取 Master 清单和三张表。国际服外置配置只需 `masterCrypto`，不使用日服 CDN 用户名或密码；Master 版本与资源版本分别保留，榜单请求同时发送。两者独立，任一版本在目录发现与采样之间改变都停止本轮采样，下轮重新发现。Master 时间沿用仓库现有投影的 UTC+9 基准，不按网页语言或操作者时区转换。
 
-每服使用独立运行目录、数据库和 API 端口。错误分区的凭据在创建运行目录前拒绝，已有目录不能切服；活动最高 ID 和历史游标分别保存在各服数据库。API 只接受该运行目录所配置的分区路径。
+凭据 `origin` 只接受同分区的静态官方来源：繁中为 l12/l14 HK，英文为 l14/l17 VA，韩文为 l14/l17 KR，完整主机名见 [分区合同](core/regions.py)。运行时使用凭据选定的 API 来源查询 Version、GetServerList 及榜单，再从发现结果对应的 CDN 读取目录；不会把另一来源签发的凭据自动转送到默认来源。采样前再次核对来源与目录版本，回执和观测保存实际 `apiOrigin`。仅检查目录的命令使用分区默认来源，不读取游戏凭据。
+
+每服使用独立运行目录、数据库和 API 端口。错误分区的凭据在创建运行目录前拒绝，新目录使用 `haneoka:official-ranking-collector/2` 并立即在数据库绑定分区；已有目录不能切服。原 `haneoka:official-jp-collector/1` 只接受日服，缺少 `region` 时仍按 `jp` 读取，不重写旧配置。旧数据库的日服身份由原目录及观测推导，只读检查不迁移，写入时才保存身份；混服历史拒绝读取或续写。活动最高 ID 和历史游标分别保存在各服数据库，API 只接受该运行目录所配置的分区路径。
 
 ```sh
 python collector.py catalog --region tw --output <繁中目录检查> --master-config <外置解码配置> --client-version 1.1.0
@@ -80,7 +82,7 @@ python collector.py backup --output <运行目录> --destination <运行目录�
 
 `start` 返回实际 PID，Windows 隐藏窗口，POSIX 使用独立会话。`run` 在前台执行，可由现有 Python 服务管理器托管；工具不注册系统服务。`stop` 与截止时间在连接、读取、请求间隔和重试等待中检查；单次 RPC 总预算为 20 秒。`resume` 沿用原截止时间，已完成的运行、采样代码或协议及配置变化需要新目录。进程锁随进程退出释放，状态查询与采集共用相同的锁实现。
 
-首次网络请求前持久化账号身份，发送时从一次凭据读取构造身份和认证头。HTTP401/gRPC16、HTTP403/gRPC7 暂停相同认证字段；修改无关元数据不会解除暂停，仅接受同账号凭据替换，不执行注册或登录。HTTP429/gRPC8 遵守 Retry-After，并将冷却时间写入状态。Master 版本漂移时不采样，下一轮重新发现。请求及重试也受各榜单的独立窗口限制。
+首次网络请求前持久化账号身份与分区，发送时从一次凭据读取构造身份和认证头。HTTP401/gRPC16、HTTP403/gRPC7 暂停相同认证字段；国际服还按分区及实际 API 来源隔离认证代际，修改无关元数据不会解除暂停。外部凭据替换只接受同账号，不执行注册或登录。HTTP429/gRPC8 遵守 Retry-After，并将冷却时间写入状态。目录来源或版本在采样前发生变化时停止本轮，下轮重新发现。请求及重试也受各榜单的独立窗口限制。
 
 每个成功或失败观测独立保存，空榜单与损坏数据分别处理。备份通过 SQLite 在线备份 API 获取一致快照，校验数据库、外键、观测关系和正文摘要，再通过硬链接原子创建新文件，不覆盖已有目标；备份目标文件系统需支持硬链接。
 

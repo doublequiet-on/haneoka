@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from urllib.request import build_opener, ProxyHandler, HTTPRedirectHandler, Request
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-from regions import region_config
+from regions import region_config, select_api_origin
 
 TABLES = ('MasterEvent', 'MasterChallengeMusic', 'MasterParameter')
 
@@ -39,7 +39,7 @@ def date(value):
     return int(datetime.strptime(value, '%Y/%m/%d %H:%M:%S').replace(
         tzinfo=timezone(timedelta(hours=9))).timestamp()*1000)
 
-def project(tables, version, now_ms, region='jp'):
+def project(tables, version, now_ms, region='jp',resource_version=None,api_origin=None):
     from lifecycle import identifier
     events=tables['MasterEvent']['_allData']; songs=tables['MasterChallengeMusic']['_allData']
     params=[r for r in tables['MasterParameter']['_allData'] if r['_id']=='event_ranking_aggregation_time']
@@ -58,7 +58,8 @@ def project(tables, version, now_ms, region='jp'):
     held=[e for e in candidates if now_ms<e[1]]
     selected=held or candidates
     if len(selected)>1: raise ValueError('ambiguous current event')
-    result=dict(region=region,catalogSource='official-master',masterVersion=version,
+    result=dict(region=region,catalogSource='official-master',masterVersion=version,resourceVersion=resource_version,
+                apiOrigin=select_api_origin(region,api_origin),
                 catalogObservedAtMs=now_ms,fetchedAtMs=None,stale=False,event=None)
     if not selected:return result
     start,end,e=selected[0];eid=identifier(e['_id']);challenges=[];seen=set()
@@ -85,32 +86,35 @@ def project(tables, version, now_ms, region='jp'):
     return result
 
 class OfficialCatalog:
-    def __init__(self, config_file, output, proxy, client_version, stop_file=None, deadline=None, region='jp'):
+    def __init__(self, config_file, output, proxy, client_version, stop_file=None, deadline=None, region='jp',api_origin=None):
         from lifecycle import normalize_proxy
         self.config_file=Path(config_file);self.output=Path(output)/'master';self.proxy=normalize_proxy(proxy)
         self.client_version=client_version
         self.region=region
         self.region_config=region_config(region)
+        self.api_origin=select_api_origin(region,api_origin)
         self.stop_file=stop_file;self.deadline=deadline
 
     def __call__(self):
         if not self.config_file.is_file():raise ValueError('official Master configuration is missing')
         config=json.loads(self.config_file.read_text(encoding='utf-8-sig'))
+        if not isinstance(config,dict):raise ValueError('invalid Master configuration')
         if self.region=='jp' and config.get('masterRemoteRoot')!='https://static.bang-dream-on.jp/master':
             raise ValueError('unverified official Master origin')
         username=config.get('cdnUsername')
         crypto=config.get('masterCrypto',{})
-        if set(crypto)!={'salt','key','iv'} or (self.region=='jp' and (not isinstance(username,str) or not username or ':' in username)):
+        if not isinstance(crypto,dict) or set(crypto)!={'salt','key','iv'} or (self.region=='jp' and (not isinstance(username,str) or not username or ':' in username)):
             raise ValueError('official CDN authorization or Master crypto missing')
         from py3rijndael import RijndaelCbc, Pkcs7Padding
         from transport import Sampler, VersionError
         self.output.mkdir(parents=True,exist_ok=True)
         sampler=Sampler(SimpleNamespace(region=self.region,descriptors=Path(__file__).parent/self.region_config.descriptor,
             output=self.output/'version-receipts',client_version=self.client_version,proxy=self.proxy,
-            stop_file=self.stop_file,deadline=self.deadline))
+            stop_file=self.stop_file,deadline=self.deadline,api_origin=self.api_origin))
         try:sampler.version(include_cdn=self.region=='jp')
         except VersionError as error:raise CatalogRequestError('version',error.receipt) from None
         version=sampler.master_version
+        if self.region!='jp' and not sampler.resource_version:raise ValueError('International resource version missing')
         cdn=sampler.cdn or {}
         headers={}
         if self.region=='jp':
@@ -162,7 +166,7 @@ class OfficialCatalog:
             if not isinstance(tables[table].get('_allData'),list):raise ValueError('invalid Master table')
             if not cached:atomic_write(path,raw)
             digests[table]=digest
-        result=project(tables,version,int(time.time()*1000),self.region);result['tableHashes']=digests
+        result=project(tables,version,int(time.time()*1000),self.region,sampler.resource_version,self.api_origin);result['tableHashes']=digests
         atomic_write(directory/'catalog.json',json.dumps(result).encode('utf-8'))
         return result
 
@@ -171,16 +175,15 @@ class OfficialCatalog:
         receipt, response, _=sampler.rpc(SERVERS, sampler.message('app.playerlogin.GetServerListRequest'),
             'app.playerlogin.GetServerListResponse', 'server-list')
         if response is None:raise CatalogRequestError('server-list',receipt)
-        area={'tw':2,'en':3,'kr':4}[self.region]
+        area=self.region_config.area_id
         rows=[row for row in response.servers if str(row.areaID)==str(area)]
         if len(rows)!=1:raise ValueError('Missing or ambiguous official region')
         row=rows[0]
-        if self.region_config.origin not in row.apiServerRoot.split('|'):
+        if self.api_origin not in row.apiServerRoot.split('|'):
             raise ValueError('Official discovery API region mismatch')
-        allowed=({'l14-prod-hk-patch-sirius.gamerfusiontech.com','l12-prod-hk-patch-sirius.gamerfusiontech.com'}
-            if self.region=='tw' else {'l14-prod-sg-patch-sirius.bilibiligame.net','l12-prod-sg-patch-sirius.bilibiligame.net'})
+        allowed=self.region_config.cdn_hosts
         roots=row.cdnRoot.split('|')
-        prefix={'tw':'hk','en':'en','kr':'kr'}[self.region]
+        prefix=self.region_config.cdn_prefix
         for root in roots:
             url=urlsplit(root)
             if (url.scheme!='https' or url.hostname not in allowed or url.netloc!=url.hostname

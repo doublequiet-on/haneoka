@@ -20,7 +20,8 @@ sys.path.insert(0, str(ROOT / 'core'))
 from process_lock import process_lock as lock_file
 from lifecycle import normalize_proxy
 from regions import REGIONS, region_config
-FORMAT = 'haneoka:official-jp-collector/1'
+FORMAT = 'haneoka:official-ranking-collector/2'
+LEGACY_FORMAT = 'haneoka:official-jp-collector/1'
 DESCRIPTOR_SHA256 = 'e8225c67eb066c1cdb2232a4c95f661a460d54dd88420f634ea2c8242de71adf'
 
 
@@ -68,8 +69,11 @@ def doctor():
 def validate_settings(config):
     if set(config)-{'region'} != {'format', 'credentials', 'interval', 'hours', 'client_version', 'proxy', 'master_config'}:
         raise ValueError('Unexpected configuration fields')
-    region_config(config.get('region','jp'))
-    if config['format'] != FORMAT:
+    region=config.get('region','jp')
+    region_config(region)
+    if config['format']==LEGACY_FORMAT:
+        if region!='jp':raise ValueError('Legacy runtime is fixed to jp')
+    elif config['format']!=FORMAT or 'region' not in config:
         raise ValueError('Not a standalone collector runtime')
     if type(config['interval']) is not int or config['interval'] < 60:
         raise ValueError('interval must be at least 60 seconds')
@@ -101,6 +105,8 @@ def initialize(args):
     # Refusing every existing directory prevents adopting an active legacy soak.
     output.mkdir(parents=True, exist_ok=False)
     from continuous import atomic_json
+    from history import History
+    History(output/'history.sqlite3',region=args.region)
     atomic_json(output / 'runtime.json', config)
     emit(dict(status='initialized', output=str(output), started=False))
 
@@ -111,6 +117,14 @@ def runtime(path):
     validate_settings(config)
     if Path(config['credentials']).resolve().is_relative_to(output):
         raise ValueError('Credentials must remain external to the runtime')
+    region=config.get('region','jp')
+    state_path=output/'collector-state.json'
+    if state_path.exists() and json.loads(state_path.read_text(encoding='utf-8')).get('region','jp')!=region:
+        raise ValueError('Runtime region changed')
+    database=output/'history.sqlite3'
+    if database.exists():
+        from history import History
+        History(database,read_only=True,region=region)
     return output, config
 
 
@@ -260,7 +274,8 @@ def main():
         with lock_file(output/'catalog.lock'):
             state_path=output/'catalog-state.json'
             state=json.loads(state_path.read_text()) if state_path.exists() else {}
-            definition=refresh_catalog(args,History(output/'history.sqlite3'),state)
+            if state_path.exists() and state.get('region','jp')!=args.region:raise ValueError('Catalog region changed')
+            definition=refresh_catalog(args,History(output/'history.sqlite3',region=args.region),state)
             atomic_json(state_path,state)
         emit(definition)
         return
@@ -294,7 +309,7 @@ def main():
             raise ValueError('No observations database yet; run sampling first')
         from history import History
         from api import server
-        with server(History(output / 'history.sqlite3', read_only=True), args.port,config.get('region','jp')) as http:
+        with server(History(output / 'history.sqlite3', read_only=True,region=config.get('region','jp')), args.port,config.get('region','jp')) as http:
             emit(dict(status='serving', url=f'http://127.0.0.1:{http.server_port}'))
             http.serve_forever()
     elif args.command == 'backup':

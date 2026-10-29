@@ -4,8 +4,8 @@
 
 | 层 | 输入 / 输出 | 网络、身份与时间 |
 | --- | --- | --- |
-| 官方主数据发现 | 官方 MasterdataService/Version → 版本；官方 CDN → Manifest 与三张表 | Version匿名并动态取得CDN密码，客户端用户名与解码参数外置；认证不落回执，不经过Moenotes |
-| 活动投影 | MasterEvent + MasterChallengeMusic + MasterParameter → 当前活动、挑战、开关和窗口 | JP UTC+9；保留masterVersion、表摘要和catalogObservedAtMs |
+| 官方主数据发现 | 官方 Version／国际服 GetServerList → 版本及分区 CDN；CDN → Manifest 与三张表 | 匿名发现；日服动态 CDN 密码只驻留内存，客户端用户名与解码参数外置，不经过 Moenotes |
+| 活动投影 | MasterEvent + MasterChallengeMusic + MasterParameter → 当前活动、挑战、开关和窗口 | 沿用 Master 管线 UTC+9；保留 region、apiOrigin、独立 masterVersion／resourceVersion、表摘要和 catalogObservedAtMs |
 | 榜单采集 | GetChallengeMusicRanking(challenge_music_id)、GetChallengeMusicTotalRanking(event_id) | 游戏专用身份；单曲与总榜分别保存，最多100条 |
 | 本地历史 | 不可变正文摘要 + 独立观测 + 失败周期 | observedAtMs是接收时间；sourceFetchedAtMs保持null |
 | HTTP读取 | localhost v2 | 只读数据库，GET不请求游戏、不中途登录、不写历史 |
@@ -16,13 +16,15 @@
 
 | GET 路径 | 返回 |
 | --- | --- |
-| `/status` | `haneoka:ranking-status/1`；serverTimeMs、collectorStatus、samplingIntervalSeconds、lastSuccessfulObservationAtMs、ageMs、stale、pollAfterSeconds、catalogProvider |
+| `/status` | `haneoka:ranking-status/1`；region、serverTimeMs、collectorStatus、samplingIntervalSeconds、lastSuccessfulObservationAtMs、ageMs、stale、pollAfterSeconds、catalogProvider |
 | `/events/current` | 官方主数据投影；没有当前活动时event=null |
 | `/events/{eventId}/challenges/{challengeId}/latest` | 指定单曲最后成功观测 |
 | `/events/{eventId}/total/latest` | 四曲总榜最后成功观测 |
 | 上述latest改为`history?after={cursor}` | observations与nextCursor，每页最多100条；失败也保留 |
 
 榜单合同仍为 `haneoka:ranking-observation/2`，保留snapshotId、cursor、payloadHash、eventId、challengeId、players、provenance、stale。新增官方主数据来源不应冒充Moenotes采集时间。榜单原始玩家字段不是完整图片资源；名片图片下载未接入。
+
+运行数据库以 `collector_identity` 持久绑定一个分区，观测和目录写入在同一事务内校验分区。读取旧日服库不添加元数据，写入时才采用其已存在的日服身份；混服数据及与配置或状态不符的区域拒绝读取。运行配置 `haneoka:official-ranking-collector/2` 要求显式 `region`，旧 `haneoka:official-jp-collector/1` 缺省仍为 `jp` 且只允许日服。
 
 当前状态stale阈值为10分钟；状态接口的最后成功时间是全局最新值，**不能代替某一榜单自己的observedAtMs/stale**。collectorStatus是最后持久状态，不是操作系统存活证明；停止更新时仍须按age判断。全部接口Cache-Control:no-store；Host只接受当前端口的127.0.0.1或localhost，存在Origin时也只接受本机HTTP来源，其余返回403。404表示尚无该成功观测，400表示查询参数错误，存储损坏或读取失败返回500。数据损坏不能将空榜视为成功。
 
