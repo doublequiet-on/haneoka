@@ -1,9 +1,20 @@
+// L3 — GEB
+// Input: Selected chart source and locale.
+// Output: Shared skill timeline and the loaded chart notification.
+// Pos: [Map](L2-2.md); song detail chart reader.
+// Effects/Dependencies: Fetches one chart per source; source changes and disconnect abort chart consumers.
 import { LitElement, html, nothing } from "lit";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
 import { skillTimeline } from "./shared/skill-timeline";
 import "../styles/components/skill-timeline.css";
 import { clientText } from "../i18n/client";
 import type { ChartSource } from "../lib/team-builder/engine/chart";
+
+export interface SongChartReady {
+  source: string;
+  chart: ChartSource;
+  signal: AbortSignal;
+}
 
 /** Every live skill lasts five seconds before snap extensions (MasterLiveSkillEffect). */
 const SKILL_MS = 5000;
@@ -50,7 +61,12 @@ export class SongSkillPoints extends LitElement {
       if (!response.ok) return;
       const { convertChartBytes } = await import("../lib/team-builder/engine/chart");
       const chart = await convertChartBytes(new Uint8Array(await response.arrayBuffer()));
-      if (!controller.signal.aborted) this.chart = chart;
+      if (!controller.signal.aborted) {
+        this.chart = chart;
+        this.dispatchEvent(new CustomEvent<SongChartReady>("song-chart-ready", {
+          detail: { source: this.source, chart, signal: controller.signal }, bubbles: true,
+        }));
+      }
     })().catch(() => undefined);
   }
   private text(key: string, fallback: string) {

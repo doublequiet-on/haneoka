@@ -5,6 +5,7 @@ import { difficultyKey, difficultyPicker } from "./ui/difficulty-picker";
 import { LitElement, html, nothing } from "lit";
 import { difficultyEstimatesEnabled, observeDifficultyDisplay } from "../lib/difficulty-display";
 import { icon } from "./ui/icon";
+import { gekisoTimingView } from "./shared/gekiso-timing";
 
 /**
  * Catalogue table view.
@@ -164,6 +165,7 @@ const COLUMNS: Record<string, Column[]> = {
     column("attribute", "mark", "musicType"),
     column("band", "entity", "band"),
     column("difficulty", "numeric", "level"),
+    column("gekisouTiming"),
     column("time", "numeric", "time"),
     column("score", "numeric", "score"),
     column("eff", "numeric", "eff"),
@@ -481,6 +483,13 @@ export class CatalogTable extends LitElement {
       const mission = gekisouMission(songMissions(item)[Number(key.slice(-1)) - 1]);
       const source = mission ? c.missionIcons?.[mission.icon] : undefined;
       return wrap(mission ? html`<span class="table-entity">${source ? html`<img src=${source} width="24" height="24" alt="" loading="lazy" />` : nothing}<span>${c.label(mission.key, mission.fallback)}</span></span>` : "—");
+    }
+    if (key === "gekisouTiming") {
+      const timings = c.songTimingSegments(item);
+      return wrap(timings.some((timing: unknown) => timing) ? html`<span class="cluster">
+        ${timings.map((timing: Parameters<typeof gekisoTimingView>[0], index: number) =>
+          gekisoTimingView(timing, c.settings.locale, (key, fallback) => c.label(key, fallback), index))}
+      </span>` : "—");
     }
     if (key === "play")
       return wrap(

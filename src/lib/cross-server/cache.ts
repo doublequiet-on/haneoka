@@ -18,6 +18,7 @@ interface CurrentIdentity {
   value: CrossCatalogIdentity;
   observedAt: number;
 }
+type PublicDocumentResource = CrossCatalogResource | "live-tools";
 export interface CrossServerPublicCacheOptions {
   maxEntries?: number;
   maxBytes?: number;
@@ -135,10 +136,10 @@ export class CrossServerPublicCache {
     return await this.observe(key, load, signal) as CrossCatalogIdentity;
   }
 
-  private async readDocument(resource: CrossCatalogResource, identity: CrossCatalogIdentity, id?: string, signal?: AbortSignal, ids?: readonly string[]) {
+  private async readDocument(resource: PublicDocumentResource, identity: CrossCatalogIdentity, id?: string, signal?: AbortSignal, ids?: readonly string[]) {
     if (!visibleContentServers([identity.server]).length) throw new Error("Source access is unavailable");
     signal?.throwIfAborted();
-    const path = `/api/v1/servers/${identity.server}/${crossCatalogApi(resource)}${id === undefined ? "" : `/${encodeURIComponent(id)}`}`;
+    const path = `/api/v1/servers/${identity.server}/${resource === "live-tools" ? resource : crossCatalogApi(resource)}${id === undefined ? "" : `/${encodeURIComponent(id)}`}`;
     const query = new URLSearchParams({ release: identity.releaseId });
     for (const value of ids || []) query.append("id", value);
     const key = JSON.stringify([identity.server, identity.releaseId, identity.sourceId, path, ids || []]);
@@ -175,7 +176,7 @@ export class CrossServerPublicCache {
     return publicSource ? this.observe(key, load, signal) : load(signal);
   }
 
-  readCollection(resource: CrossCatalogResource, identity: CrossCatalogIdentity, signal?: AbortSignal) {
+  readCollection(resource: PublicDocumentResource, identity: CrossCatalogIdentity, signal?: AbortSignal) {
     return this.readDocument(resource, identity, undefined, signal);
   }
   readEntity(resource: CrossCatalogResource, identity: CrossCatalogIdentity, id: string, signal?: AbortSignal) {

@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 页面载荷、资源／实体选择、语言与跨服状态。
-// Output: 目录筛选、开放顺序与日期排序、视图、实体详情、媒体及关联评论交互。
+// Output: 目录筛选、排序、视图、实体详情、激奏边界时机、媒体及关联评论交互。
 // Pos: [Map](L2-2.md)；集合与实体资料的 Lit 协调枢纽。
 // Effects/Dependencies: DOM、事件、HTTP／资源加载和页面状态；部分渲染被构建期 SSR 复用。
 import { createChartOverviewMeta } from "../lib/public-tools/chart-meta";
@@ -59,6 +59,8 @@ import {
   type NativeMetaIdentity,
 } from "./runtime/native-meta-sidecar";
 import { gekisouMission, gekisouMissionIcons } from "../lib/gekisou";
+import type { GekisoTimingSegment, PerfectTiming } from "../lib/team-builder/gekiso-timing";
+import type { SongChartReady } from "./song-skill-points";
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { readPageData } from "../lib/page-data";
 import type { CatalogCollectionPayload } from "../server/catalog-collection";
@@ -234,6 +236,10 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
   gekisouSkill: "catalog.cards.fields.gekisouSkill",
   gekisouSupportSkill: "catalog.cards.fields.gekisouSupportSkill",
   gekisouType: "catalog.analysis.fields.gekisouType",
+  gekisouTiming: "catalog.analysis.fields.gekisouTiming",
+  gekisouTimingOpening: "catalog.analysis.fields.gekisouTimingOpening",
+  gekisouTimingEnding: "catalog.analysis.fields.gekisouTimingEnding",
+  gekisouTimingNotes: "catalog.analysis.fields.gekisouTimingNotes",
   genre: "catalog.songs.fields.genre",
   grid: "common.layout.grid",
   hatedFood: "catalog.characters.fields.hatedFood",
@@ -342,6 +348,7 @@ const EXTRA_FILTERS = [
   ...CARD_SKILL_FACETS.map((facet) => facet.key),
   "gekisouType",
   "gekisouMatch",
+  "gekisouTiming",
   "minRarity",
   "maxRarity",
   "school",
@@ -3314,6 +3321,16 @@ export class CatalogScreen extends LitElement {
     return chart[key] === null || chart[key] === undefined ? Number.NaN : Number(chart[key]);
   }
   private orderRateCache = new WeakMap<Item, { deck: Deck; rates: number[] }>();
+  private songTimingSegments(item: Item): Array<GekisoTimingSegment | undefined> {
+    const song = this.itemSongMeta(item)?.[String(item.musicId)] as Item | undefined;
+    const difficulty = song?.[String(item.__difficultyIndex ?? 0)] as Item | undefined;
+    const gekisou = difficulty?.gekisou as Item | undefined;
+    const missions = songMissions(item);
+    return asItems(gekisou?.segments).map((segment, index) => {
+      const timing = segment.timing as GekisoTimingSegment | undefined;
+      return missions[index] === "Combo" && (timing?.opening || timing?.ending) ? timing : undefined;
+    });
+  }
   /** This row's chart rates, its rank thresholds (solo in Live, the room total in Gekisou), and the Live deck's score
    * per unit of power in each skill order. */
   private deckChart(item: Item) {
@@ -3866,6 +3883,8 @@ export class CatalogScreen extends LitElement {
       const missions = songMissions(item);
       return [...new Set(missions.filter(Boolean)), ...(missions.length === 3 && missions.every(Boolean) && new Set(missions).size > 1 ? ["Mix"] : [])];
     }
+    if (key === "gekisouTiming") return [...new Set(this.songTimingSegments(item).flatMap((timing) =>
+      [timing?.opening ? "opening" : "", timing?.ending ? "ending" : ""].filter(Boolean)))];
     if (key === "character") return this.itemCharacterIds(item).map((id) => this.facetToken(item, id));
     if (this.profile.presentation === "system") {
       if (key === "status") return [this.entryState(item)];
@@ -4134,6 +4153,15 @@ export class CatalogScreen extends LitElement {
           { value: "Luck", label: this.label("gekisouMissionLuck", "LUCK") },
           { value: "JustCount", label: this.label("gekisouMissionJustCount", "JUST") },
           { value: "Mix", label: uiText(this.settings.locale, "catalog.songs.gekisou.mixed") },
+        ],
+      });
+    if (this.settings.resource === "song-meta" && !this.isProvider())
+      groups.push({
+        key: "gekisouTiming",
+        label: this.label("gekisouTiming", "Timing"),
+        options: [
+          { value: "opening", label: this.label("gekisouTimingOpening", "Late start") },
+          { value: "ending", label: this.label("gekisouTimingEnding", "Early end") },
         ],
       });
     const fields =
@@ -5889,15 +5917,58 @@ export class CatalogScreen extends LitElement {
   /** Song-level gekisou mission pattern merged with the selected difficulty's
    * per-segment metrics (both live in the song-meta entry). */
   private songGekisouMeta(item: Item) {
-    const meta = this.itemSongMeta(item);
-    if (!meta) return {};
+    const meta = this.itemSongMeta(item) ?? {};
     const song = meta[String(item.musicId || "")] as Item | undefined;
     const difficulty = song?.[String(this.detailDifficulty)] as Item | undefined;
-    return {
+    const gekisou: Item = {
       icons: this.missionIcons,
       ...((song?.gekisou as Item | undefined) || {}),
       ...((difficulty?.gekisou as Item | undefined) || {}),
     };
+    const source = String(this.chartRow(item).file || "");
+    const cached = this.detailSongTimings.get(this.songTimingKey(item, source));
+    if (cached) gekisou.segments = cached.map((timing, index) => ({ ...asItems(gekisou.segments)[index], timing }));
+    return gekisou;
+  }
+  private detailSongTimings = new Map<string, GekisoTimingSegment[]>();
+  private songTimingIdentity(item: Item) {
+    const entry = this.unionEntry(item);
+    return entry?.perServer[entry.displayServer]?.identity ?? this.nativeCatalogPin;
+  }
+  private songTimingKey(item: Item, source: string) {
+    const identity = this.songTimingIdentity(item);
+    return JSON.stringify([identity?.server, identity?.releaseId, identity?.sourceId, source]);
+  }
+  private async ensureDetailSongTiming(item: Item, { source, chart, signal }: SongChartReady) {
+    const identity = this.songTimingIdentity(item);
+    if (!identity || !OFFICIAL_CATALOG_SERVERS.includes(identity.server) || this.isProvider()) return;
+    const key = this.songTimingKey(item, source);
+    if (this.detailSongTimings.has(key)) return;
+    const meta = this.songGekisouMeta(item), segments = asItems(meta.segments);
+    const missions = songMissions(item);
+    if (!missions.includes("Combo") || (segments.length === chart.feverMs.length && segments.every(segment => segment.timing !== undefined))) return;
+    try {
+      const { gekisoTiming, perfectTimings } = await import("../lib/team-builder/gekiso-timing");
+      let windows: ReadonlyMap<number, PerfectTiming>;
+      if (meta.perfectTimings) windows = new Map(Object.entries(meta.perfectTimings as Record<string, PerfectTiming>).map(([type, value]) => [Number(type), value]));
+      else {
+        const [{ dataRows, nativeRow }, tools] = await Promise.all([
+          import("../lib/team-builder/data"),
+          crossServerPublicCache().readCollection("live-tools", { ...identity, server: identity.server as OfficialCatalogServer }, signal),
+        ]);
+        windows = perfectTimings(dataRows((tools as Item).judgementTiming).map(value => {
+          const row = nativeRow(value);
+          return { assistLevel: Number(row.assistLevel), noteSimulateJudgement: Number(row.noteSimulateJudgement),
+            noteJudgementType: Number(row.noteJudgementType), beforeMs: Number(row.beforeMs ?? row.before), afterMs: Number(row.afterMs ?? row.after) };
+        }));
+      }
+      if (signal.aborted || !this.isConnected || !this.selected || this.songTimingKey(this.selected, String(this.chartRow(this.selected).file || "")) !== key) return;
+      this.detailSongTimings.set(key, gekisoTiming(chart, windows));
+      while (this.detailSongTimings.size > 12) this.detailSongTimings.delete(this.detailSongTimings.keys().next().value!);
+      this.requestUpdate();
+    } catch {
+      return;
+    }
   }
   private missionIconRequests = new RequestScope();
   private missionIconSource = "";
@@ -6938,6 +7009,7 @@ export class CatalogScreen extends LitElement {
                     selectDifficulty: (index) => {
                       this.selectSongDifficulty(difficultyKey(difficulty[index] || {}, index));
                     },
+                    onChartReady: (detail) => void this.ensureDetailSongTiming(item, detail),
                   }) ?? nothing)
                 : nothing
             }

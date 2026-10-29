@@ -111,6 +111,8 @@
     "src/lit/shared/catalog.ts",
     "src/lit/shared/hydrate-workspace.ts",
     "src/lit/shared/team-result-image.ts",
+    "src/lit/shared/gekiso-timing.ts",
+    "src/lit/song-skill-points.ts",
     "src/lit/catalog-screen.ts",
     "src/lit/community-workspace.ts",
     "src/lit/team-builder.ts",

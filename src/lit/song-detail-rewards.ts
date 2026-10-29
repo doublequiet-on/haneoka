@@ -8,6 +8,9 @@ import { gekisouMission } from "../lib/gekisou";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
 import { icon, gameGlyph } from "./ui/icon";
 import "./song-skill-points";
+import type { SongChartReady } from "./song-skill-points";
+import type { GekisoTimingSegment } from "../lib/team-builder/gekiso-timing";
+import { gekisoTimingView } from "./shared/gekiso-timing";
 import { byScoreRank, isSongScoreRank, roomRequiredScore, scoreRankName } from "../lib/chart-rates";
 import { clientText } from "../i18n/client";
 import { scoreRankIcon } from "./shared/score-rank";
@@ -46,6 +49,7 @@ export interface SongSummaryRenderOptions {
   detailLabel(key: string): string;
   fieldValue(item: Item, key: string): string;
   selectDifficulty(index: number): void;
+  onChartReady?(detail: SongChartReady): void;
 }
 
 function estimatedDifficulty(row: Item | undefined, locale: string) {
@@ -187,13 +191,14 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
         lang: resolveLocalizedText(item[key], locale).locale,
       })),
     })}
-    ${renderGekisouStages({ item, gekisou, label })}
+    ${renderGekisouStages({ item, gekisou, label, locale })}
     ${
       scoring
         ? html`
             <song-skill-points
               source=${String(difficulty[selectedDifficulty]?.file || "")}
               locale=${locale}
+              @song-chart-ready=${(event: CustomEvent<SongChartReady>) => options.onChartReady?.(event.detail)}
             ></song-skill-points>
           `
         : nothing
@@ -206,10 +211,12 @@ export function renderGekisouStages({
   item,
   gekisou,
   label,
+  locale,
 }: {
   item: Item;
   gekisou?: Item;
   label(key: string, fallback: string): string;
+  locale: string;
 }) {
   const itemGekisou = (item.gekisou as Item | undefined) || {};
   const gekisouData = gekisou || {};
@@ -235,8 +242,9 @@ export function renderGekisouStages({
       <li>
         ${image ? gameGlyph(image) : nothing}
         <span>
-          <small>${label("gekisouSegment", "Gekisou stage")} ${index + 1}</small>
+          <small><span aria-hidden="true">${index + 1}</span><span class="sr-only">${label("gekisouSegment", "Gekisou stage")} ${index + 1}</span></small>
           <strong>${label(mission.key, mission.fallback)}</strong>
+          ${mission.icon === "combo" ? html`<span class="song-gekisou-timing-slot">${gekisoTimingView(segments[index]?.timing as GekisoTimingSegment | undefined, locale, label)}</span>` : nothing}
         </span>
       </li>
     `;
