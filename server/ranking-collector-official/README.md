@@ -1,6 +1,6 @@
-# 独立日服榜单采集器
+# 独立四服榜单采集器
 
-采集器从官方 Version 与官方 CDN 的 MasterEvent、MasterChallengeMusic、MasterParameter 生成活动目录，再读取官方单曲榜和总榜，保存 SQLite 历史。HTTP/2、TLS、进程锁和安装入口均由 Python 实现，支持 Windows、Linux 和 macOS，不依赖 PowerShell。工具与网站、生产 Worker 及 Taki 的现有数据源分别运行。
+采集器支持 `jp`、`tw`、`en`、`kr`，每个运行目录固定一个分区，从官方 Version 与官方 CDN 的 MasterEvent、MasterChallengeMusic、MasterParameter 生成活动目录，再读取官方单曲榜和总榜，保存 SQLite 历史。HTTP/2、TLS、进程锁和安装入口均由 Python 实现，支持 Windows、Linux 和 macOS，不依赖 PowerShell。工具与网站、生产 Worker 及 Taki 的现有数据源分别运行。
 
 ## 环境与配置
 
@@ -13,6 +13,22 @@
 - `masterCrypto`：`salt`、`key`、`iv` 的十六进制值。
 
 两个配置文件都放在工具及运行目录之外，不提交或打包。游戏账号凭据与 CDN 认证分别使用。可选代理为本机 HTTP 代理，例如 `--proxy http://127.0.0.1:7897`；也接受 `localhost` 和 `[::1]` 的有效端口。
+
+## 国际服三个分区
+
+`init` 和 `catalog` 使用 `--region tw|en|kr`，缺省仍为 `jp`。繁中网站标识为 `tw`，已有游戏凭据文件中的标识为 `hk`；英文和韩文分别为 `en`、`kr`。三服沿用各自已有游戏身份，工具不执行 SDK 登录或创建账号。
+
+国际服先调用所选分区的匿名 Version，再通过官方 GetServerList 的 areaID（繁中 2、英文 3、韩文 4）发现该区 CDN。发现结果必须匹配固定官方 API、CDN 主机和区域路径，随后匿名获取 Master 清单和三张表。国际服外置配置只需 `masterCrypto`，不使用日服 CDN 用户名或密码；Master 版本与资源版本分别保留，榜单请求同时发送。目录时间沿用游戏 Master 的 UTC+9 时间基准，不按网页语言或操作者时区转换。
+
+每服使用独立运行目录、数据库和 API 端口。错误分区的凭据在创建运行目录前拒绝，已有目录不能切服；活动最高 ID 和历史游标分别保存在各服数据库。API 只接受该运行目录所配置的分区路径。
+
+```sh
+python collector.py catalog --region tw --output <繁中目录检查> --master-config <外置解码配置> --client-version 1.1.0
+python collector.py init --region tw --output <繁中运行目录> --credentials <繁中已有游戏凭据> --master-config <外置解码配置> --hours 0.2 --interval 300 --client-version 1.1.0
+python collector.py start --output <繁中运行目录>
+```
+
+英文和韩文分别指定 `--region en`、`--region kr`，使用对应凭据及全新目录。Master 获取失败保持失败状态，不回退到 Moenotes 或其他分区；凭据拒绝和限流沿用日服的暂停及退避机制。
 
 ## 离线安装
 
@@ -44,9 +60,9 @@ python setup.py --python <Python3.13解释器>
 python collector.py catalog --output <独立目录> --master-config <外置Master配置> --client-version 1.1.0
 ```
 
-匿名 Version 提供当前 Master 版本和动态 CDN 密码；来源固定为官方域名，密码只驻留内存，不写入请求文件、回执或配置。每次发现都获取版本匹配的 Manifest，并按大小及 SHA256 验证三张表后解码。表缓存按版本隔离并原子替换，损坏缓存重新获取。全部表成功后才提交目录，不回退第三方目录；窗口外写入 `event=null`。
+日服匿名 Version 提供当前 Master 版本和动态 CDN 密码；来源固定为官方域名，密码只驻留内存，不写入请求文件、回执或配置。每次发现都获取版本匹配的 Manifest，并按大小及 SHA256 验证三张表后解码。表缓存按版本隔离并原子替换，损坏缓存重新获取。全部表成功后才提交目录，不回退第三方目录；窗口外写入 `event=null`。
 
-JP 时间按 UTC+9 解析，挑战开始字段保留原生拼写 `_stratAt`。单曲和总榜开关来自官方 Master，聚合期来自 `event_ranking_aggregation_time`。多个活跃活动视为冲突；新活动优先于旧活动聚合期。最高已接受活动 ID 与目录同事务保存，状态文件落后、空档或重启都不会接受活动回退。挑战自己的窗口分别标记 `upcoming`、`nowOn`、`aggregation`、`finished`。
+Master 时间按 UTC+9 解析，挑战开始字段保留原生拼写 `_stratAt`。单曲和总榜开关来自官方 Master，聚合期来自 `event_ranking_aggregation_time`。多个活跃活动视为冲突；新活动优先于旧活动聚合期。最高已接受活动 ID 与目录同事务保存，状态文件落后、空档或重启都不会接受活动回退。挑战自己的窗口分别标记 `upcoming`、`nowOn`、`aggregation`、`finished`。
 
 `catalog` 拒绝已有采集运行目录，实际采样与该入口不共享同一输出目录。
 

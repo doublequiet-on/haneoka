@@ -6,10 +6,10 @@ This file records the third-party material known to be vendored, adapted, genera
 
 ## Vendored, packaged, and build-injected artifacts
 
-### Local JP ranking collector
+### Local four-region ranking collector
 
-The standalone `server/ranking-collector-official` tool uses an official JP Master
-catalog and the protocol descriptor validated by the isolated ranking experiments.
+The standalone `server/ranking-collector-official` tool uses official JP and international Master
+catalogs and the protocol descriptors validated by the isolated ranking experiments.
 Its cross-platform Python collector uses pinned protobuf, h2, hpack, hyperframe and
 py3rijndael. Its offline builder also retains pinned setuptools and wheel distributions. Provenance, hashes, retained licenses and protocol limits are
 recorded in [collector notices](server/ranking-collector-official/NOTICES.md).

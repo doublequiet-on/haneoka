@@ -1,4 +1,4 @@
-"""L3: server/L2.md -> ranking-collector-official; framed JP read-only RPC transport with account and stop boundaries."""
+"""L3: server/L2.md -> ranking-collector-official; framed regional read-only RPC transport with account and stop boundaries."""
 import base64
 from datetime import datetime, timezone
 import json
@@ -10,9 +10,12 @@ import uuid
 from google.protobuf import descriptor_pb2, descriptor_pool, json_format, message_factory
 from http2 import post, ORIGIN
 from lifecycle import read_credentials
+from regions import region_config
 
 VERSION = '/app.masterdata.MasterdataService/Version'
-ALLOWED = {VERSION, '/app.event.EventService/GetChallengeMusicRanking', '/app.event.EventService/GetChallengeMusicTotalRanking'}
+SERVERS = '/app.playerlogin.PlayerLoginService/GetServerList'
+ANONYMOUS = {VERSION, SERVERS}
+ALLOWED = {VERSION, SERVERS, '/app.event.EventService/GetChallengeMusicRanking', '/app.event.EventService/GetChallengeMusicTotalRanking'}
 
 
 class VersionError(RuntimeError):
@@ -54,6 +57,9 @@ def unframe(raw):
 class Sampler:
     def __init__(self, args):
         self.args = args
+        self.region = getattr(args, "region", "jp")
+        self.origin = region_config(self.region).origin
+        self.resource_version = None
         self.pool = pool_from_file(args.descriptors)
         self.run_id = uuid.uuid4().hex
         self.output = args.output / self.run_id
@@ -86,14 +92,18 @@ class Sampler:
         self.check_control()
         headers = [('te', 'trailers'), ('x-client-version', self.args.client_version),
                    ('x-platform', 'android'), ('x-request-id', str(uuid.uuid4()))]
-        if name != VERSION:
-            identity, _, auth = read_credentials(self.args.credentials)
+        if name not in ANONYMOUS:
+            identity, _, auth = read_credentials(self.args.credentials, self.region)
             if identity != self.args.credential_identity:
                 raise ValueError('Collector account changed')
             if not self.master_version:
                 raise ValueError('Missing verified master version')
             headers.extend([('x-player-id', auth['player_id']), ('x-player-credential', auth['credential']),
                             ('x-master-version', self.master_version)])
+            if self.region!='jp':
+                if not self.resource_version:raise ValueError('Missing verified resource version')
+                headers.append(('x-resource-version', self.resource_version))
+                if auth.get('bid'):headers.append(('x-player-bid', auth['bid']))
             if auth.get('device_id'):
                 headers.append(('x-device-id', auth['device_id']))
         for _, value in headers:
@@ -122,11 +132,11 @@ class Sampler:
             started = time.monotonic()
             wire = post(name, body, lambda: self.headers(name), proxy=self.args.proxy,
                 connect_ip=getattr(self.args, 'connect_ip', None), timeout=rpc_deadline-started,
-                check_control=self.check_control, include_cdn=include_cdn)
+                check_control=self.check_control, include_cdn=include_cdn, region=self.region)
             self.cdn = wire['cdn'] if include_cdn else None
             receipt = dict(started_at=started_at, received_at=datetime.now(timezone.utc).isoformat(),
-                origin=ORIGIN, path=name, client_version=self.args.client_version,
-                authenticated=name != VERSION, transport='Python h2', runtime='Python '+platform.python_version(),
+                origin=self.origin, path=name, client_version=self.args.client_version,
+                authenticated=name not in ANONYMOUS, transport='Python h2', runtime='Python '+platform.python_version(),
                 proxy=self.args.proxy, connect_ip=getattr(self.args, 'connect_ip', None),
                 elapsed_ms=round((time.monotonic()-started)*1000), status=wire['status'],
                 http_version=wire.get('http_version'), headers=wire['headers'], trailers=wire['trailers'],
@@ -157,5 +167,6 @@ class Sampler:
         if response is None or not response.version:
             raise VersionError(receipt)
         self.master_version = response.version
+        self.resource_version = getattr(response, "resource_version", None)
         return {'master_version': self.master_version, 'receipt': str(path),
                 'http_status': receipt['status'], 'grpc_status': receipt['grpc_status']}

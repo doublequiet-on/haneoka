@@ -19,7 +19,7 @@ from process_lock import process_lock
 def code_identity(args):
     root=Path(__file__).resolve().parent
     files=[root/name for name in ('continuous.py','lifecycle.py','sample.py','history.py',
-        'official_catalog.py','transport.py','http2.py','process_lock.py','total-descriptors.pb')]
+        'official_catalog.py','transport.py','http2.py','process_lock.py','regions.py','total-descriptors.pb','intl-descriptors.pb')]
     files += [root.parent/'collector.py']
     return {str(path.relative_to(root.parent)):hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
 
@@ -34,7 +34,7 @@ def refresh_catalog(args,history,state,discover_fn=None):
     if discover_fn is None:
         from official_catalog import OfficialCatalog
         discover_fn=OfficialCatalog(args.master_config,args.output,args.proxy,args.client_version,
-            stop_file=Path(args.output)/'STOP',deadline=state.get('deadline'))
+            stop_file=Path(args.output)/'STOP',deadline=state.get('deadline'),region=getattr(args,'region','jp'))
     previous=history.catalog()
     definition=accept_catalog(previous,discover_fn())
     highest=max(state.get('highestEventId',0),(previous or {}).get('highestEventId',0))
@@ -58,7 +58,7 @@ def refresh_catalog(args,history,state,discover_fn=None):
 def cycle(args,history,state,discover_fn=None,sample_fn=sample):
     now=time.time();status='waiting';detail=None
     if now<state.get('retryAfter',0):return 'cooldown',None
-    identity,generation=credential_generation(args.credentials)
+    identity,generation=credential_generation(args.credentials,getattr(args,'region','jp'))
     if not credential_ready(state,identity,generation):return 'credentials_required',None
     try:definition=refresh_catalog(args,history,state,discover_fn)
     except InterruptedError:
@@ -71,13 +71,13 @@ def cycle(args,history,state,discover_fn=None,sample_fn=sample):
     if not targets(definition,int(time.time()*1000)):return 'between_events',None
     if (Path(args.output)/'STOP').exists():return 'stopped',None
     if time.time()>=state['deadline']:return 'deadline',None
-    identity,generation=credential_generation(args.credentials)
+    identity,generation=credential_generation(args.credentials,getattr(args,'region','jp'))
     if not credential_ready(state,identity,generation):return 'credentials_required',None
     event_file=Path(args.output)/'discovered-event.json'
     with history.connect() as db:
         cursor=db.execute('SELECT COALESCE(MAX(sequence),0) FROM observations').fetchone()[0]
     try:
-        acquired=sample_fn(SimpleNamespace(credentials=args.credentials,event=str(event_file),
+        acquired=sample_fn(SimpleNamespace(region=getattr(args,'region','jp'),credentials=args.credentials,event=str(event_file),
             output=args.output,client_version=args.client_version,proxy=args.proxy,rounds=1,
             interval=args.interval,credential_identity=identity,deadline=state['deadline']))
         status=('success' if acquired else 'stopped' if (Path(args.output)/'STOP').exists()
@@ -123,7 +123,7 @@ def run(args):
         if state.get('configIdentity')!=args.config_identity:raise ValueError('resume configuration changed')
         if state['interval']!=args.interval:raise ValueError('resume interval changed')
         if state.get('codeIdentity')!=code_identity(args):raise ValueError('run source changed; use a new output directory')
-        identity,generation=credential_generation(args.credentials)
+        identity,generation=credential_generation(args.credentials,getattr(args,'region','jp'))
         credential_ready(state,identity,generation)
         with history.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS collector_cycles(id INTEGER PRIMARY KEY,run_id TEXT,started REAL,finished REAL,status TEXT,detail TEXT)')
