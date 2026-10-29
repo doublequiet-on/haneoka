@@ -43,11 +43,11 @@ def credential_generation(path):
         if not isinstance(credentials.get(key),str) or not credentials[key]:raise ValueError('incomplete credential')
     if credentials.get('bid'):raise ValueError('international identity rejected')
     identity=hashlib.sha256(credentials['player_id'].encode()).hexdigest()
-    generation=hashlib.sha256(json.dumps(credentials,sort_keys=True).encode()).hexdigest()
+    generation=hashlib.sha256(json.dumps({key:credentials[key] for key in ('player_id','credential')},sort_keys=True).encode()).hexdigest()
     return identity,generation
 
 def credential_ready(state, identity, generation):
-    if state.get('identity') not in (None,identity):raise ValueError('test account changed')
+    if state.get('identity') not in (None,identity):raise ValueError('collector account changed')
     state['identity']=identity
     return state.get('blockedGeneration')!=generation
 

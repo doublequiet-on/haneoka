@@ -1,4 +1,4 @@
-"""L3: server/L2.md -> ranking-collector-official; JP-only official board acquisition."""
+"""L3: server/L2.md -> ranking-collector-official; JP board acquisition with account and run controls."""
 import argparse
 from datetime import datetime
 import hashlib
@@ -23,7 +23,11 @@ def run(args):
         msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
         count=0
         failures=0
+        acquired=0
+        def stopped():
+            return (output/'STOP').exists() or time.time()>=args.deadline
         while args.rounds==0 or count<args.rounds:
+            if stopped():break
             start=time.monotonic();count+=1
             definition=json.loads(Path(args.event).read_text(encoding='utf-8-sig'))
             event=definition['event']
@@ -34,13 +38,18 @@ def run(args):
             if not boards:
                 break
             credential=credential_generation(args.credentials)
+            if credential[0]!=args.credential_identity:raise ValueError('collector account changed')
             sampler=transport.Sampler(SimpleNamespace(descriptors=configured_descriptor,
                 output=output/'receipts',client_version=args.client_version,proxy=args.proxy,connect_ip=None,
-                credentials=Path(args.credentials)))
-            sampler.version()
+                credentials=Path(args.credentials),credential_identity=credential[0],
+                stop_file=output/'STOP',deadline=args.deadline))
+            try:sampler.version()
+            except InterruptedError:break
             if definition.get('catalogSource')!='official-master' or definition.get('masterVersion')!=sampler.master_version:
                 raise RuntimeError('Master version changed; rediscover the official catalog next cycle')
             for kind,challenge in boards:
+                if stopped():break
+                if (kind,challenge) not in targets(definition,int(time.time()*1000)):continue
                 oid=uuid.uuid4().hex;identity=('jp',str(event['id']),kind,challenge)
                 receipt=None
                 try:
@@ -65,7 +74,10 @@ def run(args):
                         'catalogTableHashes':definition.get('tableHashes'),
                         'descriptorSha256':hashlib.sha256(configured_descriptor.read_bytes()).hexdigest()
                     }},receipt)
+                    acquired+=1
                     print(json.dumps({'board':kind,'challenge':challenge,'snapshotId':oid,'players':len(players)}),flush=True)
+                except InterruptedError:
+                    break
                 except Exception as error:
                     failures+=1
                     history.record(identity,oid,int(time.time()*1000),receipt=receipt,error=type(error).__name__)
@@ -73,6 +85,8 @@ def run(args):
                     if receipt and (receipt.get('status') in (401,403,429) or receipt.get('grpc_status') in ('7','8','16')):
                         raise RuntimeError('Identity or rate limit requires intervention') from None
             if args.rounds==0 or count<args.rounds:
-                time.sleep(max(0,args.interval-(time.monotonic()-start)))
+                try:sampler.wait(max(0,args.interval-(time.monotonic()-start)))
+                except InterruptedError:break
         if failures:
             raise RuntimeError(f'{failures} board acquisitions failed; inspect local history')
+        return acquired

@@ -1,7 +1,6 @@
 """L3: server/L2.md -> ranking-collector-official; standalone Windows operator entry point."""
 import argparse
 from contextlib import closing, contextmanager
-import gzip
 import hashlib
 import json
 import os
@@ -178,17 +177,17 @@ def start(output, config):
 
 
 def verify_database(path):
+    from history import decode_payload
     with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise ValueError('Backup integrity check failed')
         if db.execute('PRAGMA foreign_key_check').fetchone() is not None:
             raise ValueError('Backup foreign key check failed')
+        if db.execute('SELECT 1 FROM observations WHERE (payload_hash IS NULL)=(error IS NULL) LIMIT 1').fetchone():
+            raise ValueError('Backup observation payload mismatch')
         count = 0
         for digest, body in db.execute('SELECT hash,body FROM payloads'):
-            raw = gzip.decompress(body)
-            if hashlib.sha256(raw).hexdigest() != digest:
-                raise ValueError('Backup payload checksum mismatch')
-            json.loads(raw)
+            decode_payload(digest,body)
             count += 1
         return count
 
@@ -215,8 +214,10 @@ def backup(output, destination):
         temporary.rename(target)
     finally:
         temporary.unlink(missing_ok=True)
+    with target.open('rb') as stream:
+        digest=hashlib.file_digest(stream,'sha256').hexdigest()
     emit(dict(status='backed_up', file=str(target), bytes=target.stat().st_size,
-              verifiedPayloads=count, sha256=hashlib.sha256(target.read_bytes()).hexdigest()))
+              verifiedPayloads=count, sha256=digest))
 
 
 def main():

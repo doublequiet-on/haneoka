@@ -1,11 +1,10 @@
 """L3: server/L2.md -> ranking-collector-official; read-only run evidence."""
 import argparse
-import gzip
-import hashlib
 import json
 from pathlib import Path
 import sqlite3
 import time
+from history import decode_payload
 
 def report(output,verify=False):
     output=Path(output).resolve()
@@ -23,10 +22,11 @@ def report(output,verify=False):
         verified=0
         if verify:
             if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise ValueError('database integrity failed')
+            if db.execute('PRAGMA foreign_key_check').fetchone():raise ValueError('database foreign key check failed')
+            if db.execute('SELECT 1 FROM observations WHERE (payload_hash IS NULL)=(error IS NULL) LIMIT 1').fetchone():
+                raise ValueError('observation payload status mismatch')
             for digest,body in db.execute('SELECT hash,body FROM payloads'):
-                raw=gzip.decompress(body)
-                if hashlib.sha256(raw).hexdigest()!=digest:raise ValueError('payload digest mismatch')
-                json.loads(raw);verified+=1
+                decode_payload(digest,body);verified+=1
         return dict(runId=state['runId'],status=state['status'],pid=state['pid'],
             startedAt=state['startedAt'],deadline=state['deadline'],updatedAt=state.get('updatedAt'),
             elapsedHours=round((min(time.time(),state.get('updatedAt',time.time()))-state['startedAt'])/3600,3),

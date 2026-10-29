@@ -11,6 +11,14 @@ CONTRACT = 'haneoka:ranking-observation/2'
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
 
+def decode_payload(digest, compressed):
+    raw=gzip.decompress(compressed)
+    if hashlib.sha256(raw).hexdigest()!=digest:raise ValueError('payload checksum mismatch')
+    body=json.loads(raw)
+    if not isinstance(body,dict) or not isinstance(body.get('players'),list) or len(body['players'])>100:
+        raise ValueError('invalid stored ranking payload')
+    return body
+
 class History:
     def __init__(self, path, read_only=False):
         self.path = str(path)
@@ -89,18 +97,20 @@ class History:
                 rows = db.execute(query+' AND sequence>? ORDER BY sequence LIMIT 100', (*identity,after)).fetchall()
             result=[]
             for row in rows:
+                if (row['payload_hash'] is None)==(row['error'] is None):
+                    raise ValueError('observation payload status mismatch')
+                if row['payload_hash'] is not None and row['body'] is None:
+                    raise ValueError('observation payload is missing')
                 body=None
                 if row['body'] is not None:
-                    raw=gzip.decompress(row['body'])
-                    if hashlib.sha256(raw).hexdigest()!=row['payload_hash']:
-                        raise ValueError('payload checksum mismatch')
-                    body=json.loads(raw)
+                    body=decode_payload(row['payload_hash'],row['body'])
+                age=time.time()*1000-row['observed_ms']
                 result.append(dict(contract=CONTRACT, snapshotId=row['id'], cursor=row['sequence'],
                     region=row['region'],eventId=row['event_id'],boardKind=row['board_kind'],
                     challengeId=row['challenge_id'] or None, observedAtMs=row['observed_ms'],
                     sourceFetchedAtMs=None,timeBasis='collector_received',source='official-game',
                     payloadHash=row['payload_hash'],error=row['error'],
-                    stale=time.time()*1000-row['observed_ms']>600000,positionSource='responseOrder',
+                    stale=age<0 or age>600000,positionSource='responseOrder',
                     coverage={'limit':100,'returned':len(body['players']) if body else 0},
                     provenance=body.get('provenance') if body else None,
                     players=body['players'] if body else []))
