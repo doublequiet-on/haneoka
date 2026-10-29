@@ -189,6 +189,36 @@ function format(host: TeamBuilder, value: number, digits = 0) {
   }
   return formatter.format(value);
 }
+
+function eventBonusDetails(host: TeamBuilder, hit: EngineHit): TemplateResult | typeof nothing {
+  if (!hit.event) return nothing;
+  const input = resultInputs(host, hit), master = host.master;
+  let bonuses: [number, number] | null = null;
+  if (input && master && (input.goal.kind === "event" || input.goal.kind === "plan")) {
+    const effects = (input.goal.kind === "event" ? input.goal.eventEffects : undefined)
+      ?? master.events.get(input.goal.eventId)?.effects;
+    const snapKeys = hit.snaps.filter((key): key is string => key !== null);
+    const box = resolveBox(master,
+      input.members.filter((row) => hit.members.includes(row.key)),
+      input.snaps.filter((row) => snapKeys.includes(row.key)), input.unknownPolicy);
+    if (effects && box.members.length === hit.members.length && box.snaps.length === snapKeys.length)
+      bonuses = [0, 1].map((type) => (
+        box.members.reduce((sum, member) => sum + memberEventPercent(effects, member, type), 0)
+        + box.snaps.reduce((sum, snap) => sum + snapEventPercent(effects, snap, type), 0)
+      ) / 100) as [number, number];
+  }
+  return html`
+    <dl class="spec-list spec-list--split spec-list--numeric">
+      ${[host.t("pointsBonus", "Point bonus"), host.t("itemsBonus", "Item bonus")].map((label, index) => html`
+        <div>
+          <dt>${label}</dt>
+          <dd>${bonuses ? `${bonuses[index]! >= 0 ? "+" : ""}${format(host, bonuses[index]!, Number.isInteger(bonuses[index]) ? 0 : 2)}%` : "—"}</dd>
+        </div>
+      `)}
+    </dl>
+  `;
+}
+
 const hitKey = (hit: EngineHit) =>
   `${hit.song ? `${hit.song.songId}:${hit.song.difficulty}` : "-"}|${hit.members.join(",")}|${hit.snaps.join(",")}`;
 
@@ -1102,6 +1132,7 @@ export function renderHit(
                       : nothing
                   }
                   <div class="cluster">${chips(host, hit)}</div>
+                  ${eventBonusDetails(host, hit)}
                   ${distribution(host, hit, hit.song)} ${powerNeeded(host, hit, hit.song)} ${skillOrderView(host, hit)}
                 </div>
               `
