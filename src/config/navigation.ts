@@ -85,7 +85,7 @@ export const PRIMARY_DESTINATIONS: PrimaryDestination[] = [
   { id: "stories", route: "/catalog/stories", icon: "auto_stories", label: "navigation.stories", match: ["/catalog/stories"] },
   {
     id: "tools",
-    route: "/team-builder",
+    route: "/tools",
     icon: "construction",
     label: "navigation.tools",
     match: [
@@ -105,10 +105,10 @@ export const PRIMARY_DESTINATIONS: PrimaryDestination[] = [
   },
   {
     id: "games",
-    route: "/sonolus",
+    route: "/games",
     icon: "sports_esports",
     label: "navigation.games",
-    match: ["/sonolus", "/song-puzzle", "/song-guess", "/tools/song-puzzle"],
+    match: ["/games", "/sonolus", "/song-puzzle", "/song-guess", "/tools/song-puzzle"],
   },
   { id: "community", route: "/community", icon: "forum", label: "navigation.community", match: ["/community"] },
   { id: "search", route: "/search", icon: "search", label: "common.actions.search", match: ["/search"] },
@@ -133,6 +133,7 @@ const sections: NavSection[] = [
       { route: "/catalog/song-meta", icon: "monitoring", label: "catalog.songs.fields.songMeta" },
       { route: "/catalog/events", icon: "event", label: "navigation.events" },
       { route: "/catalog/events/tracker", icon: "leaderboard", label: "tools.eventTracker.title" },
+      { route: "/catalog/arena", icon: "emoji_events", label: "navigation.arena" },
       { route: "/catalog/characters", icon: "group", label: "navigation.characters" },
       { route: "/catalog/member-cards", icon: "style", label: "navigation.memberCards" },
       { route: "/catalog/support-cards", icon: "collections", label: "navigation.supportCards" },
@@ -215,7 +216,7 @@ const sections: NavSection[] = [
     label: "navigation.community",
     hideHeading: true,
     items: [
-      { route: "/community", icon: "dynamic_feed", label: "community.page.feedRecommended", children: [
+      { route: "/community/feeds", icon: "dynamic_feed", label: "community.page.feedRecommended", children: [
         { route: "/community/latest", icon: "schedule", label: "community.page.feedLatest" },
         { route: "/community/tags", icon: "sell", label: "community.page.tags" },
       ] },
@@ -284,6 +285,7 @@ const catalogHub: Array<NavItem & { resource?: string; countKey?: string }> = [
   { route: "/catalog/stories", icon: "auto_stories", label: "navigation.stories", resource: "stories", countKey: "episodes" },
   { route: "/catalog/comics", icon: "menu_book", label: "navigation.comics", resource: "comics" },
   { route: "/catalog/events", icon: "event", label: "navigation.events", resource: "events" },
+  { route: "/catalog/arena", icon: "emoji_events", label: "navigation.arena", resource: "arena" },
   { route: "/catalog/gacha", icon: "redeem", label: "navigation.gacha", resource: "gacha" },
   { route: "/catalog/login-campaigns", icon: "event_available", label: "navigation.loginCampaigns", resource: "login-campaigns" },
   { route: "/catalog/missions", icon: "fact_check", label: "navigation.systemNavMissions", resource: "missions" },

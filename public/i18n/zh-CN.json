@@ -265,7 +265,20 @@
     "games": "游戏",
     "gbpArchive": "GBP 资料",
     "projectSekai": "世界计划",
-    "chatCustomizations": "聊天装扮"
+    "chatCustomizations": "聊天装扮",
+    "arena": "激奏竞技场",
+    "mosaic": {
+      "recommended": "社区推荐",
+      "latest": "最新动态",
+      "forums": "讨论板块",
+      "tags": "话题标签",
+      "mine": "我的社区",
+      "following": "关注动态",
+      "bookmarks": "社区收藏",
+      "notifications": "社区通知",
+      "activity": "我的评论",
+      "leader": "队长"
+    }
   },
   "settings": {
     "labels": {
@@ -1032,7 +1045,7 @@
         "upcoming": "即将开始",
         "ended": "已结束",
         "retired": "已绝版",
-        "availability": "即将结束",
+        "availability": "开放顺序",
         "starts": "开始",
         "ends": "结束",
         "status": "状态",
@@ -1333,6 +1346,26 @@
       "bubble": "气泡",
       "frame": "头像框",
       "initialOwnership": "初始拥有"
+    },
+    "arena": {
+      "plays": "{count} 次",
+      "currentRule": "当前规则",
+      "originalRule": "原曲",
+      "schedule": "轮换排期",
+      "period": "时段",
+      "noSchedule": "排期待公布",
+      "songs": "课题歌曲",
+      "rewards": "奖励",
+      "dailyRewards": "每日奖励",
+      "promotionRewards": "首次晋级奖励",
+      "seasonRewards": "赛季最高积分奖励",
+      "points": "竞技场 pt",
+      "exchange": "竞技场兑换所",
+      "calendar": "活动日历",
+      "rotation": "竞技场轮换",
+      "events": "同期活动",
+      "previousSeason": "上一赛季",
+      "nextSeason": "下一赛季"
     }
   },
   "story": {
@@ -2942,7 +2975,39 @@
         "continue": "继续配队",
         "pool": "成员 / 留影",
         "materials": "材料与技能资料"
-      }
+      },
+      "arena": {
+        "tab": "激奏竞技场",
+        "server": "区服",
+        "jp": "日服",
+        "intl": "国际服",
+        "league": "联赛",
+        "season": "第 {count} 赛季",
+        "noSeason": "暂无进行中的赛季",
+        "until": "截至 {time}",
+        "rules": "竞技场规则",
+        "current": "当期规则",
+        "custom": "自定义",
+        "original": "原曲",
+        "needRules": "选择自定义规则或进行中的联赛",
+        "attribute": "歌曲属性",
+        "range": "第 {count} 区间",
+        "objective": "配队目标",
+        "shared": "多曲通用队伍",
+        "individual": "各曲分别配队",
+        "usePool": "选择联赛曲池",
+        "mean": "跨曲平均分",
+        "scoreDetails": "逐曲表现",
+        "meanPower": "平均综合力"
+      },
+      "songRules": "歌曲规则",
+      "multiSong": {
+        "mean": "多曲平均最优",
+        "average": "平均{metric}"
+      },
+      "selectAllCharts": "全选",
+      "deselectAllCharts": "全不选",
+      "clearAllCharts": "清空全部选择"
     },
     "calendar": {
       "title": "日历",
@@ -2976,7 +3041,9 @@
       "ourNotesCastBirthday": "Our Notes 声优生日",
       "garupaCharacterBirthday": "GBP 角色生日",
       "garupaCastBirthday": "GBP 声优生日",
-      "externalLive": "外部演出"
+      "externalLive": "外部演出",
+      "arena": "激奏竞技场",
+      "arena-rotation": "竞技场轮换"
     },
     "eventTracker": {
       "title": "活动追踪",

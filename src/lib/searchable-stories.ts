@@ -1,6 +1,7 @@
 import { LOCALES, type Locale } from "../i18n/locales";
 import { projectHaneokaTranscript } from "@haneoka/vega-plugin-haneoka/transcript";
 import { resolveLocalizedText } from "./localized-text";
+import { storyCharacterIds } from "./story-characters";
 import {
   asRecord,
   fetchStaticCatalog,
@@ -134,8 +135,7 @@ async function buildSearchableStoryPages(server: ReleaseServer): Promise<Searcha
     const characterNames = Object.fromEntries(
       LOCALES.map((locale) => [
         locale,
-        (Array.isArray(episode.characterIds) ? episode.characterIds : [])
-          .map(Number)
+        storyCharacterIds(episode)
           .map((id) => text(characters.get(id)?.characterName, locale))
           .filter(Boolean)
           .join("、"),

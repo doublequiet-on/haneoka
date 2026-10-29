@@ -1,4 +1,9 @@
-"""Recompile only current missions from their pinned native Master and catalog inputs."""
+# L3 — GEB
+# Input: Pinned current release, native mission/event Master and resource catalogues.
+# Output: Mission catalogue and event mission details in a derived immutable release.
+# Pos: [Publish map](L2-2.md); bounded current mission repair.
+# Effects/Dependencies: Reads R2 and local staging; optionally publishes CAS and conditionally switches current.
+"""Recompile current missions and event mission details from pinned native inputs."""
 from __future__ import annotations
 
 import argparse
@@ -15,7 +20,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build.catalog_storage import _compile_resource
-from build.game_systems import _missions
+from build.game_systems import _event_mission, _missions
 from core.config import load_server_config
 from core.manifests import stable_json, write_json
 from core.master_values import RESOURCE_TYPES, _localized, _timestamp, _image_variants
@@ -27,6 +32,7 @@ from verify.release import release_entries, write_release_identity_files
 MASTER_TABLES = (
     "MasterMission", "MasterLimitedMission", "MasterLimitedMissionGroup",
     "MasterMissionReward", "MasterText", "MasterStoryEpisode", "MasterDegree",
+    "MasterEventMission", "MasterEvent",
 )
 
 
@@ -100,16 +106,14 @@ def project(base: dict[str, Any], read_entry, staging: Path) -> dict[str, Any]:
         variants = _image_variants(data, row)
         if variants:
             row["imageVariants"] = variants
-    if set(updated["entries"]) != set(original_index["entries"]):
+    added = set(updated["entries"]) - set(original_index["entries"])
+    if set(original_index["entries"]) - set(updated["entries"]) or any(
+        updated["entries"][identity]["kind"] != "event-mission" for identity in added
+    ):
         raise ValueError("mission projection changed current mission identity coverage")
-    baseline = copy.deepcopy(updated)
-    for identity, row in baseline["entries"].items():
-        before = original_index["entries"][identity]
-        for field in CHANGED_FIELDS:
-            if field in before:
-                row[field] = copy.deepcopy(before[field])
-            else:
-                row.pop(field, None)
+    baseline = copy.deepcopy(original_index)
+    for shard in descriptor["entities"]["shards"]:
+        baseline["entries"].update(selected(descriptor["entities"]["prefix"] + shard + ".json"))
     with tempfile.TemporaryDirectory(prefix="mission-parent-proof-") as directory:
         proof = Path(directory)
         old_descriptor, count = _compile_resource("missions", baseline, proof / "api/v1/catalog")
@@ -122,14 +126,64 @@ def project(base: dict[str, Any], read_entry, staging: Path) -> dict[str, Any]:
             raise ValueError("mission parent reconstruction descriptor differs")
         if any(row != entries[row["path"]] for row in prior):
             raise ValueError("mission parent reconstruction changed a protected field or image variant")
+    for identity, before in baseline["entries"].items():
+        projected = updated["entries"][identity]
+        row = copy.deepcopy(before)
+        for field in CHANGED_FIELDS:
+            if field in projected:
+                row[field] = projected[field]
+            else:
+                row.pop(field, None)
+        if projected.get("kind") == "event-mission":
+            row["rewards"] = projected["rewards"]
+        updated["entries"][identity] = row
     updated_descriptor, count = _compile_resource("missions", updated, staging / "api/v1/catalog")
-    if count != len(original_index["entries"]) or updated_descriptor != descriptor:
+    if count != len(updated["entries"]):
         raise ValueError("mission projection changed the catalog descriptor")
+    expected_paths |= {updated_descriptor["index"]} | {
+        updated_descriptor["entities"]["prefix"] + shard + ".json"
+        for shard in updated_descriptor["entities"]["shards"]
+    }
+    catalog["resources"]["missions"] = updated_descriptor
+    summary_path = catalog["summary"]
+    summary = selected(summary_path)
+    summary["resources"]["missions"]["count"] = count
+    write_json(staging / summary_path, summary)
+    write_json(staging / "api/v1/catalog/manifest.json", catalog, pretty=True)
+    expected_paths |= {summary_path, "api/v1/catalog/manifest.json"}
+
+    event_descriptor = catalog["resources"]["events"]
+    events = selected(event_descriptor["index"])
+    event_storage = event_descriptor.get("entities", {})
+    for shard in event_storage.get("shards", []):
+        events["entries"].update(selected(event_storage["prefix"] + shard + ".json"))
+    with tempfile.TemporaryDirectory(prefix="event-mission-parent-proof-") as directory:
+        proof = Path(directory)
+        parent_descriptor, _ = _compile_resource("events", events, proof / "api/v1/catalog")
+        if parent_descriptor != event_descriptor or any(row != entries[row["path"]] for row in release_entries(proof)):
+            raise ValueError("event mission parent reconstruction differs")
+    mission_rewards = {int(row["_id"]): row for row in data.rows("MasterMissionReward")}
+    for identity, event in events["entries"].items():
+        rows = [row for row in data.rows("MasterEventMission") if int(row["_eventId"]) == int(identity)]
+        if rows != [value["raw"] for value in event["missions"]]:
+            raise ValueError("event mission native rows differ from the current event")
+        event["missions"] = [_event_mission(data, documents, RESOURCE_TYPES, row, mission_rewards) for row in rows]
+        if rows:
+            event["support"]["MasterEventMission"] = event["missions"]
+        if "MasterMissionReward" not in event["sourceTables"]:
+            event["sourceTables"].insert(event["sourceTables"].index("MasterStoryReward") + 1, "MasterMissionReward")
+    compiled_events, _ = _compile_resource("events", events, staging / "api/v1/catalog")
+    if compiled_events != event_descriptor:
+        raise ValueError("event mission projection changed the event descriptor")
+    expected_paths |= {event_descriptor["index"]} | {
+        event_storage["prefix"] + shard + ".json"
+        for shard in event_storage.get("shards", [])
+    }
     changed = []
     for row in release_entries(staging):
         if row["path"] not in expected_paths:
             raise ValueError("mission projection escaped its exact path scope")
-        if row == entries[row["path"]]:
+        if row == entries.get(row["path"]):
             (staging / row["path"]).unlink()
         else:
             changed.append(row)

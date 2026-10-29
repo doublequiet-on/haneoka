@@ -1,0 +1,19 @@
+---
+import Base from "../layouts/Base.astro";
+import AppShell from "./AppShell.astro";
+import DestinationHub from "./DestinationHub.astro";
+import { hubDestination, type HubId } from "../config/destination-hubs";
+import { t } from "../i18n/messages";
+import type { Locale } from "../i18n/locales";
+import type { ReleaseServer } from "../lib/release-server";
+import { resourceCollectionHref } from "../lib/resource-route";
+const { id, locale, server } = Astro.props as { id: HubId; locale: Locale; server?: ReleaseServer };
+const destination = hubDestination(id);
+const title = t(locale, destination.label);
+const canonicalRoute = server ? resourceCollectionHref(destination.route, server, locale) : undefined;
+---
+<Base locale={locale} route={destination.route} canonicalRoute={canonicalRoute} title={title} titleKey={destination.label}>
+  <AppShell locale={locale} route={destination.route} title={title} titleKey={destination.label} server={server}>
+    <div class="page"><DestinationHub id={id} locale={locale} server={server} /></div>
+  </AppShell>
+</Base>

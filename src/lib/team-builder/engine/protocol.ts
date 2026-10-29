@@ -10,6 +10,7 @@ import type { PlayModel } from "./live";
 import type { PlayerInput } from "./api";
 
 export type EvaluateRequest = {
+  songRules?: import("../arena").SongRules;
   members: MemberInput[];
   snaps: SnapInput[];
   player: PlayerInput;
@@ -17,11 +18,13 @@ export type EvaluateRequest = {
   team: TeamSpec;
   songs: SongRef[];
   play: PlayModel;
-  gekiso?: Pick<Extract<Goal, { kind: "gekiso" }>, "accuracy" | "rank" | "seeds">;
+  gekiso?: Pick<Extract<Goal, { kind: "gekiso" }>, "accuracy" | "rank" | "seeds" | "arena">;
   challengeEventId: number | null;
   event: { eventId: number; route: "live" | "challenge"; consumption: number; eventEffects?: readonly import("./master").EventEffectRow[] } | null;
 };
 export type ExplainRequest = {
+  songRules?: import("../arena").SongRules;
+  arena?: import("./api").ArenaGoal;
   members: MemberInput[];
   snaps: SnapInput[];
   unknownPolicy: UnknownPolicy;

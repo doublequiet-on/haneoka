@@ -4,6 +4,7 @@
 // Pos: [Map](L2.md)；前端请求与静态文档的连接点。
 // Effects/Dependencies: 开发读取本地载荷；生产预渲染可写静态文档；调用下游渲染。
 import { defineMiddleware } from "astro:middleware";
+import { communityChartShellPath, legacyCommunityChartRedirectTarget, rewriteCommunityChartDocument } from "./lib/community-chart-route";
 import fs from "node:fs";
 import path from "node:path";
 import { staticDocumentLookupPath, coreStaticDocumentPath } from "./lib/static-documents";
@@ -15,6 +16,8 @@ import { providerEntityHtmlPath } from "./lib/provider-entity-data";
 import { withMaterialStylePreloads } from "./server/material-ssr-styles";
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  let chartShell: string | undefined;
+  let chartPath: string | undefined;
   if (import.meta.env.DEV && /^\/provider-static\/data\/[a-f0-9]{64}\.json$/u.test(context.url.pathname)) {
     try {
       return Response.json(readProviderStaticData(context.url.pathname));
@@ -28,8 +31,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return entry ? Response.json(readProviderEntityPayload(entry), { headers: { "Cache-Control": "no-cache", ETag: `"${entry.sha256}"` } }) : new Response("Not found", { status: 404 });
   }
   if (import.meta.env.DEV) {
-    const chart = /^\/(jp|intl)\/(ja|en|zh-TW|zh-CN|ko)\/charts\/[0-9a-f-]{36}(?:\/chart)?\/?$/u.exec(context.url.pathname);
-    if (chart) return context.rewrite(new URL(`/${chart[1]}/${chart[2]}/charts/_/${context.url.search}`, context.url));
+    const legacyChart = legacyCommunityChartRedirectTarget(context.url.pathname, context.url.search);
+    if (legacyChart && (context.request.method === "GET" || context.request.method === "HEAD")) return context.redirect(legacyChart, 308);
+    chartShell = communityChartShellPath(context.url.pathname);
+    chartPath = chartShell ? context.url.pathname
+      : /^\/(ja|en|zh-TW|zh-CN|ko)\/community\/charts\/_\/?$/u.test(context.url.pathname)
+        ? context.request.headers.get("x-haneoka-chart-path") || undefined : undefined;
     const selected = providerEntityFromUrl(context.url);
     if (selected && fs.existsSync(path.join(providerEntityRoot(), "manifest.json"))) {
       const entry = providerEntityManifestEntry(providerEntityHtmlPath(selected), true);
@@ -41,16 +48,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
     const community = /^\/(ja|en|zh-TW|zh-CN|ko)\/community\/(posts\/[^/]+(?:\/edit)?|users\/[^/]+|forums\/[^/]+)\/?$/u.exec(context.url.pathname);
     if (community) {
-      const target = new URL(`/${community[1]}/community/${community[2]!.startsWith("forums/") ? "forums/" : ""}`, context.url);
+      const target = new URL(`/${community[1]}/community/${community[2]!.startsWith("forums/") ? "forums/" : "feeds/"}`, context.url);
       target.search = context.url.search;
       return context.rewrite(target);
     }
   }
-  let response = await next();
+  let response = chartShell ? await context.rewrite(new URL(`${chartShell}${context.url.search}`, context.url)) : await next();
   if (response.body && response.status === 200 && response.headers.get("Content-Type")?.startsWith("text/html")) {
     const headers = new Headers(response.headers);
     for (const name of ["Content-Length", "Content-Encoding", "ETag"]) headers.delete(name);
-    response = new Response(withMaterialStylePreloads(await response.text()), {
+    const html = withMaterialStylePreloads(await response.text());
+    response = new Response(chartPath ? rewriteCommunityChartDocument(html, chartPath, "https://haneoka.org") : html, {
       status: response.status,
       statusText: response.statusText,
       headers,

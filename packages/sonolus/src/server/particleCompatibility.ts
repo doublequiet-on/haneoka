@@ -1,9 +1,13 @@
+// Input: particle packs, source-empty evidence, and compiled engine imports.
+// Output: compatibility validation or a named failure.
+// Pos: Sonolus build-time validation; direct map: ../../L2-2.md.
+// Effects: reads resource identities; allows exact optional effects with engine fallbacks.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { gunzipSync } from "node:zlib";
-import { NATIVE_PARTICLE_OPTIONAL_DRAW_CAPABILITIES } from "../shared/nativeDrawCapabilities.ts";
+import { NATIVE_PARTICLE_OPTIONAL_EFFECTS } from "../shared/nativeDrawCapabilities.ts";
 import {
   NATIVE_PARTICLE_PACKS,
   NATIVE_PARTICLE_SEMANTIC_PREFIX,
@@ -39,9 +43,7 @@ type EmptyProof = {
   profiles: { key: string; sourcePrefix: string }[];
 };
 
-const optionalDrawCapabilities = new Set<string>(
-  NATIVE_PARTICLE_OPTIONAL_DRAW_CAPABILITIES,
-);
+const optionalCapabilities = new Set<string>(NATIVE_PARTICLE_OPTIONAL_EFFECTS);
 const digest = (bytes: Buffer, algorithm: "sha1" | "sha256") =>
   createHash(algorithm).update(bytes).digest("hex");
 const readJson = <T>(path: string): T =>
@@ -106,7 +108,7 @@ export function verifyParticleEffects(
     );
     for (const facet of facets) {
       const missing = facet.names.filter(
-        (name) => !names.has(name) && !optionalDrawCapabilities.has(name),
+        (name) => !names.has(name) && !optionalCapabilities.has(name),
       );
       if (missing.length)
         fail(
@@ -222,7 +224,7 @@ export function verifyParticleEffects(
     const allowedMissing = new Set([
       ...policy.absent,
       ...omitted,
-      ...optionalDrawCapabilities,
+      ...optionalCapabilities,
     ]);
     for (const facet of facets) {
       const missing = facet.names.filter(

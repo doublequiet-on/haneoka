@@ -18,12 +18,15 @@ interactive workspaces in `src/lit`, and the Material Design 3 styles in
 - [Catalog](https://haneoka.org/catalog)
 - Searchable multilingual game data
 - Audio, video, comic, Live2D, story, and asset viewers
+- Gekiso Arena schedule with all five leagues, every published rotation, current-period highlighting, local times, ranks, rewards, and calendar links
 - Interactive chart and story players
 - Song jacket sliding puzzles with mouse dragging, touch swipes, screenshot layout import and solving
 - ADV story playback and authoring
 - Sonolus-compatible play, watch, preview, and tutorial engines
 - Accounts and community features
 - Team builder with separate server inventories and reviewed cross-server JSON imports, including MoeNotes card inventories
+- Shared song type and Gekiso range overrides across automatic teams, manual evaluation, song comparison, and event rewards
+- GEKISO ARENA leagues with current schedules, custom song rules, and one formation optimized across selected songs
 - Community chart publishing, cloud drafts, version history, remixes, and Sonolus play
 - App installations and updates through the Haneoka R2 download mirror
 

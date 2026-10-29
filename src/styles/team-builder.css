@@ -1650,13 +1650,6 @@
       display: grid;
     }
   }
-  @media (max-width: 600px) {
-    .tb .tb-tabs .tab {
-      min-width: 0;
-      flex: 1;
-      padding-inline: var(--md-sys-spacing-2);
-    }
-  }
   .tb .tb-picker-footer .tb-action-menu > div {
     inset-block-end: 100%;
     inset-inline-start: 0;

@@ -13,19 +13,6 @@
     gap: 12px;
     min-width: 0;
   }
-  .song-gekisou-stage__icon {
-    display: block;
-    flex: 0 0 32px;
-    width: 32px;
-    height: 32px;
-    background: var(--md-sys-color-primary);
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    -webkit-mask-size: contain;
-    -webkit-mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-  }
   .song-gekisou-stages li > span:last-child {
     display: grid;
     gap: 4px;
@@ -47,10 +34,8 @@
     .song-gekisou-stages li {
       gap: 6px;
     }
-    .song-gekisou-stage__icon {
-      flex-basis: 24px;
-      width: 24px;
-      height: 24px;
+    .song-gekisou-stages .game-glyph {
+      --game-glyph-size: 24px;
     }
   }
 }

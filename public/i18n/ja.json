@@ -265,7 +265,20 @@
     "games": "ゲーム",
     "gbpArchive": "ガルパ資料",
     "projectSekai": "プロジェクトセカイ",
-    "chatCustomizations": "チャットカスタマイズ"
+    "chatCustomizations": "チャットカスタマイズ",
+    "arena": "撃奏アリーナ",
+    "mosaic": {
+      "recommended": "おすすめの投稿",
+      "latest": "最新の投稿",
+      "forums": "掲示板",
+      "tags": "タグ",
+      "mine": "マイコミュニティ",
+      "following": "フォロー",
+      "bookmarks": "ブックマーク",
+      "notifications": "通知",
+      "activity": "自分のコメント",
+      "leader": "リーダー"
+    }
   },
   "settings": {
     "labels": {
@@ -1032,7 +1045,7 @@
         "upcoming": "開催予定",
         "ended": "終了",
         "retired": "絶版",
-        "availability": "終了が近い順",
+        "availability": "開催状況順",
         "starts": "開始",
         "ends": "終了",
         "status": "状態",
@@ -1333,6 +1346,26 @@
       "bubble": "吹き出し",
       "frame": "アイコンフレーム",
       "initialOwnership": "初期所持"
+    },
+    "arena": {
+      "plays": "{count} 回",
+      "currentRule": "現在のルール",
+      "originalRule": "元の楽曲",
+      "schedule": "ローテーション",
+      "period": "期間",
+      "noSchedule": "スケジュール未発表",
+      "songs": "課題楽曲",
+      "rewards": "報酬",
+      "dailyRewards": "デイリー報酬",
+      "promotionRewards": "初回ランク昇格報酬",
+      "seasonRewards": "シーズン最高アリーナpt報酬",
+      "points": "アリーナpt",
+      "exchange": "撃奏アリーナ交換所",
+      "calendar": "イベントカレンダー",
+      "rotation": "アリーナ切替",
+      "events": "同時開催イベント",
+      "previousSeason": "前のシーズン",
+      "nextSeason": "次のシーズン"
     }
   },
   "story": {
@@ -2942,7 +2975,39 @@
         "continue": "探索を続ける",
         "pool": "メンバー / スナップ",
         "materials": "素材・スキル資料"
-      }
+      },
+      "arena": {
+        "tab": "撃奏アリーナ",
+        "server": "サーバー",
+        "jp": "日本版",
+        "intl": "グローバル版",
+        "league": "リーグ",
+        "season": "シーズン {count}",
+        "noSeason": "開催中のシーズンなし",
+        "until": "{time} まで",
+        "rules": "アリーナルール",
+        "current": "開催中のルール",
+        "custom": "カスタム",
+        "original": "元の楽曲",
+        "needRules": "カスタムルールまたは開催中のリーグを選択",
+        "attribute": "楽曲タイプ",
+        "range": "第 {count} 区間",
+        "objective": "編成目標",
+        "shared": "複数楽曲共通の編成",
+        "individual": "楽曲ごとに編成",
+        "usePool": "リーグの楽曲を選択",
+        "mean": "楽曲全体の平均スコア",
+        "scoreDetails": "楽曲ごとのスコア",
+        "meanPower": "平均総合力"
+      },
+      "songRules": "楽曲ルール",
+      "multiSong": {
+        "mean": "全曲平均で最適編成",
+        "average": "平均{metric}"
+      },
+      "selectAllCharts": "すべて選択",
+      "deselectAllCharts": "すべて解除",
+      "clearAllCharts": "すべての選択をクリア"
     },
     "calendar": {
       "title": "カレンダー",
@@ -2976,7 +3041,9 @@
       "ourNotesCastBirthday": "Our Notes 声優の誕生日",
       "garupaCharacterBirthday": "GBP キャラクターの誕生日",
       "garupaCastBirthday": "GBP 声優の誕生日",
-      "externalLive": "外部ライブ"
+      "externalLive": "外部ライブ",
+      "arena": "撃奏アリーナ",
+      "arena-rotation": "アリーナ切替"
     },
     "eventTracker": {
       "title": "イベント追跡",

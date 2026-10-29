@@ -126,7 +126,8 @@ function conditionLines(host: TeamBuilder, hit: EngineHit): string[] {
 
 export function resultSong(host: TeamBuilder, song: SongRef): TemplateResult {
   const catalog = host.catalog!;
-  const attribute = Number(catalog.song(song.songId).musicType);
+  const rule = resultSettings(host).arena ?? resultInputs(host)?.songRules;
+  const attribute = rule?.musicType || Number(catalog.song(song.songId).musicType);
   const attributeIcon = catalog.attributeIcon(attribute);
   const title = catalog.songTitle(song.songId);
   const href = entityHref({
@@ -229,6 +230,8 @@ function chips(host: TeamBuilder, hit: EngineHit, compact = false): TemplateResu
     labels.set(result, label);
     return result;
   };
+  if (hit.aggregate)
+    return [chip(host.t("arena.meanPower", "Average power"), format(host, hit.power), icon("bolt", 16))];
   if (s.goal !== "power") out.push(chip(host.t("power", "Power"), format(host, hit.power), icon("bolt", 16)));
   if (hit.score) {
     if ((s.goal !== "score" && s.goal !== "gekiso") || scoreGoal(s) !== "mean")
@@ -575,6 +578,8 @@ function orderTimeline(host: TeamBuilder, hit: EngineHit, index: number) {
     timelines.set(key, "loading");
     void host.engine
       .explain({
+        songRules: request.songRules,
+        ...(request.goal.kind === "gekiso" && request.goal.arena ? { arena: request.goal.arena } : {}),
         members: request.members,
         snaps: request.snaps,
         unknownPolicy: request.unknownPolicy,
@@ -918,6 +923,7 @@ function songMetaHref(host: TeamBuilder, hit: EngineHit): string | null {
   });
   const query = new URLSearchParams({ deckPower: String(hit.power), deckSlots: slots.join(",") });
   const settings = resultSettings(host, hit);
+  if (settings.arena || inputs.songRules) return null;
   if (settings.manualEventEnabled && settings.goal === "event") return null;
   const event = settings.eventId !== null ? master.events.get(settings.eventId) : undefined;
   if (hit.event && (settings.goal === "event" || settings.goal === "plan") && settings.route !== "challenge" && event) {
@@ -979,6 +985,27 @@ export function renderHit(
       </header>
       <div class="cluster tb-hit__chips">${chips(host, hit, true)}</div>
       ${options.content ?? nothing} ${formation(host, hit)}
+      ${
+        hit.aggregate
+          ? html`
+              <section class="stack">
+                <h3 class="detail-section-title">${host.t("arena.scoreDetails", "Scores by song")}</h3>
+                ${hit.aggregate.songs.map(
+          (part) => html`
+            <div class="surface stack">
+              ${part.song ? resultSong(host, part.song) : nothing}
+              <div class="row row--between row--wrap">
+                <span class="supporting-text">${resultMetric(host, part, resultSettings(host)).label}</span>
+                <strong class="tabular">${format(host, resultMetric(host, part, resultSettings(host)).value, resultMetric(host, part, resultSettings(host)).digits)}</strong>
+              </div>
+              <div class="cluster">${chips(host, part, true)}</div>
+            </div>
+          `,
+        )}
+              </section>
+            `
+          : nothing
+      }
       <div class="tb-hit__actions">
         ${resultSettings(host, hit).scope !== "theoretical" && resultSettings(host, hit).goal !== "plan" ? html`
           <button class="button button--tonal" type="button" ?disabled=${host.running}
@@ -997,6 +1024,7 @@ export function renderHit(
           ${host.t("saveTeam", "Save team")}
         </button>
         ${
+          resultSettings(host).arena ||
           resultSettings(host).scope === "theoretical" || (usesPtResults(host) && !host.pt.job?.presentation)
             ? nothing
             : html`
@@ -1005,6 +1033,7 @@ export function renderHit(
                   type="button"
                   ?disabled=${stale}
                   @click=${() => {
+                    host.songComparison.update({songRules: resultInputs(host)?.songRules});
                     host.openSongComparison({
                       members: hit.members.map(cardIdOf),
                       snaps: hit.snaps.map((snap) => (snap ? cardIdOf(snap) : null)),
@@ -1047,7 +1076,10 @@ export function renderHit(
           ],
         })}
       </div>
-      ${accordion({
+      ${
+        hit.aggregate
+          ? nothing
+          : accordion({
         id: `tb-detail-${key.replace(/[^a-z0-9]/giu, "-")}`,
         label: host.t("moreDetail", "Details"),
         expanded,

@@ -5,6 +5,7 @@ import { live } from "lit/directives/live.js";
 import "@material/web/progress/linear-progress.js";
 import type { TeamBuilder } from "../team-builder";
 import type { EngineRequest } from "../../lib/team-builder/engine/api";
+import { multiSongControl, songRulesControl } from "./song-rules";
 import { validatePtRequest, type PtIssue } from "../../lib/team-builder/engine/pt-eligibility";
 import {
   canonical,
@@ -212,7 +213,8 @@ export class PtController {
               goal.consumption = this.cycle()!.consumption;
               delete goal.gekiso;
             }
-            this.issues.push(...validatePtRequest(this.host.master, { ...request, goal }));
+            // The native request validates skill programs; retained TS scoring has a smaller skill set.
+            this.issues.push(...validatePtRequest(this.host.master, { ...request, goal }).filter((issue) => issue.code !== "skill"));
           }
         if (this.cycle() && !this.cycle()!.songs.length)
           this.issues.push({ code: "chart", target: "challenge-selection" });
@@ -505,6 +507,8 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                   s.route === "challenge" ? challengeSongs : catalog.normalEventSongIds(s.manualEventEnabled ? null : s.eventId),
                 ),
               )}
+              ${multiSongControl(host)}
+              ${songRulesControl(host)}
               ${
                 autoCp
                   ? html`

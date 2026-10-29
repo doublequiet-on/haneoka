@@ -77,7 +77,9 @@ const japanese = (value: unknown) => Array.isArray(value) ? text(value[0]) : nul
 type Signature = { key: string; evidence: string[] };
 const signature = (parts: unknown[], evidence: string[]): Signature => ({ key: JSON.stringify(parts), evidence });
 /** Official catalogue maps use original IDs within their resource namespace. */
-function entitySignature(resource: CrossCatalogResource, row: CrossCatalogRow, id: string): Signature | null {
+function entitySignature(resource: CrossCatalogResource, row: CrossCatalogRow, id: string, server: OfficialCatalogServer): Signature | null {
+  if (isFormalCatalogSource(server))
+    return signature(["original-entity-id", resource, id], ["original-entity-id", "resource-namespace"]);
   if (crossCatalogDefinition(resource).opaque) {
     if (!id || id.length > 256 || /[\\/\u0000-\u001f\u007f]/u.test(id) || id === "." || id === "..") return null;
   } else if (!/^[1-9]\d*$/u.test(id) || !Number.isSafeInteger(Number(id))) return null;
@@ -210,7 +212,7 @@ export function mergeCrossServerCatalog(
         const formal = isFormalCatalogSource(source.identity.server) && source.collections[resource]?.[id];
         return formal && !semanticOwnersConflict(formal, original, resource);
       })) continue;
-      const sig = entitySignature(resource, row, id), key = sig?.key ?? `independent:${server}:${id}`;
+      const sig = entitySignature(resource, row, id, server), key = sig?.key ?? `independent:${server}:${id}`;
       const bucket = buckets.get(key) ?? { sources: {}, signature: sig };
       (bucket.sources[server] ??= []).push({ identity: { ...identity }, id, row, available: true,
         releasedAt: structuredClone(row.releasedAt ?? row.publishedAt ?? row.publicStartAt ?? row.startAt ?? null), href: href(resource, server, options.locale, id), assets: assets(row) });

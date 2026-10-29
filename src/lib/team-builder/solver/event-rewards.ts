@@ -1,4 +1,5 @@
 import type { EvidenceGap } from "../model.ts";
+import { settleEventReward } from "../event-settlement.ts";
 
 export interface BoostBonusRow {
   consumedCount: number;
@@ -47,14 +48,12 @@ export function resolveBoostBonus(
   for (const value of [rewardRate, playerExpRate, memberExpRate, friendshipExpRate, eventPointRate]) integer(value);
   return { value: { rewardRate, playerExpRate, memberExpRate, friendshipExpRate, eventPointRate }, gaps: [] };
 }
-/** ConsumeLiveBoost 0x60db4ec / event-item paths: every w arithmetic wraps i32.
- * The final signed divide truncates toward zero; no display-percent rounding.
- */
+/** ApplyEventBonus widens the product before division, then caps the result. */
 function eventAmount(bonusBP: number, rate: number, baseAmount: number): number {
   integer(bonusBP);
   integer(rate);
   integer(baseAmount);
-  return Math.trunc(Math.imul(Math.imul((bonusBP + 10000) | 0, rate), baseAmount) / 10000) | 0;
+  return settleEventReward(baseAmount, bonusBP, rate);
 }
 export function calcClientEventPoints(pointBonusBP: number, eventPointRate: number, baseRankPoint: number): number {
   return eventAmount(pointBonusBP, eventPointRate, baseRankPoint);

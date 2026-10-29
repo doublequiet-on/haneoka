@@ -21,6 +21,8 @@ export function conditionSummary(host: TeamBuilder) {
           ? 0
           : songs.length;
   const gekiso = host.tab === "song-comparison" || s.goal === "gekiso" || (s.goal === "event" && s.ptMode === "gekiso");
+  if (host.tab === "arena")
+    return `${host.catalog!.bandName(host.arena.bandId)} ${host.t("chartCount", "{count} charts", { count })}`;
   return [
     host.tab === "song-comparison"
       ? host.t("manualTeam", "Build a team by hand")

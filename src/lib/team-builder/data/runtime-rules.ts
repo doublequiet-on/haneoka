@@ -1,4 +1,5 @@
 import { nativeRow, objectRow, dataRows, type DataRow, type TeamBuilderData } from "../data";
+import { ARENA_MASTER_TABLES } from "../arena";
 
 export const RUNTIME_MASTER_TABLES = {
   parameters: "MasterParameter",
@@ -70,6 +71,7 @@ export async function readRuntimeRulesDocument(identity: RuntimeRulesIdentity, r
     [key, { ...await readTable(table), identity: { ...pin } }] as const));
   const gekiso = await Promise.all(Object.entries(GEKISO_TIMELINE_MASTER_TABLES).map(async ([key, table]) =>
     [key, { ...await readTable(table), identity: { ...pin } }] as const));
+  const arena = await Promise.all(Object.values(ARENA_MASTER_TABLES).map(async (table) => [table, await readTable(table)] as const));
   // Optional compatibility with dispatchers deployed before this selected table was allowed.
   let characterRows: RuntimeRuleTable;
   try { characterRows = await readTable("MasterCharacter"); }
@@ -78,6 +80,7 @@ export async function readRuntimeRulesDocument(identity: RuntimeRulesIdentity, r
     schema: "haneoka-team-runtime-rules-v1", ...pin, tables, challengePointTable, challengeMusicTable,
     boostTables: Object.fromEntries(boosts),
     gekisoTables: Object.fromEntries(gekiso),
+    arenaTables: Object.fromEntries(arena),
     masterCharacterRoster: { ...pin, sourceTable: "MasterCharacter",
       status: characterRows.status === "missing" ? "missing" : "complete", rows: characterRows.rows },
   };

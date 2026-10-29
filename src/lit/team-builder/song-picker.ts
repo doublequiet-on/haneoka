@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Scene-specific chart choices, catalogue and browse preferences.
-// Output: Explicit apply/cancel selection transaction with per-chart filters.
+// Output: Grid chart selection with visible select-all/clear actions and explicit apply/cancel.
 // Pos: [Map](../L2-2.md); shared team workspace chart chooser.
 // Effects/Dependencies: Lit modal, page-local preferences, lazy metadata reads.
 import { matchesSongMissions, matchesSelections } from "../../lib/catalog-filters";
@@ -12,13 +12,12 @@ import {
 } from "../../lib/catalog-query";
 import { html, nothing, type TemplateResult } from "lit";
 import type { SongRef } from "../../lib/team-builder/engine/api";
-import { chooserFacet } from "../ui/chooser-filters";
+import { arenaSongView, type ArenaRule } from "../../lib/team-builder/arena";
+import { chooserFacet, chooserGroup } from "../ui/chooser-filters";
 import { filterChip, inputChip, segmented } from "../ui/controls";
 import { actionMenu } from "../ui/action-menu";
 import { asyncRegion } from "../ui/async-region";
 import { chartDuration } from "./result-metric";
-import { missionSummary } from "./workspace-state";
-import { songMissions } from "../../lib/catalog-filters";
 import { snackbar } from "../../lib/snackbar";
 import { selectionPane } from "../ui/selection-pane";
 import { chartKey, uniqueCharts } from "./workspace-state";
@@ -29,7 +28,8 @@ export interface SongPickerState {
   single: boolean;
   query: string;
   filtersOpen: boolean;
-  bands: number[];
+  bands: (number | string)[];
+  categories?: number[];
   attributes: number[];
   gekisouTypes: string[];
   gekisouMatch?: "only" | "contains";
@@ -39,6 +39,8 @@ export interface SongPickerState {
   maxLevel?: number | null;
   maxSeconds?: number | null;
   allowedSongIds?: number[];
+  allowedCharts?: SongRef[];
+  songRules?: ArenaRule;
   title?: string;
   context?: string;
   initialized?: boolean;
@@ -51,6 +53,8 @@ const DIFFICULTIES = ["EASY", "NORMAL", "HARD", "EXPERT", "SPECIAL"];
 export function renderSongPicker(host: TeamBuilder): TemplateResult {
   let state = host.songPicker!;
   const catalog = host.catalog!;
+  const songView = (id: number) =>
+    state.songRules ? arenaSongView(catalog.song(id), state.songRules) : catalog.song(id);
   const context = state.context ?? `${host.tab}:${state.single ? "single" : "charts"}`;
   if (!state.initialized) {
     state = host.songPicker = {
@@ -62,10 +66,11 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   }
   const update = (patch: Partial<SongPickerState>) => {
     const next = (host.songPicker = { ...host.songPicker!, ...patch });
-    const { query, bands, attributes, gekisouTypes, gekisouMatch, difficulties, minLevel, maxLevel, maxSeconds } = next;
+    const { query, bands, categories, attributes, gekisouTypes, gekisouMatch, difficulties, minLevel, maxLevel, maxSeconds } = next;
     host.songPickerPreferences.set(context, {
       query,
       bands,
+      categories,
       attributes,
       gekisouTypes,
       gekisouMatch,
@@ -81,10 +86,34 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
     host.requestUpdate();
     void host.updateComplete.then(() => state.opener?.isConnected && state.opener.focus());
   };
+  const bandValues = (id: number): string[] => {
+    const ids = catalog.songBands(id).map(String);
+    if (ids.length) return ids;
+    const row = catalog.song(id);
+    const names = Array.isArray(row.artistName ?? row.bandName) ? row.artistName ?? row.bandName : [row.artistName ?? row.bandName];
+    const credit = String(row.artistId || (names as unknown[]).find(value => typeof value === "string" && value.trim()) || "").normalize("NFKC");
+    return credit ? [`credit:${credit}`] : [];
+  };
+  const bandOptions = new Map(Object.keys(catalog.data.bands).map(id => [id, { value: id, label: catalog.bandName(Number(id)) }]));
+  const categoryName = (value: string) => {
+    const key = ["original", "virtual", "jpop", "anime", "game"][Number(value) - 1];
+    return key ? host.common(`catalog.songs.types.${key}`, value) : value;
+  };
+  const categoryValues = (id: number): string[] => ((catalog.song(id).musicCategories as number[] | undefined) ?? []).map(String);
+  const categoryOptions = [...new Set(Object.keys(catalog.data.songs).flatMap(id => categoryValues(Number(id))))]
+    .sort((a, b) => Number(a) - Number(b))
+    .map(value => ({ value, label: categoryName(value) }));
+  const credits = new Map<string, number>();
+  for (const id of Object.keys(catalog.data.songs).map(Number)) for (const value of bandValues(id)) {
+    if (!value.startsWith("credit:")) continue;
+    credits.set(value, id);
+    bandOptions.set(value, { value, label: catalog.songArtist(id) });
+  }
   const queryContext: CatalogQueryContext = {
     game: "our-notes",
     kind: "song",
     aliases: [
+      ...[...credits].map(([value, id]) => ({ key: "collectionBand", value, names: catalogQueryNames({ bandName: catalog.song(id).artistName ?? catalog.song(id).bandName }, "band") })),
       ...Object.entries(catalog.data.characters).map(([id, row]) => ({
         key: "character",
         value: id,
@@ -108,6 +137,8 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const difficulties = state.difficulties ?? [state.difficulty];
   const legal = (song: SongRef) =>
     (!state.allowedSongIds || state.allowedSongIds.includes(song.songId)) &&
+    (!state.allowedCharts ||
+      state.allowedCharts.some((ref) => ref.songId === song.songId && ref.difficulty === song.difficulty)) &&
     catalog.difficultyRows(song.songId).some((row) => Number(row.difficulty) === song.difficulty);
   const allCharts = Object.keys(catalog.data.songs)
     .map(Number)
@@ -126,13 +157,15 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const incomplete = durationLoading || durationError;
   const visible = allCharts.filter((ref) => {
     const id = ref.songId,
-      song = catalog.song(id);
+      song = songView(id);
     if (!difficulties.includes(ref.difficulty)) return false;
-    if (state.bands.length && !catalog.songBands(id).some((band) => state.bands.includes(band))) return false;
+    if (state.bands.length && !bandValues(id).some(value => state.bands.map(String).includes(value))) return false;
+    if (!matchesSelections(categoryValues(id), (state.categories ?? []).map(String))) return false;
     if (state.attributes.length && !state.attributes.includes(Number(song.musicType))) return false;
     if (!matchesSongMissions(song, state.gekisouTypes, missionMode)) return false;
     if (
-      !matchesSelections(catalog.songBands(id).map(String), facets.collectionBand || []) ||
+      !matchesSelections(bandValues(id), facets.collectionBand || []) ||
+      !matchesSelections(categoryValues(id), facets.category || []) ||
       !matchesSelections(
         (Array.isArray(song.vocalCharacterIds) ? song.vocalCharacterIds : []).map(String),
         facets.character || [],
@@ -163,6 +196,8 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const outside = validSelected.filter((song) => !visibleKeys.has(chartKey(song)));
   const shown = state.view === "outside" ? outside : state.view === "unavailable" ? unavailable : visible;
   const selected = new Set(state.songs.map(chartKey));
+  const shownKeys = new Set(shown.map(chartKey));
+  const selectableShown = shown.filter(legal);
   const replace = (songs: SongRef[]) => {
     update({ songs: uniqueCharts(songs), undo: state.songs });
     snackbar(host.t("selectionUpdated", "Selection updated"));
@@ -175,12 +210,9 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
         : state.single
           ? [song]
           : [...state.songs, song],
+      undo: state.songs,
     });
   };
-  const gekiso =
-    host.tab === "song-comparison" ||
-    host.searchSettings.goal === "gekiso" ||
-    (host.tab === "pt" && host.settings.rewardMode === "recommendation" && host.searchSettings.ptMode === "gekiso");
   const missionFilters = html`
     <div class="cluster">
       ${["Combo", "Luck", "JustCount", "Mix"].map((value, i) =>
@@ -234,7 +266,13 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
       "collectionBand",
       [...state.bands.map(String), ...(facets.collectionBand ?? [])],
       { bands: [] },
-      (v: string) => catalog.bandName(Number(v)),
+      (v: string) => bandOptions.get(v)?.label ?? catalog.bandName(Number(v)),
+    ],
+    [
+      "category",
+      [...(state.categories ?? []).map(String), ...(facets.category ?? [])],
+      { categories: [] },
+      categoryName,
     ],
     [
       "type",
@@ -268,6 +306,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const clearFilters = () =>
     update({
       bands: [],
+      categories: [],
       attributes: [],
       gekisouTypes: [],
       gekisouMatch: "only",
@@ -287,7 +326,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
     search: (query) => update({ query }),
     filterLabel: `${host.t("filters", "Filters")}${applied.length ? ` · ${applied.length}` : ""}`,
     filtersOpen: state.filtersOpen,
-    layout: "list",
+    layout: "grid",
     filterCount: applied.length,
     toggleFilters: () => update({ filtersOpen: !state.filtersOpen }),
     filterLayout: "facets",
@@ -322,9 +361,34 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
       </div>
     `,
     filters: html`
-      <div class="stack">
-        ${missionFilters}${missionMatch} ${levelField("minLevel", minLevel, host.t("sc.minLevel", "Minimum level"))}
-        ${levelField("maxLevel", maxLevel, host.t("sc.maxLevel", "Maximum level"))}
+        ${chooserFacet({
+          label: host.common("catalog.songs.fields.genre", "Genre"),
+          value: state.categories?.[0] == null ? "" : String(state.categories[0]),
+          allLabel: all,
+          options: categoryOptions,
+          change: (value) => update({ categories: value ? [Number(value)] : [] }),
+        })}
+        ${chooserFacet({
+          label: host.common("catalog.fields.band", "Band"),
+          value: state.bands[0] == null ? "" : String(state.bands[0]),
+          allLabel: all,
+          options: [...bandOptions.values()].filter(option => option.label),
+          change: (value) => update({ bands: value ? [value.startsWith("credit:") ? value : Number(value)] : [] }),
+        })}
+        ${chooserFacet({
+          label: host.common("catalog.fields.attribute", "Attribute"),
+          value: state.attributes[0] == null ? "" : String(state.attributes[0]),
+          allLabel: all,
+          options: (state.songRules ? [1, 2, 3, 4, 5, 99] : [1, 2, 3, 4, 5]).map((id) => ({ value: String(id), label: catalog.attributeName(id),
+          })),
+          change: (value) => update({ attributes: value ? [Number(value)] : [] }),
+        })}
+        ${chooserGroup(host.t("gekiso", "GEKISO"), html`<div class="stack stack--tight">${missionFilters}${missionMatch}</div>`)}
+        ${chooserGroup(host.t("level", "Level"), html`<div class="row">
+          ${levelField("minLevel", minLevel, host.t("sc.minLevel", "Minimum level"))}
+          ${levelField("maxLevel", maxLevel, host.t("sc.maxLevel", "Maximum level"))}
+        </div>`)}
+        ${chooserGroup(host.common("common.fields.duration", "Duration"), html`
         <md-outlined-text-field
           type="number"
           min="1"
@@ -334,42 +398,22 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
             const raw = (event.target as HTMLInputElement).value;
             update({ maxSeconds: raw === "" ? null : Number(raw) });
           }}
-        ></md-outlined-text-field>
-        ${chooserFacet({
-          label: host.common("catalog.fields.band", "Band"),
-          value: state.bands[0] == null ? "" : String(state.bands[0]),
-          allLabel: all,
-          options: Object.keys(catalog.data.bands)
-            .map(Number)
-            .filter((id) => catalog.bandName(id))
-            .map((id) => ({ value: String(id), label: catalog.bandName(id) })),
-          change: (value) => update({ bands: value ? [Number(value)] : [] }),
-        })}
-        ${chooserFacet({
-          label: host.common("catalog.fields.attribute", "Attribute"),
-          value: state.attributes[0] == null ? "" : String(state.attributes[0]),
-          allLabel: all,
-          options: [1, 2, 3, 4, 5].map((id) => ({ value: String(id), label: catalog.attributeName(id) })),
-          change: (value) => update({ attributes: value ? [Number(value)] : [] }),
-        })}
-      </div>
+        ></md-outlined-text-field>`)}
     `,
     kind: "song",
-    items: shown.map((song) => ({
-      ...catalog.songOptions(song.songId, song.difficulty),
-      marks: [],
-      value: chartKey(song),
-      adornment: nothing,
-      subtitle: html`
-        <span class="tb-picker-chart">
-          ${catalog.difficultyLabel(song.songId, song.difficulty)} · ${chartDuration(catalog.chartMetadata(song)?.time)}
-        </span>
-        <span class="tb-picker-artist">
-          ${catalog.songArtist(song.songId)} ·
-          ${catalog.attributeName(Number(catalog.song(song.songId).musicType))}${gekiso ? ` · ${missionSummary(songMissions(catalog.song(song.songId)))}` : ""}
-        </span>
-      `,
-    })),
+    items: shown.map((song) => {
+      const options = catalog.songOptions(song.songId, song.difficulty);
+      const attribute = Number(songView(song.songId).musicType);
+      return {
+        ...options,
+        value: chartKey(song),
+        label: `${catalog.songTitle(song.songId)} ${catalog.difficultyLabel(song.songId, song.difficulty)}`,
+        marks: [
+          { at: "start" as const, image: catalog.attributeIcon(attribute), label: catalog.attributeName(attribute) },
+          ...(options.marks ?? []).filter(mark => mark?.at !== "start"),
+        ],
+      };
+    }),
     selected: "",
     selectedValues: selected,
     select: toggle,
@@ -429,36 +473,34 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
             }
           </div>
           <div class="cluster tb-picker-actions">
-            ${actionMenu({
+            ${!state.single ? html`
+              <button class="button button--text" type="button"
+                ?disabled=${incomplete || !selectableShown.length || selectableShown.every(song => selected.has(chartKey(song)))}
+                @click=${() => replace([...state.songs, ...selectableShown])}>
+                ${host.t("selectAllCharts", "Select all")}
+              </button>
+            ` : nothing}
+            <button class="button button--text" type="button" ?disabled=${!state.songs.some(song => shownKeys.has(chartKey(song)))}
+              @click=${() => replace(state.songs.filter(song => !shownKeys.has(chartKey(song))))}>
+              ${host.t("deselectAllCharts", "Deselect all")}
+            </button>
+            ${!state.single ? actionMenu({
               id: "tb-selection-actions",
               label: host.t("selectionActions", "Selection actions"),
-              items: [
-                ...(state.single
-                  ? []
-                  : [
-                      {
-                        label: host.t("appendMatching", "Add matching charts"),
-                        disabled: incomplete,
-                        run: () => replace([...state.songs, ...visible]),
-                      },
-                      {
-                        label: host.t("replaceSelection", "Use only filtered charts"),
-                        disabled: incomplete,
-                        run: () => replace(visible),
-                      },
-                    ]),
-                { label: host.t("clearSelection", "Clear selection"), run: () => replace([]) },
-              ],
-            })}
-            ${
-              state.undo
-                ? html`
-                    <button class="button button--text" @click=${() => update({ songs: state.undo!, undo: undefined })}>
-                      ${host.t("undoSelection", "Undo")}
-                    </button>
-                  `
-                : nothing
-            }
+              items: [{
+                label: host.t("replaceSelection", "Use only filtered charts"),
+                disabled: incomplete,
+                run: () => replace(visible),
+              }, {
+                label: host.t("clearAllCharts", "Clear all selections"),
+                disabled: !state.songs.length,
+                run: () => replace([]),
+              }],
+            }) : nothing}
+            <button class="button button--text" type="button" ?disabled=${!state.undo}
+              @click=${() => state.undo && update({ songs: state.undo, undo: undefined })}>
+              ${host.t("undoSelection", "Undo")}
+            </button>
           </div>
         </div>
         <button

@@ -265,7 +265,20 @@
     "games": "게임",
     "gbpArchive": "GBP 자료",
     "projectSekai": "프로젝트 세카이",
-    "chatCustomizations": "채팅 꾸미기"
+    "chatCustomizations": "채팅 꾸미기",
+    "arena": "격주 아레나",
+    "mosaic": {
+      "recommended": "커뮤니티 추천",
+      "latest": "최신 게시물",
+      "forums": "게시판",
+      "tags": "태그",
+      "mine": "내 커뮤니티",
+      "following": "팔로우",
+      "bookmarks": "북마크",
+      "notifications": "알림",
+      "activity": "내 댓글",
+      "leader": "리더"
+    }
   },
   "settings": {
     "labels": {
@@ -1032,7 +1045,7 @@
         "upcoming": "예정",
         "ended": "종료",
         "retired": "절판",
-        "availability": "종료 임박순",
+        "availability": "진행 상태순",
         "starts": "시작",
         "ends": "종료",
         "status": "상태",
@@ -1333,6 +1346,26 @@
       "bubble": "말풍선",
       "frame": "프로필 프레임",
       "initialOwnership": "기본 보유"
+    },
+    "arena": {
+      "plays": "{count}회",
+      "currentRule": "현재 규칙",
+      "originalRule": "원곡",
+      "schedule": "로테이션 일정",
+      "period": "기간",
+      "noSchedule": "일정 미공개",
+      "songs": "과제곡",
+      "rewards": "보상",
+      "dailyRewards": "일일 보상",
+      "promotionRewards": "최초 승급 보상",
+      "seasonRewards": "시즌 최고 포인트 보상",
+      "points": "아레나 pt",
+      "exchange": "아레나 교환소",
+      "calendar": "이벤트 캘린더",
+      "rotation": "아레나 로테이션",
+      "events": "동시 개최 이벤트",
+      "previousSeason": "이전 시즌",
+      "nextSeason": "다음 시즌"
     }
   },
   "story": {
@@ -2942,7 +2975,39 @@
         "continue": "탐색 계속",
         "pool": "멤버 / 스냅",
         "materials": "재료 및 스킬 정보"
-      }
+      },
+      "arena": {
+        "tab": "격주 아레나",
+        "server": "서버",
+        "jp": "일본",
+        "intl": "글로벌",
+        "league": "리그",
+        "season": "시즌 {count}",
+        "noSeason": "진행 중인 시즌 없음",
+        "until": "{time}까지",
+        "rules": "아레나 규칙",
+        "current": "현재 규칙",
+        "custom": "사용자 설정",
+        "original": "원래 곡",
+        "needRules": "사용자 규칙 또는 진행 중인 리그를 선택하세요",
+        "attribute": "곡 타입",
+        "range": "{count}번째 구간",
+        "objective": "편성 목표",
+        "shared": "여러 곡의 공통 편성",
+        "individual": "곡별 편성",
+        "usePool": "리그 곡 선택",
+        "mean": "전체 곡 평균 점수",
+        "scoreDetails": "곡별 점수",
+        "meanPower": "평균 종합력"
+      },
+      "songRules": "곡 규칙",
+      "multiSong": {
+        "mean": "전체 곡 평균 최적 편성",
+        "average": "평균 {metric}"
+      },
+      "selectAllCharts": "전체 선택",
+      "deselectAllCharts": "전체 해제",
+      "clearAllCharts": "모든 선택 지우기"
     },
     "calendar": {
       "title": "달력",
@@ -2976,7 +3041,9 @@
       "ourNotesCastBirthday": "Our Notes 성우 생일",
       "garupaCharacterBirthday": "GBP 캐릭터 생일",
       "garupaCastBirthday": "GBP 성우 생일",
-      "externalLive": "외부 라이브"
+      "externalLive": "외부 라이브",
+      "arena": "격주 아레나",
+      "arena-rotation": "아레나 로테이션"
     },
     "eventTracker": {
       "title": "이벤트 추적",

@@ -1,0 +1,35 @@
+@layer pages {
+  .arena-page .arena-rule-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .arena-page .arena-rule-mark img {
+    object-fit: contain;
+  }
+  .arena-page .arena-period {
+    display: grid;
+    gap: 4px;
+    scroll-margin-block: 24px;
+    white-space: normal;
+  }
+  .arena-page .arena-period .chip {
+    justify-self: start;
+  }
+  .arena-page .arena-current-label[aria-hidden="true"] {
+    visibility: hidden;
+  }
+  .arena-page .arena-current-label {
+    color: inherit;
+  }
+  .arena-page tr:has([aria-current="time"]) > * {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  @media (max-width: 600px) {
+    .arena-page .arena-period {
+      max-width: 116px;
+    }
+  }
+}

@@ -3,6 +3,7 @@
 // Output: 条件表单、歌曲代表谱面、可展开明细与固定队伍活动加成。
 // Pos: [Map](../L2-2.md)；独立激奏选曲页签的结果视图。
 // Effects/Dependencies: Lit light DOM；事件回调交由控制器处理。
+import { songRulesControl } from "./song-rules";
 import { toolLayout } from "./tool-layout";
 import { html, nothing } from "lit";
 import { live } from "lit/directives/live.js";
@@ -445,6 +446,7 @@ export function renderSongComparison(host: TeamBuilder, editor?: unknown) {
         >
           ${t("choose")} · ${c.rows.length}
         </button>
+        ${songRulesControl(host, s.songRules, songRules => c.update({songRules}), true)}
         ${select(
           "sc-target",
           t("target"),

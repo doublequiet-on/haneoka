@@ -53,7 +53,7 @@ import {
   type FarmingSettings,
   type Tab,
 } from "./team-builder/types";
-import { farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
+import { farmingConditions, farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
 import { renderBuildTab } from "./team-builder/build-tab";
 import { snackbar } from "../lib/snackbar";
 import { renderBoxTab, renderCardEditor, renderUndoAction } from "./team-builder/box-tab";
@@ -65,6 +65,10 @@ import { Catalog } from "./team-builder/catalog";
 import { songMissions } from "../lib/catalog-filters";
 import { PtController, renderPtTab } from "./team-builder/pt-tab";
 import { SongComparison } from "./team-builder/song-comparison";
+import { ArenaController, renderArenaTab } from "./team-builder/arena-tab";
+import { availableOnServer } from "../lib/team-builder/song-comparison";
+import { activeSongRules } from "../lib/team-builder/arena";
+import { arenaReleased } from "../lib/team-builder/arena";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -106,6 +110,7 @@ export class TeamBuilder extends LitElement {
   pt = new PtController(this);
   songComparison = new SongComparison(this);
   teamGrowth = new TeamGrowthComparison(this);
+  arena = new ArenaController(this);
   private task: { token: symbol; kind: string } | null = null;
   acquireTask(kind: string) {
     if (this.task || this.running || this.manualBusy) return null;
@@ -130,6 +135,7 @@ export class TeamBuilder extends LitElement {
   private resetTasks() {
     this.teamGrowth.close();
     this.songComparison.dispose();
+    this.arena.dispose();
     this.pt.dispose();
     this.farmResultMode = null;
     this.engine?.cancel();
@@ -177,7 +183,7 @@ export class TeamBuilder extends LitElement {
     });
   }
   async ensureConditionsVisible() {
-    if (this.compactConditions && !this.conditionsOpen && ["build", "pt", "song-comparison"].includes(this.tab))
+    if (this.compactConditions && !this.conditionsOpen && ["build", "arena", "pt", "song-comparison"].includes(this.tab))
       this.openConditions();
     await this.updateComplete;
   }
@@ -239,8 +245,8 @@ export class TeamBuilder extends LitElement {
     }
   >();
   private get resultScope() {
-    const tab = ["build", "pt", "song-comparison"].includes(this.tab) ? this.tab : this.lastTaskTab;
-    return tab === "pt" ? (this.settings.rewardMode === "plan" ? "plan" : "farm") : "build";
+    const tab = ["build", "arena", "pt", "song-comparison"].includes(this.tab) ? this.tab : this.lastTaskTab;
+    return tab === "arena" ? "arena" : tab === "pt" ? (this.settings.rewardMode === "plan" ? "plan" : "farm") : "build";
   }
   private get taskResult() {
     const key = this.resultScope;
@@ -590,13 +596,20 @@ export class TeamBuilder extends LitElement {
         )
           this.preparePage(this.pageData, server, visible);
       }
-      const seeded = staticScope && this.data?.identity.server === server && this.catalog?.visuals;
+      const seeded = staticScope && this.data?.identity.server === server && this.pageData?.sources.every((source) => source.arena !== undefined) &&
+        this.catalog?.visuals;
       const data = seeded ? this.data! : await fetchCrossServerTeamBuilderData(server, loadController.signal);
       if (loadController.signal.aborted) return;
       this.data = data;
       if (!seeded) {
+        const matches = (identity: TeamBuilderData["identity"]) =>
+          identity.server === data.identity.server && identity.releaseId === data.identity.releaseId && identity.sourceId === data.identity.sourceId;
+        const previous = this.catalog && matches(this.catalog.data.identity) ? this.catalog.visuals : null;
+        const embedded = this.pageData?.sources.some(source => matches(source.identity)) ? this.pageData.visuals[server] : undefined;
         this.master = compileFromTeamData(data);
         this.catalog = new Catalog(this, data, this.master);
+        if (previous) this.catalog.setVisuals(previous);
+        else if (embedded) this.catalog.setVisuals({ ...embedded, marks: new Map(embedded.marks) });
       }
       this.pt = new PtController(this);
       await this.updateComplete;
@@ -613,7 +626,7 @@ export class TeamBuilder extends LitElement {
       this.store = new BoxStore({ server });
       this.unsubscribe = this.store.subscribe((snapshot) => this.adopt(snapshot));
       void this.store.start();
-      if (!seeded) void this.loadCatalogMetadata();
+      if (!this.catalog?.visuals?.marks.size) void this.loadCatalogMetadata();
     } catch {
       if (!loadController.signal.aborted) {
         this.loadError = this.t("loadFailed", "Card data could not be loaded.");
@@ -660,9 +673,10 @@ export class TeamBuilder extends LitElement {
       );
       if (this.settings.goal === "event" || this.settings.goal === "plan") {
         this.settings = { ...this.settings, rewardMode: this.settings.goal, goal: "score" };
-        if (ownerChanged && this.tab !== "box") this.tab = "pt";
+        if (ownerChanged && this.tab === "build") this.tab = "pt";
       }
       this.songComparison.restore();
+      this.arena.restore();
       this.engine?.prefetch(this.searchSettings.songs);
     }
     this.requestUpdate();
@@ -680,6 +694,10 @@ export class TeamBuilder extends LitElement {
     }
   }
   updateSettings(patch: Partial<BuildSettings>) {
+    if (this.tab === "arena") {
+      this.arena.updateBuild(patch);
+      return;
+    }
     const scopeChanged =
       this.tab === "pt" &&
       patch.rewardMode !== undefined &&
@@ -740,10 +758,11 @@ export class TeamBuilder extends LitElement {
   }
   setTab(tab: Tab) {
     if (this.tab === tab) return;
+    if (this.running && (this.tab === "arena" || tab === "arena")) this.cancel();
     this.slotPicker = null;
     this.saveScroll();
     this.boxQuickEntry = false;
-    if (["build", "pt", "song-comparison"].includes(tab)) this.lastTaskTab = tab;
+    if (["build", "arena", "pt", "song-comparison"].includes(tab)) this.lastTaskTab = tab;
     this.tab = tab;
     this.submitted = false;
     this.requestUpdate();
@@ -753,7 +772,7 @@ export class TeamBuilder extends LitElement {
   /** Cards taking part in a search, after the candidate filters. */
   engineCards() {
     if (!this.master || !this.view) return { members: [], snaps: [] };
-    const s = this.settings;
+    const s = this.tab === "arena" ? this.searchSettings : this.settings;
     const base =
       s.scope === "theoretical"
         ? {
@@ -798,8 +817,19 @@ export class TeamBuilder extends LitElement {
       ...s.bindings.flatMap(([, snap]) => (snap === null ? [] : [snap])),
     ]);
     return {
-      members: base.members.filter((row) => fixedMembers.has(row.cardId) || memberOk(row.cardId)),
-      snaps: base.snaps.filter((row) => fixedSnaps.has(row.cardId) || snapOk(row.cardId)),
+      members: base.members.filter((row) =>
+          (this.tab !== "arena" ||
+            (master.members.get(row.cardId)?.bandId === this.arena.bandId &&
+              availableOnServer(this.data!, "members", row.cardId) &&
+              arenaReleased(this.data!.members[String(row.cardId)]?.catalogMetadata ?? {}))) &&
+          (fixedMembers.has(row.cardId) || memberOk(row.cardId)),
+      ),
+      snaps: base.snaps.filter((row) =>
+          (this.tab !== "arena" ||
+            (availableOnServer(this.data!, "snapshots", row.cardId) &&
+              arenaReleased(this.data!.snapshots[String(row.cardId)]?.catalogMetadata ?? {}))) &&
+          (fixedSnaps.has(row.cardId) || snapOk(row.cardId)),
+      ),
     };
   }
   manualInputs() {
@@ -842,6 +872,7 @@ export class TeamBuilder extends LitElement {
       this.manual,
       this.manualInputs(),
       this.manualGoal(),
+      this.songRules(this.manualGoal()),
     ]);
   }
   manualSuggestionContext() {
@@ -849,9 +880,11 @@ export class TeamBuilder extends LitElement {
   }
   get searchSettings(): BuildSettings {
     const settings =
-      this.tab === "pt" && this.settings.rewardMode !== "plan" ? farmingSettings(this.settings) : this.settings;
+      this.tab === "arena"
+        ? this.arena.settings
+        : this.tab === "pt" && this.settings.rewardMode !== "plan" ? farmingSettings(this.settings) : this.settings;
     const goal =
-      this.tab === "build" && this.buildMode === "manual"
+      ((this.tab === "build" && this.buildMode === "manual") || this.tab === "teams")
         ? settings.manualScoreMode
         : this.tab === "pt"
           ? settings.rewardMode === "plan"
@@ -860,14 +893,34 @@ export class TeamBuilder extends LitElement {
           : settings.goal;
     return this.compatibleSettings({ ...settings, goal });
   }
+  songRules(goal?: Goal | null) {
+    if (this.tab === "arena") return undefined;
+    if (this.tab === "song-comparison") return activeSongRules(this.songComparison.settings.songRules, true);
+    if (goal !== undefined) {
+      if (!goal || goal.kind === "potential" || (goal.kind === "power" && !goal.song)) return undefined;
+      return activeSongRules(this.settings.songRules, goal.kind === "gekiso" || (goal.kind === "event" && !!goal.gekiso));
+    }
+    const s = this.settings;
+    const mode = this.tab === "teams" || (this.tab === "build" && this.buildMode === "manual")
+      ? s.manualScoreMode : this.tab === "pt" ? s.rewardMode === "plan" ? "plan" : "event" : s.goal;
+    if (mode === "potential" || (mode === "power" && !s.powerSong)) return undefined;
+    return activeSongRules(s.songRules, mode === "gekiso" || (mode === "event" && s.farming.play === "gekiso"));
+  }
   hasMission(type: string, songs = this.effectiveSettings().songs): boolean {
+    const rule = this.tab === "arena" ? this.arena.rule : this.songRules();
+    if (rule)
+      return rule.missions.some((mission, index) =>
+        mission === 0
+          ? songs.some((song) => songMissions(this.catalog!.song(song.songId))[index] === type)
+          : ["", "Combo", "Luck", "JustCount"][mission] === type,
+      );
     return songs.some((song) => songMissions(this.catalog!.song(song.songId)).includes(type));
   }
   hasComboSongs(songs = this.effectiveSettings().songs): boolean {
     return this.hasMission("Combo", songs);
   }
   effectiveSettings(mode?: string): BuildSettings {
-    return this.compatibleSettings(this.settings, mode);
+    return this.compatibleSettings(this.tab === "arena" ? this.arena.settings : this.settings, mode);
   }
   private compatibleSettings(settings: BuildSettings, mode?: string): BuildSettings {
     if (mode === "recommendation" || (this.tab === "pt" && settings.rewardMode !== "plan" && !mode))
@@ -905,6 +958,7 @@ export class TeamBuilder extends LitElement {
           : availableSongs;
     return {
       ...settings,
+      ...(settings.aggregation === "mean" && (goal === "score" || goal === "gekiso") ? { criterion: "mean" as const, scoreTarget: "none" as const, gekisoPlacementMode: "rank" as const } : {}),
       minComboBonus: this.hasComboSongs(songs) ? settings.minComboBonus : 1,
       just: this.hasMission("JustCount", songs) ? settings.just : 100,
       ptJust: this.hasMission("JustCount", songs) ? settings.ptJust : 100,
@@ -917,6 +971,7 @@ export class TeamBuilder extends LitElement {
       issues: { field: string; message: string }[] = [];
     const add = (field: string, key: string, fallback: string) =>
       issues.push({ field, message: this.t(key, fallback) });
+    if (this.tab === "arena") issues.push(...this.arena.issues());
     if (!this.engineCards().members.length) add("tb-cards", "needCardsShort", "Choose cards");
     if (s.goal === "event" && s.manualEventEnabled && this.master) {
       const issue = resolveManualEvent(this.master, s.manualEvent).issue;
@@ -984,7 +1039,7 @@ export class TeamBuilder extends LitElement {
       if (parsed.empty) add("tb-placement", "needOpponents", "Enter opponent scores");
       if (parsed.invalid.some(Boolean))
         add("tb-placement", "invalidOpponents", "Use up to four positive scores per range");
-      if (s.songs.some((song) => songMissions(this.catalog!.song(song.songId)).includes("Luck")))
+      if (s.songs.some((song) => this.hasMission("Luck", [song])))
         add("tb-songs", "opponentsLuck", "This chart does not support opponent scores");
     }
     const fixed = new Set([
@@ -1096,7 +1151,7 @@ export class TeamBuilder extends LitElement {
           ...(s.scoreTarget !== "none" ? { target: { kind: s.scoreTarget, score: s.targetScore! } } : {}),
         };
       case "gekiso":
-        return s.songs.length ? this.gekisoGoal(s) : null;
+        return s.songs.length ? { ...this.gekisoGoal(s), ...(s.arena ? { arena: s.arena } : {}) } : null;
       case "event":
         if (s.eventId === null) return null;
         if (s.route !== "skip" && !s.songs.length) return null;
@@ -1131,7 +1186,8 @@ export class TeamBuilder extends LitElement {
                 },
               }
             : {}),
-          ranking: s.fullRanking ? undefined : "primary",
+          ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
+          ranking: s.ptMode === "gekiso" && s.route === "live" ? "pt-only" : s.fullRanking ? undefined : "primary",
           route: s.route,
           eventId: s.eventId,
           songs: s.route === "skip" ? [] : s.songs,
@@ -1177,10 +1233,12 @@ export class TeamBuilder extends LitElement {
             .filter((row) => row.lock && row.use)
             .map((row) => `${kind}${row.cardId}`);
     return {
+      songRules: this.songRules(goal),
+      ...(s.aggregation === "mean" && this.tab !== "arena" && (goal.kind === "score" || goal.kind === "gekiso" || (goal.kind === "event" && goal.route !== "skip")) ? { aggregation: "mean" as const } : {}),
       members: cards.members,
       snaps: cards.snaps,
       player:
-        this.tab === "pt" && s.rewardMode !== "plan" && (!s.farming.includeMemory || s.rewardMode === "recommendation")
+        this.tab === "pt" && s.rewardMode !== "plan" && (!farmingConditions(s.farming).includeMemory || s.rewardMode === "recommendation")
           ? {
               ...this.view.player,
               characterMemory: Object.fromEntries([...(this.master?.characters.keys() ?? [])].map((id) => [id, 0])),
@@ -1209,6 +1267,7 @@ export class TeamBuilder extends LitElement {
     const request = this.request();
     if (request) request.timeLimitMs = null;
     return JSON.stringify([
+      "native-rewards-wide-v2",
       this.snapshot?.owner,
       this.loadedServer,
       this.data?.identity,
@@ -1376,6 +1435,7 @@ export class TeamBuilder extends LitElement {
   private renderTabs(): TemplateResult {
     const tabs = [
       { id: "build", icon: "groups", label: this.t("tabBuild", "Build"), count: null },
+      { id: "arena", icon: "swords", label: this.t("arena.tab", "Gekiso Arena"), count: null },
       { id: "song-comparison", icon: "music_note", label: this.t("sc.tab", "Gekiso songs"), count: null },
       { id: "pt", icon: "emoji_events", label: this.t("pt.tab", "Event rewards"), count: null },
     ] as const;
@@ -1610,6 +1670,7 @@ export class TeamBuilder extends LitElement {
     if (this.pt.correcting && this.tab !== "pt") this.pt.sync();
     this.songComparison.sync();
     this.teamGrowth.sync();
+    this.arena.sync();
     this.comparison.sync(this);
     const buildPanel = () => html`
       <div class="stack tb-build-panel">
@@ -1642,6 +1703,8 @@ export class TeamBuilder extends LitElement {
             ? renderBoxTab(this)
             : this.tab === "account"
               ? renderAccountTab(this)
+              : this.tab === "arena"
+                ? renderArenaTab(this)
               : this.tab === "song-comparison"
                 ? renderSongComparisonTab(this)
                 : renderTeamsTab(this);

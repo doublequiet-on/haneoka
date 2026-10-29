@@ -86,6 +86,7 @@ export class SongComparison {
       s.just,
       s.mode === "ap" ? 0 : s.missEvery,
       s.rank,
+      s.songRules,
       0,
     ]);
   }
@@ -178,6 +179,7 @@ export class SongComparison {
       allowedSongIds: [...this.host.master!.songs.keys()].filter((id) =>
         availableOnServer(this.host.data!, "songs", id),
       ),
+      songRules: this.effectiveSettings.songRules,
       context: "comparison",
       title: this.host.t("sc.choose", "Playable charts"),
       change: (songs) => this.update({ songs }),
@@ -260,7 +262,7 @@ export class SongComparison {
         row.status = "running";
         delete row.reason;
         host.requestUpdate();
-        const issue = chartIssue(host.master!, host.data!, row.song, settings.rank!);
+        const issue = chartIssue(host.master!, host.data!, row.song, settings.rank!, settings.songRules);
         if (issue) {
           row.status = "failed";
           row.reason = issue;

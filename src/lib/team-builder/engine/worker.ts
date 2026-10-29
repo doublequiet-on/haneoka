@@ -160,7 +160,7 @@ async function execute(call: EngineCall) {
       const rows = await charts(songs, call.loadedCharts);
       if (pendingFloor !== null && Number.isFinite(pendingFloor)) {
         request = request.rewardPhase && request.rewardPhase.kind !== "primary"
-          ? { ...request, rewardPhase: { ...request.rewardPhase, floor: Math.max(request.rewardPhase.floor ?? 0, pendingFloor) } }
+          ? { ...request, rewardPhase: { ...request.rewardPhase, floor: Math.max(request.rewardPhase.floor ?? -Infinity, pendingFloor) } }
           : { ...request, floors: { ...request.floors, [chartKey(songs[0]!)]: Math.max(request.floors?.[chartKey(songs[0]!)] ?? -Infinity, pendingFloor) } };
       }
       // Each improvement arrives as one song's best teams so far.

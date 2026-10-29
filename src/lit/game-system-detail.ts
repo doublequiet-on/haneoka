@@ -1136,7 +1136,7 @@ function renderRotatingOverview(c: Controller, item: Item) {
                 <div class="spec-list__wide">
                   <dt>${eventText(c, "eventAvailableRankings", "Rankings")}</dt>
                   <dd>
-                    ${activeRankings.length ? activeRankings.map(([, key, fallback]) => c.label(key, fallback)).join(" · ") : eventText(c, "eventRankingOff", "No rankings")}
+                    ${activeRankings.length ? activeRankings.map(([, key, fallback]) => eventText(c, key, fallback)).join(" · ") : eventText(c, "eventRankingOff", "No rankings")}
                   </dd>
                 </div>
               `
@@ -1273,7 +1273,7 @@ function renderEventStory(c: Controller, item: Item) {
         entries.length
           ? html`
               <div class="stack stack--tight">
-                <h4 class="md-title-small md-on-surface-variant">${c.label(key, fallback)}</h4>
+                <h4 class="md-title-small md-on-surface-variant">${eventText(c, key, fallback)}</h4>
                 <div class="collection collection--story">
                   ${entries.map((episode) => {
                     const titleValue = episode.titleText || episode.title || episode.prefix;
@@ -1624,7 +1624,7 @@ function renderEventEffects(c: Controller, item: Item) {
 }
 
 function renderEventMissions(c: Controller, item: Item) {
-  const missions = eventRows(item.missions);
+  const missions = eventRows(item.missions).filter((mission) => c.plainGameText(mission.description));
   if (!missions.length) return nothing;
   return html`
     <section class="detail-section">
@@ -1633,7 +1633,13 @@ function renderEventMissions(c: Controller, item: Item) {
         ${missions.map(
           (mission) => html`
             <div>
-              <dt>${c.plainGameText(mission.description) || eventText(c, "eventMission", "Event mission")}</dt>
+              <dt>
+                ${mission.id
+                  ? html`<a href=${canonicalHref(c, `/catalog/missions?entry=${encodeURIComponent(String(mission.id))}`)}>
+                      ${c.plainGameText(mission.description)}
+                    </a>`
+                  : c.plainGameText(mission.description)}
+              </dt>
               <dd>
                 <ul class="detail-object-list">
                   ${eventRows(mission.rewards).map((reward) => eventRewardRow(c, reward))}

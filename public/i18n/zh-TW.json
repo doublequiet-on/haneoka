@@ -265,7 +265,20 @@
     "games": "遊戲",
     "gbpArchive": "GBP 資料",
     "projectSekai": "世界計畫",
-    "chatCustomizations": "聊天裝扮"
+    "chatCustomizations": "聊天裝扮",
+    "arena": "激奏競技場",
+    "mosaic": {
+      "recommended": "社群推薦",
+      "latest": "最新動態",
+      "forums": "討論看板",
+      "tags": "話題標籤",
+      "mine": "我的社群",
+      "following": "追蹤動態",
+      "bookmarks": "社群收藏",
+      "notifications": "社群通知",
+      "activity": "我的留言",
+      "leader": "隊長"
+    }
   },
   "settings": {
     "labels": {
@@ -1032,7 +1045,7 @@
         "upcoming": "即將開始",
         "ended": "已結束",
         "retired": "已絕版",
-        "availability": "即將結束",
+        "availability": "開放順序",
         "starts": "開始",
         "ends": "結束",
         "status": "狀態",
@@ -1333,6 +1346,26 @@
       "bubble": "氣泡",
       "frame": "頭像框",
       "initialOwnership": "初始擁有"
+    },
+    "arena": {
+      "plays": "{count} 次",
+      "currentRule": "目前規則",
+      "originalRule": "原曲",
+      "schedule": "輪換排程",
+      "period": "時段",
+      "noSchedule": "排程待公布",
+      "songs": "課題歌曲",
+      "rewards": "獎勵",
+      "dailyRewards": "每日獎勵",
+      "promotionRewards": "首次晉級獎勵",
+      "seasonRewards": "賽季最高積分獎勵",
+      "points": "競技場 pt",
+      "exchange": "競技場交換所",
+      "calendar": "活動日曆",
+      "rotation": "競技場輪換",
+      "events": "同期活動",
+      "previousSeason": "上一賽季",
+      "nextSeason": "下一賽季"
     }
   },
   "story": {
@@ -2942,7 +2975,39 @@
         "continue": "繼續配隊",
         "pool": "成員 / 留影",
         "materials": "材料與技能資料"
-      }
+      },
+      "arena": {
+        "tab": "激奏競技場",
+        "server": "伺服器",
+        "jp": "日服",
+        "intl": "國際服",
+        "league": "聯賽",
+        "season": "第 {count} 賽季",
+        "noSeason": "目前沒有進行中的賽季",
+        "until": "至 {time}",
+        "rules": "競技場規則",
+        "current": "當期規則",
+        "custom": "自訂",
+        "original": "原曲",
+        "needRules": "選擇自訂規則或進行中的聯賽",
+        "attribute": "歌曲屬性",
+        "range": "第 {count} 區間",
+        "objective": "配隊目標",
+        "shared": "多曲通用隊伍",
+        "individual": "各曲分別配隊",
+        "usePool": "選擇聯賽曲目",
+        "mean": "跨曲平均分",
+        "scoreDetails": "各曲表現",
+        "meanPower": "平均綜合力"
+      },
+      "songRules": "歌曲規則",
+      "multiSong": {
+        "mean": "多曲平均最佳",
+        "average": "平均{metric}"
+      },
+      "selectAllCharts": "全選",
+      "deselectAllCharts": "全不選",
+      "clearAllCharts": "清空全部選擇"
     },
     "calendar": {
       "title": "日曆",
@@ -2976,7 +3041,9 @@
       "ourNotesCastBirthday": "Our Notes 聲優生日",
       "garupaCharacterBirthday": "GBP 角色生日",
       "garupaCastBirthday": "GBP 聲優生日",
-      "externalLive": "外部演出"
+      "externalLive": "外部演出",
+      "arena": "激奏競技場",
+      "arena-rotation": "競技場輪換"
     },
     "eventTracker": {
       "title": "活動追蹤",

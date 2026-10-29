@@ -4,6 +4,7 @@
 // Pos: [Map](L2-2.md)；配队资料模型与运行时适配枢纽。
 // Effects/Dependencies: 调用规则／资源／证据适配；下层又引用本文件解析函数，存在运行时回边。
 import type { PowerStats, ReleaseIdentity } from "./model";
+import { adaptArenaCatalog, type ArenaCatalog } from "./arena";
 import { projectEventDetail } from "./data/events";
 import { adaptChallengeMusicTable, type ChallengeMusicTable } from "./data/resource-stage";
 import { adaptRuntimeRules, adaptChallengePointTable, adaptBoostTables, adaptGekisoTimelineTables, GEKISO_TIMELINE_MASTER_TABLES, type RuntimeRules, type LiveChallengePointTable } from "./data/runtime-rules";
@@ -57,6 +58,7 @@ export interface SnapshotCatalog {
   gekisoSupportSkillSlotsKnown?: boolean;
 }
 export interface TeamBuilderData {
+  arena?: Record<string, ArenaCatalog>;
   crossServer?: {
     identities: Record<string, TeamBuilderData["identity"]>;
     owners: Record<string, Record<string, string>>;
@@ -257,8 +259,10 @@ export function adaptTeamBuilderData(
   ) as DataRow;
   const gekisoRules = compactNative(objectRow(documents.gekisou)) as DataRow;
   const gekiso = adaptGekisoTimelineTables(identity, objectRow(documents["runtime-rules"]).gekisoTables, liveTools, gekisoRules);
+  const arena = adaptArenaCatalog(identity, objectRow(documents["runtime-rules"]).arenaTables);
   for (const key of Object.keys(GEKISO_TIMELINE_MASTER_TABLES)) delete liveTools[key];
   return {
+    arena: arena ? { [identity.server]: arena } : {},
     schema: "haneoka-team-builder-data-v1",
     identity: { ...identity },
     masterCharacterRoster: adaptMasterCharacterRoster(identity, objectRow(documents["runtime-rules"]).masterCharacterRoster),
@@ -278,6 +282,7 @@ export function adaptTeamBuilderData(
         pick(row, [
           "musicId",
           "musicTitle",
+          "publishedAt",
           "bandId",
           "bandIds",
           "bandName",

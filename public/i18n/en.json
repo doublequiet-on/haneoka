@@ -265,7 +265,20 @@
     "games": "Games",
     "gbpArchive": "GBP archive",
     "projectSekai": "Project Sekai",
-    "chatCustomizations": "Chat customizations"
+    "chatCustomizations": "Chat customizations",
+    "arena": "Gekiso Arena",
+    "mosaic": {
+      "recommended": "Community picks",
+      "latest": "Latest posts",
+      "forums": "Forums",
+      "tags": "Topics",
+      "mine": "My community",
+      "following": "Following",
+      "bookmarks": "Bookmarks",
+      "notifications": "Notifications",
+      "activity": "My comments",
+      "leader": "Leader"
+    }
   },
   "settings": {
     "labels": {
@@ -1032,7 +1045,7 @@
         "upcoming": "Upcoming",
         "ended": "Ended",
         "retired": "Retired",
-        "availability": "Ending soonest",
+        "availability": "Availability order",
         "starts": "Starts",
         "ends": "Ends",
         "status": "Status",
@@ -1333,6 +1346,26 @@
       "bubble": "Bubble",
       "frame": "Avatar frame",
       "initialOwnership": "Owned by default"
+    },
+    "arena": {
+      "plays": "{count} plays",
+      "currentRule": "Current rules",
+      "originalRule": "Original song",
+      "schedule": "Rotation schedule",
+      "period": "Period",
+      "noSchedule": "Schedule pending",
+      "songs": "Challenge songs",
+      "rewards": "Rewards",
+      "dailyRewards": "Daily rewards",
+      "promotionRewards": "First promotion rewards",
+      "seasonRewards": "Season best point rewards",
+      "points": "Arena pt",
+      "exchange": "Arena exchange",
+      "calendar": "Event calendar",
+      "rotation": "Arena rotation",
+      "events": "Concurrent events",
+      "previousSeason": "Previous season",
+      "nextSeason": "Next season"
     }
   },
   "story": {
@@ -2942,7 +2975,39 @@
         "continue": "Continue search",
         "pool": "Members / Snapshots",
         "materials": "Materials and skills"
-      }
+      },
+      "arena": {
+        "tab": "GEKISO ARENA",
+        "server": "Server",
+        "jp": "Japan",
+        "intl": "International",
+        "league": "League",
+        "season": "Season {count}",
+        "noSeason": "No active season",
+        "until": "Until {time}",
+        "rules": "Arena rules",
+        "current": "Current rules",
+        "custom": "Custom",
+        "original": "Original song",
+        "needRules": "Choose custom rules or an active league",
+        "attribute": "Song Type",
+        "range": "Range {count}",
+        "objective": "Team objective",
+        "shared": "One team for all songs",
+        "individual": "A team for each song",
+        "usePool": "Select league song pool",
+        "mean": "Average across songs",
+        "scoreDetails": "Scores by song",
+        "meanPower": "Average power"
+      },
+      "songRules": "Song rules",
+      "multiSong": {
+        "mean": "Best average across songs",
+        "average": "Average {metric}"
+      },
+      "selectAllCharts": "Select all",
+      "deselectAllCharts": "Deselect all",
+      "clearAllCharts": "Clear all selections"
     },
     "calendar": {
       "title": "Calendar",
@@ -2976,7 +3041,9 @@
       "ourNotesCastBirthday": "Our Notes voice actor birthdays",
       "garupaCharacterBirthday": "GBP character birthdays",
       "garupaCastBirthday": "GBP voice actor birthdays",
-      "externalLive": "External live events"
+      "externalLive": "External live events",
+      "arena": "Gekiso Arena",
+      "arena-rotation": "Arena rotation"
     },
     "eventTracker": {
       "title": "Event tracker",

@@ -60,6 +60,7 @@ def enrich_story_birthdays(
         }
         episode["storyCategory"] = "birthday"
         episode["birthday"] = birthday
+        episode["characterIds"] = [character_id]
         index.setdefault(str(character_id), []).append({
             "storyId": story_id,
             "storyKey": story_id,

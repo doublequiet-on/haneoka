@@ -1,3 +1,4 @@
+import { arenaCatalog } from "./arena-catalog";
 import { loadStaticCrossServerCatalog } from "../lib/cross-server/static";
 import { OFFICIAL_CATALOG_SERVERS, type CrossCatalogResource, type OfficialCatalogServer } from "../lib/cross-server/catalog";
 import { isCrossCatalogResource } from "../lib/cross-server/definitions";
@@ -39,6 +40,12 @@ export function catalogSystemData(kind: CatalogSystemKind, server: ReleaseServer
 }
 async function loadData(kind: CatalogSystemKind, server: ReleaseServer, locale: Locale, mode?: string): Promise<CatalogSystemPayload> {
   const payload: CatalogSystemPayload = { schema: "haneoka-catalog-system-v1", kind, server };
+  if (kind === "arena") {
+    const release = await staticCatalogRelease(server);
+    payload.arena = await arenaCatalog(server, release);
+    payload.marks = await fetchStaticCatalog("ui-marks", server, release) as Record<string, string>;
+    return payload;
+  }
   if (kind === "studio") {
     const release = await staticCatalogRelease(server);
     payload.release = { releaseId: release.releaseId, sourceId: release.sourceId };

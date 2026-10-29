@@ -45,6 +45,27 @@ observation from the supplied plan, not a controlled performance comparison.
 Measure real tar.zst bytes and prepare-plus-render cost with the same released
 input before attributing production savings to these changes.
 
+## Arena static inputs
+
+The Arena page uses the same immutable Master projection as its API. Before a
+complete HTTP-based static build, stage the released Master tables so the first
+publication does not depend on an already deployed Arena endpoint:
+
+```sh
+export PYTHONPATH=scripts
+python scripts/build/arena_inputs.py
+export STATIC_ARENA_MASTER_INPUTS=data/static-arena
+```
+
+The command uses the existing R2 environment and performs reads only. Local
+runs can add `--wrangler` to use the signed-in Wrangler account, and `--server jp`
+to stage one server. Each file is checked against its release manifest. A pointer
+change between staging and static capture fails the identity check; restage and
+restart capture. Capture freezes the complete projected catalogue, so locale
+render jobs need neither R2 credentials nor the staged files. Normal CI and
+frontend publication stage these inputs automatically. Public verification mode
+continues to read the already deployed API.
+
 ## Core page snapshots
 
 `catalog-pages.yml` follows successful complete public resource publication. It
@@ -416,6 +437,14 @@ Set `RESOURCE_RELEASE_ROOT` to select an immutable release directly, or
 `RESOURCE_BUILD_ROOT` to use a prepared build workspace.
 
 ## R2 publication
+
+The reviewed `missions` projection in `band-description-projection.yml`
+recompiles mission descriptions and effective periods, adds native event
+missions to the mission catalogue, and resolves event-detail descriptions and
+rewards from `MasterEventMission` and `MasterMissionReward`. It updates the
+catalogue descriptor and summary counts while retaining existing mission reward
+and image records. Run the workflow with publishing disabled to review the
+derived release before promotion.
 
 ### App downloads and native story downloads
 

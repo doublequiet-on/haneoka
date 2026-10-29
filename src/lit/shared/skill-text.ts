@@ -250,6 +250,17 @@ const renderValue = (
   source: { effects: SkillEffect[] },
   localize: (value: LocalizedValue | null | undefined) => string,
 ): RenderResult => {
+  const sum = expression.trim().match(/^\((effects(?:\[\d+])(?:[.\w]|\[\d+])*)\s*\+\s*(effects(?:\[\d+])(?:[.\w]|\[\d+])*)\)(?:([/*])(\d+(?:\.\d+)?))?(?::F(\d+))?$/);
+  if (sum) {
+    const left = valueAtPath(source, sum[1]!);
+    const right = valueAtPath(source, sum[2]!);
+    if (typeof left !== "number" || typeof right !== "number") return unresolved();
+    const operand = sum[4] === undefined ? undefined : Number(sum[4]);
+    const total = left + right;
+    const calculated = sum[3] === "/" ? total / operand! : sum[3] === "*" ? total * operand! : total;
+    if (!Number.isFinite(calculated)) return unresolved();
+    return { resolved: true, value: sum[5] === undefined ? String(calculated) : calculated.toFixed(Number(sum[5])) };
+  }
   const match = expression.trim().match(/^(effects(?:\[\d+])(?:[.\w]|\[\d+])*)(?:([/*])(\d+(?:\.\d+)?))?(?::F(\d+))?$/);
   if (!match) return unresolved();
   const raw = valueAtPath(source, match[1]!);

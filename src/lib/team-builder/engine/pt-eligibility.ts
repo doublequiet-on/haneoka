@@ -16,6 +16,10 @@ const integer = (n: unknown, min = 0): n is number =>
   typeof n === "number" && Number.isSafeInteger(n) && n >= min && n <= 2_147_483_647;
 
 export function validatePtRequest(master: EngineMaster, request: EngineRequest): PtIssue[] {
+  if (request.songRules) {
+    const rule = request.songRules;
+    master = { ...master, songs: new Map([...master.songs].map(([id,song]) => [id,{...song,musicType:rule.musicType || song.musicType,gekisoMissions:song.gekisoMissions.map((mission,index)=>rule.missions[index] || mission)}])) };
+  }
   const issues: PtIssue[] = [];
   const add = (code: PtIssue["code"], target: string) => issues.push({ code, target });
   const checkGekisoEffects = (effects: readonly SkillEffectRow[], target: string) => {

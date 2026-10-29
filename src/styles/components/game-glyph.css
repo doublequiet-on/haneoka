@@ -1,0 +1,15 @@
+@layer components {
+  .game-glyph {
+    display: block;
+    flex: 0 0 var(--game-glyph-size, 32px);
+    width: var(--game-glyph-size, 32px);
+    height: var(--game-glyph-size, 32px);
+    background: var(--md-sys-color-primary);
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+  }
+}

@@ -1,0 +1,49 @@
+---
+import I18nText from "./I18nText.astro";
+import type { Locale } from "../i18n/locales";
+import { FRIENDSHIP_SELF_SLOTS, FRIENDSHIP_OTHER_SLOTS } from "../lib/friendship-board";
+import Icon from "./Icon.astro";
+import type { HubVisual } from "../config/destination-hubs";
+import type { HubMedia } from "../server/destination-hub-data";
+const { visual, media, icon, limit = 3, locale } = Astro.props as { visual: HubVisual; media?: HubMedia; icon: string; limit?: number; locale: Locale };
+const offsets = [[0, 0, -2], [-1, -1, -12], [1, -2, 10], [-2, -3, -18], [2, -4, 18], [1.5, -5, 24]];
+const friendship = media?.friendship;
+const images = (media?.images ?? []).slice(0, limit);
+const photographic = ["portraits", "landscape", "jackets", "banners", "models", "stamps"];
+---
+<div class={`destination-hub__art destination-hub__art--${visual}`} aria-hidden="true">
+  {photographic.includes(visual) && images.length > 0 && <div class:list={["destination-hub__pictures", `destination-hub__pictures--${images.length}`]}>
+    {images.map((src, index) => <div class="destination-hub__picture" style={`--fan-x:${offsets[index % offsets.length][0]};--fan-y:${offsets[index % offsets.length][1]};--fan-angle:${images.length === 1 ? 0 : offsets[index % offsets.length][2]}deg;z-index:${images.length-index}`}><img src={src} alt="" loading="lazy" decoding="async" /></div>)}
+  </div>}
+  {visual === "team" && <div class="destination-hub__team">
+    <div class="destination-hub__formation">{media?.team?.map(slot => <div class:list={["destination-hub__slot", {"destination-hub__slot--leader":slot.leader}]}>
+      <div class="destination-hub__member"><img src={slot.member.image} alt="" loading="lazy" />
+        {slot.member.attribute && <img class="destination-hub__attribute" src={slot.member.attribute} alt="" loading="lazy" />}
+        {slot.member.rarity && <img class="destination-hub__rarity" src={slot.member.rarity} alt="" loading="lazy" />}
+      </div>
+      {slot.snap && <div class="destination-hub__snap"><img src={slot.snap.image} alt="" loading="lazy" />
+        {slot.snap.attribute && <img class="destination-hub__attribute" src={slot.snap.attribute} alt="" loading="lazy" />}
+        {slot.snap.rarity && <img class="destination-hub__rarity" src={slot.snap.rarity} alt="" loading="lazy" />}
+      </div>}
+      {slot.leader && <span class="destination-hub__leader"><I18nText keyName="navigation.mosaic.leader" locale={locale} /></span>}
+    </div>)}</div>
+  </div>}
+  {visual === "friendship" && friendship && <div class="destination-hub__bond">
+    <img class="destination-hub__bond-board" src={friendship.board} alt="" loading="lazy" />
+    {friendship.logo && <img class="destination-hub__bond-logo" src={friendship.logo} alt="" loading="lazy" />}
+    <img class="destination-hub__bond-lead" src={friendship.lead} alt="" loading="lazy" />
+    {friendship.portraits.map((src,index) => {const slot=(friendship.sameBand ? FRIENDSHIP_SELF_SLOTS : FRIENDSHIP_OTHER_SLOTS)[index];return slot && <div class="destination-hub__bond-partner" style={`--slot-x:${slot[0]};--slot-y:${slot[1]};--arrow-x:${slot[2]};--arrow-y:${slot[3]};--arrow-rotation:${friendship.sameBand && friendship.bandId===2 && index===0 ? "168.146055deg" : slot[4]}`}><img class="destination-hub__bond-arrow" src={friendship.arrow} alt="" loading="lazy" /><img class="destination-hub__bond-avatar" src={src} alt="" loading="lazy" /></div>;})}
+  </div>}
+  {(visual === "sonolus" || visual === "chart") && <>
+    <div class="destination-hub__score">{[0,1,2,3,4,5,6,7,8].map(n => <i style={`--note:${n}`}></i>)}</div>
+    <div class="destination-hub__score-media">
+      {images[0] && <img src={images[0]} alt="" loading="lazy" decoding="async" />}
+      {visual === "sonolus" ? <img class="destination-hub__sonolus" src="/images/sonolus-icon.png" alt="" width="96" height="96" loading="lazy" /> : <span class="destination-hub__edit"><Icon name="edit_note" size={48} /></span>}
+    </div>
+  </>}
+  {visual === "puzzle" && <div class="destination-hub__puzzle">{images[0] && <img src={images[0]} alt="" loading="lazy" decoding="async" />}<span></span></div>}
+  {visual === "guess" && <div class="destination-hub__guess">{images[0] && <img src={images[0]} alt="" loading="lazy" decoding="async" />}<Icon name="graphic_eq" size={64} /></div>}
+  {visual === "discussion" && <div class="destination-hub__conversation"><span><Icon name="forum" size={52} /></span><span><Icon name="favorite" size={40} /></span><span><Icon name="sell" size={32} /></span></div>}
+  {visual === "personal" && <div class="destination-hub__personal"><Icon name="account_circle" size={88} /><Icon name="notifications" size={40} /></div>}
+  {(visual === "icon" || photographic.includes(visual) && !images.length) && <div class="destination-hub__symbol"><Icon name={icon} size={64} /></div>}
+</div>

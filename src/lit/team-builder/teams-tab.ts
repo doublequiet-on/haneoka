@@ -8,6 +8,7 @@ import { icon } from "../ui/icon";
 import { tileMedia } from "../ui/tile";
 import { specList } from "../ui/spec";
 import { sectionHeading } from "./catalog";
+import { songRulesControl } from "./song-rules";
 import { saveTeam } from "./results";
 import { renderSongComparison } from "./song-comparison-view";
 import { toolLayout } from "./tool-layout";
@@ -48,6 +49,7 @@ async function evaluate(host: TeamBuilder) {
   try {
     const results = await host.engine.evaluate({
       ...host.manualInputs(),
+      songRules: host.songRules(goal),
       player: host.view!.player,
       team: teamSpec(host),
       songs: goal.songs,
@@ -205,7 +207,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                     class="button button--text"
                     type="button"
                     ?disabled=${!manualReady(host)}
-                    @click=${() => host.openSongComparison()}
+                    @click=${() => { host.songComparison.update({songRules: host.songRules(host.manualGoal())}); host.openSongComparison(); }}
                   >
                     ${host.t("sc.useTeam", "Compare songs with this team")}
                   </button>
@@ -439,6 +441,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                 ? catalog.challengeSongs(host.settings.eventId).map((row) => row.liveMusicId)
                 : undefined,
             )}
+              ${songRulesControl(host)}
             </section>
             <section class="surface stack">
               ${sectionHeading({ icon: "piano", label: host.t("farm.conditions", "Play and account conditions") })}

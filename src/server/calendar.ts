@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { arenaCatalog } from "./arena-catalog";
+import { t } from "../i18n/messages";
 import { characterProfiles } from "../data/characterProfiles";
 import { castProfiles } from "../data/castProfiles";
 import {
@@ -330,6 +332,17 @@ export async function loadCalendarData(
           image: typeof row.image === "string" ? row.image : undefined,
         });
       }
+    const arena = await arenaCatalog(server, release);
+    for (const season of Object.values(arena.entries)) {
+      const href = resourcePath({ server, locale, kind: "arena" });
+      activities.set(`arena:${season.id}`, { id: `arena:${season.id}`, kind: "arena", title: season.title,
+        startAtMs: season.startAt, endAtMs: season.endAt, href: `${href}#${season.id}`, timeZone: season.timeZone });
+      const boundaries = [...new Set(season.leagues.flatMap((league) => league.rules.map((rule) => rule.startAt)))];
+      for (const startAtMs of boundaries) activities.set(`arena-rotation:${season.id}:${startAtMs}`, {
+        id: `arena-rotation:${season.id}:${startAtMs}`, kind: "arena-rotation", title: t(locale, "catalog.arena.rotation"),
+        startAtMs, href: `${href}#arena-period-${startAtMs}`, timeZone: season.timeZone,
+      });
+    }
     const liveSnapshot = sources.lives
       ? { lives: sources.lives, unavailable: false, buildId: undefined }
       : await bandoriLiveSnapshot(release, documents["real-lives"]);

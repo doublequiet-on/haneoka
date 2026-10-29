@@ -6,11 +6,12 @@ export const deadlineOf = (request: EngineRequest) => request.deadline ?? (reque
 export const remaining = (deadline: number) => Math.max(0, deadline - clock());
 export const requestSongs = (request: EngineRequest): (SongRef | null)[] => {
   const goal = request.goal;
+  if (request.aggregation === "mean" || (goal.kind === "gekiso" && goal.arena?.mode === "shared")) return [null];
   return goal.kind === "power" ? [goal.song] : goal.kind === "potential" ? [null] : goal.kind === "plan"
     ? [...goal.challengeSongs, ...goal.normalSongs] : goal.kind === "event" && !goal.songs.length && goal.route === "skip" ? [null] : goal.songs;
 };
 export const requestChartSongs = (request: EngineRequest): (SongRef | null)[] => [
-  ...requestSongs(request), ...(request.goal.kind === "event" ? request.goal.rewardPlan?.autoCp?.songs ?? [] : []),
+  ...((request.aggregation === "mean" && (request.goal.kind === "score" || request.goal.kind === "event")) || (request.goal.kind === "gekiso" && (request.goal.arena || request.aggregation === "mean")) ? request.goal.songs : requestSongs(request)), ...(request.goal.kind === "event" ? request.goal.rewardPlan?.autoCp?.songs ?? [] : []),
 ];
 export const pendingSong = (song: SongRef | null): SongResult => ({
   song, hits: [], proven: false, bound: Infinity,

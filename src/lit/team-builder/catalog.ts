@@ -146,12 +146,15 @@ export class Catalog {
     return String(row?.icon ?? "");
   }
   attributeName(attribute: number) {
+    if (attribute === 99) return "ALL";
     const key = ["", "red", "blue", "green", "yellow", "purple"][attribute];
     return key ? clientText(this.host.locale, `catalog.songs.liveTypes.${key}`, key) : "";
   }
   attributeIcon(attribute: number) {
     const color = COLORS[attribute];
-    return color ? (this.visuals?.marks.get(`CardType-${color}.png`) ?? "") : "";
+    return color ? (this.visuals?.marks.get(`CardType-${color}.png`) ?? "")
+      : attribute === 99
+        ? liveMusicTypeMark(this.visuals?.marks ?? new Map(), 99) : "";
   }
   rarityIcon(rarity: number) {
     return this.visuals?.marks.get(`RarityIconCenter_${cardRarityName(rarity)}.png`) ?? "";

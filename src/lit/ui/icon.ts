@@ -1,4 +1,5 @@
 import { html, type TemplateResult } from "lit";
+import "../../styles/components/game-glyph.css";
 
 /**
  * Material Symbols, from the sprite built by scripts/build/icon_sprite.py.
@@ -19,5 +20,16 @@ export function iconFilled(name: string, size = 24): TemplateResult {
     <svg class="material-icon" width=${size} height=${size} aria-hidden="true">
       <use href=${`/icons.svg#${name}-filled`}></use>
     </svg>
+  `;
+}
+
+/** Native monochrome sprites inherit the theme instead of disappearing on light surfaces. */
+export function gameGlyph(source: string, size?: number): TemplateResult {
+  return html`
+    <span
+      class="game-glyph"
+      aria-hidden="true"
+      style=${`${size === undefined ? "" : `--game-glyph-size:${size}px;`}mask-image:url("${source}");-webkit-mask-image:url("${source}")`}
+    ></span>
   `;
 }

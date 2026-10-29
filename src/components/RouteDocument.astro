@@ -63,7 +63,7 @@ const collectionPayload = entry.kind === "catalog" && entry.resource
 const collectionPage = collectionPayload ? renderCatalogCollection(screenConfig, collectionPayload, locale) : undefined;
 const collectionDataId = `catalog-collection-${entry.resource}`;
 const collectionDescription = collectionPayload ? catalogCollectionDescription(collectionPayload, locale, title) : undefined;
-const systemPayload = entry.kind === "missions" || entry.kind === "studio" || entry.kind === "tgw-card"
+const systemPayload = entry.kind === "missions" || entry.kind === "studio" || entry.kind === "tgw-card" || entry.kind === "arena"
   ? await catalogSystemData(entry.kind, server || "intl", locale)
   : undefined;
 const systemPage = systemPayload ? await renderCatalogSystem(systemPayload, locale) : undefined;
@@ -101,6 +101,7 @@ const trackerPage = trackerPayload ? await renderEventTracker(trackerPayload, lo
     )}
     {systemPayload && <script is:inline type="application/json" id={systemDataId} set:html={serializePageData(systemPayload)}></script>}
     {entry.kind === "tgw-card" && <tgw-card-workspace locale={locale} data-page-data={systemDataId} data-prerendered set:html={systemPage?.body || ""}></tgw-card-workspace>}
+    {entry.kind === "arena" && <arena-workspace locale={locale} data-page-data={systemDataId} data-prerendered set:html={systemPage?.body || ""}></arena-workspace>}
     {entry.kind === "studio" && <studio-workspace locale={locale} data-page-data={systemDataId} data-prerendered set:html={systemPage?.body || ""}></studio-workspace>}
     {entry.kind === "missions" && <mission-workspace locale={locale} data-page-data={systemDataId} data-prerendered set:html={systemPage?.body || ""}></mission-workspace>}
     {entry.kind === "event-tracker" && <EventTrackerPage locale={locale} server={server} payload={trackerPayload} page={trackerPage} />}
@@ -110,5 +111,6 @@ const trackerPage = trackerPayload ? await renderEventTracker(trackerPayload, lo
   import "../lit/catalog-screen";
   import "../lit/tgw-card-workspace";
   import "../lit/studio-workspace";
+  import "../lit/arena-workspace";
   import "../lit/mission-workspace";
 </script>

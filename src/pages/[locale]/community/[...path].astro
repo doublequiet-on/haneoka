@@ -1,5 +1,6 @@
 ---
 import { staticBuildPaths } from "../../../server/static-build";
+import HubDocument from "../../../components/HubDocument.astro";
 import CommunityDocument from "../../../components/CommunityDocument.astro";
 import { LOCALES, type Locale } from "../../../i18n/locales";
 
@@ -13,4 +14,15 @@ export function getStaticPaths() {
 }
 const { locale, path } = Astro.props as { locale: Locale; path?: string };
 ---
-<CommunityDocument locale={locale} path={path} />
+{path ? <CommunityDocument locale={locale} path={path} /> : <HubDocument id="community" locale={locale} />}
+<script>
+  const preserveFeedQuery = () => {
+    if (!/^\/[^/]+\/community\/?$/u.test(location.pathname)) return;
+    const query = new URLSearchParams(location.search);
+    if (["q", "tag", "tags", "scope", "forumId", "state"].some(key => query.has(key))) {
+      location.replace(`${location.pathname.replace(/\/$/u, "")}/feeds/${location.search}${location.hash}`);
+    }
+  };
+  preserveFeedQuery();
+  document.addEventListener("astro:page-load", preserveFeedQuery);
+</script>

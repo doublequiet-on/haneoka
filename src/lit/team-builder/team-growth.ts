@@ -139,6 +139,8 @@ export class TeamGrowthComparison {
     const selected = host.manualInputs(),
       owned = engineInputs(host.view, true);
     const input = freshGrowthRequest(base);
+    // Manual evaluation scores each chart separately from the automatic search's aggregation.
+    input.aggregation = undefined;
     input.members = [
       ...new Map(
         [

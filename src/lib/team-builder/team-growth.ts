@@ -40,6 +40,8 @@ export function freshGrowthRequest(source: EngineRequest): EngineRequest {
     unknownPolicy: source.unknownPolicy,
     goal: source.goal,
     constraints: source.constraints,
+    aggregation: source.aggregation,
+    songRules: source.songRules,
     k: 1,
     timeLimitMs: source.timeLimitMs,
   });
@@ -94,7 +96,7 @@ export function teamGrowthChange(
 /** All five bindings include empty slots, so a fixed comparison cannot fill or swap a Snapshot. */
 export function fixedGrowthRequest(
   source: EngineRequest,
-  team: Pick<EngineHit, "song" | "members" | "snaps">,
+  team: Pick<EngineHit, "song" | "members" | "snaps" | "aggregate">,
 ): EngineRequest {
   const request = freshGrowthRequest(source);
   request.timeLimitMs = null;
@@ -111,7 +113,10 @@ export function fixedGrowthRequest(
     minBonusPercent: null,
   };
   if (request.goal.kind === "plan") throw new Error("growth-plan-needs-route");
-  if ("songs" in request.goal) request.goal.songs = team.song ? [{ ...team.song }] : [];
+  if ("songs" in request.goal)
+    request.goal.songs = team.aggregate
+      ? team.aggregate.songs.map((hit) => ({ ...hit.song! }))
+      : team.song ? [{ ...team.song }] : [];
   if (request.goal.kind === "power") request.goal.song = team.song;
   return request;
 }
