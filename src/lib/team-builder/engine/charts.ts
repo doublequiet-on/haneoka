@@ -2,7 +2,7 @@
 // Input: 固定 release 的谱面来源。
 // Output: 完整谱面 JSON 及最多四张共享下载缓存。
 // Pos: [Map](L2-2.md)；主线程和 Worker 的谱面装载。
-// Effects/Dependencies: 限时下载、重试、固定身份核对和 gzip 解压。
+// Effects/Dependencies: 按固定身份共享在途下载，限时重试、身份核对和 gzip 解压。
 import { pinnedSongAssetUrl } from "../solver/song-loader";
 import type { SongRef } from "./api";
 import type { EngineChart, EngineChartSources } from "./protocol";
@@ -39,22 +39,23 @@ export async function downloadChart(source: EngineChartSources[string] | undefin
 
 export class EngineCharts {
   private readonly downloads = new Map<string, Promise<EngineChart>>();
-  private readonly pending = new Set<Promise<EngineChart>>();
+  private readonly pending = new Map<string, Promise<EngineChart>>();
   private lifetime = new AbortController();
   constructor(private readonly sources: EngineChartSources) {}
   load(song: SongRef): Promise<EngineChart> {
     const key = chartKey(song);
-    const existing = this.downloads.get(key);
+    const existing = this.pending.get(key) ?? this.downloads.get(key);
     if (existing) {
       this.downloads.delete(key);
+      if (this.downloads.size >= 4) this.downloads.delete(this.downloads.keys().next().value!);
       this.downloads.set(key, existing);
       return existing;
     }
     const download = downloadChart(this.sources[key], this.lifetime.signal).then(chart => ({ song, chart })).catch(error => {
       if (this.downloads.get(key) === download) this.downloads.delete(key);
       throw error;
-    }).finally(() => { this.pending.delete(download); });
-    this.pending.add(download);
+    }).finally(() => { if (this.pending.get(key) === download) this.pending.delete(key); });
+    this.pending.set(key, download);
     if (this.downloads.size >= 4) this.downloads.delete(this.downloads.keys().next().value!);
     this.downloads.set(key, download);
     return download;
@@ -73,7 +74,8 @@ export class EngineCharts {
     return rows;
   }
   cancel() {
-    for (const [key, download] of this.downloads) if (this.pending.has(download)) this.downloads.delete(key);
+    for (const [key, download] of this.pending) if (this.downloads.get(key) === download) this.downloads.delete(key);
+    this.pending.clear();
     this.lifetime.abort();
     this.lifetime = new AbortController();
   }
