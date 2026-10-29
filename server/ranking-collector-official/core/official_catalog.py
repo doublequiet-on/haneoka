@@ -84,7 +84,8 @@ def project(tables, version, now_ms):
 
 class OfficialCatalog:
     def __init__(self, config_file, output, proxy, client_version, stop_file=None, deadline=None):
-        self.config_file=Path(config_file);self.output=Path(output)/'master';self.proxy=proxy
+        from lifecycle import normalize_proxy
+        self.config_file=Path(config_file);self.output=Path(output)/'master';self.proxy=normalize_proxy(proxy)
         self.client_version=client_version
         self.stop_file=stop_file;self.deadline=deadline
 
