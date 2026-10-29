@@ -213,6 +213,7 @@ const COLUMNS: Record<string, Column[]> = {
 /** Ceilings, so a long composer credit wraps instead of widening the table. */
 const CELL_MAX: Record<string, string> = {
   title: "320px",
+  gekisouTiming: "160px",
   character: "200px",
   characters: "260px",
   band: "180px",
