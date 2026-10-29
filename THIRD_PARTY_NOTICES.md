@@ -6,6 +6,17 @@ This file records the third-party material known to be vendored, adapted, genera
 
 ## Vendored, packaged, and build-injected artifacts
 
+### Local JP ranking collector
+
+The standalone `server/ranking-collector-official` tool uses an official JP Master
+catalog and the protocol descriptor validated by the isolated ranking experiments.
+Its offline candidate builder includes pinned protobuf, py3rijndael, setuptools and
+wheel distributions. Provenance, hashes, retained licenses and protocol limits are
+recorded in [collector notices](server/ranking-collector-official/NOTICES.md).
+The game protocol descriptor is not covered by Haneoka's MPL grant. The tool is
+operator-run and is not included in website deployment; credentials and game data
+are excluded from the source and bundle.
+
 ### Local account import
 
 - The optional Android reader lazily bundles `@yume-chan/adb@2.6.4` and `@yume-chan/adb-daemon-webusb@2.3.2` from [Tango ADB](https://github.com/yume-chan/ya-webadb). Both are MIT licensed, copyright 2020–2025 Simon Chan. The [MIT notice](src/lib/team-builder/box-import/device/LICENSE.tango.txt) is retained locally; dependency versions and transitive licenses remain recorded in the lockfile and package distributions.
