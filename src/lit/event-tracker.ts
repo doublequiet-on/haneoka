@@ -26,7 +26,6 @@ import {
   GAME_RECORDS_REGIONS,
   defaultGameRecordsRegion,
   gameRecordsRegionPicker,
-  moenotesBrand,
 } from "./shared/game-records";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
 import { iconButton, rovingKeydown } from "./ui/controls";
@@ -391,7 +390,6 @@ export class EventTracker extends LitElement {
               <p class="tabular" role="timer" aria-live="off">${this.countdown()}</p>
             </div>
           </header>
-          ${moenotesBrand(`https://bdon.moe/events/tracker?server=${this.region}`)}
         </div>
         <section class="detail-section">
           ${renderDetailSectionHeading(this.label("challengeRanking", "Challenge song ranking"), "works")}

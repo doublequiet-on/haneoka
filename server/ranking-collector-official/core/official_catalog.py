@@ -1,4 +1,4 @@
-"""L3: server/L2.md; official Master acquisition and JP event projection."""
+"""L3: server/L2.md; official Master acquisition and regional event projection."""
 from datetime import datetime, timezone, timedelta
 import gzip
 import base64
@@ -12,6 +12,8 @@ import uuid
 from types import SimpleNamespace
 from urllib.request import build_opener, ProxyHandler, HTTPRedirectHandler, Request
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
+from regions import region_config
 
 TABLES = ('MasterEvent', 'MasterChallengeMusic', 'MasterParameter')
 
@@ -37,7 +39,7 @@ def date(value):
     return int(datetime.strptime(value, '%Y/%m/%d %H:%M:%S').replace(
         tzinfo=timezone(timedelta(hours=9))).timestamp()*1000)
 
-def project(tables, version, now_ms):
+def project(tables, version, now_ms, region='jp'):
     from lifecycle import identifier
     events=tables['MasterEvent']['_allData']; songs=tables['MasterChallengeMusic']['_allData']
     params=[r for r in tables['MasterParameter']['_allData'] if r['_id']=='event_ranking_aggregation_time']
@@ -56,7 +58,7 @@ def project(tables, version, now_ms):
     held=[e for e in candidates if now_ms<e[1]]
     selected=held or candidates
     if len(selected)>1: raise ValueError('ambiguous current event')
-    result=dict(region='jp',catalogSource='official-master',masterVersion=version,
+    result=dict(region=region,catalogSource='official-master',masterVersion=version,
                 catalogObservedAtMs=now_ms,fetchedAtMs=None,stale=False,event=None)
     if not selected:return result
     start,end,e=selected[0];eid=identifier(e['_id']);challenges=[];seen=set()
@@ -83,44 +85,50 @@ def project(tables, version, now_ms):
     return result
 
 class OfficialCatalog:
-    def __init__(self, config_file, output, proxy, client_version, stop_file=None, deadline=None):
+    def __init__(self, config_file, output, proxy, client_version, stop_file=None, deadline=None, region='jp'):
         from lifecycle import normalize_proxy
         self.config_file=Path(config_file);self.output=Path(output)/'master';self.proxy=normalize_proxy(proxy)
         self.client_version=client_version
+        self.region=region
+        self.region_config=region_config(region)
         self.stop_file=stop_file;self.deadline=deadline
 
     def __call__(self):
         if not self.config_file.is_file():raise ValueError('official Master configuration is missing')
         config=json.loads(self.config_file.read_text(encoding='utf-8-sig'))
-        if config.get('masterRemoteRoot')!='https://static.bang-dream-on.jp/master':
+        if self.region=='jp' and config.get('masterRemoteRoot')!='https://static.bang-dream-on.jp/master':
             raise ValueError('unverified official Master origin')
         username=config.get('cdnUsername')
         crypto=config.get('masterCrypto',{})
-        if not isinstance(username,str) or not username or ':' in username or set(crypto)!={'salt','key','iv'}:
+        if set(crypto)!={'salt','key','iv'} or (self.region=='jp' and (not isinstance(username,str) or not username or ':' in username)):
             raise ValueError('official CDN authorization or Master crypto missing')
         from py3rijndael import RijndaelCbc, Pkcs7Padding
         from transport import Sampler, VersionError
         self.output.mkdir(parents=True,exist_ok=True)
-        sampler=Sampler(SimpleNamespace(descriptors=Path(__file__).parent/'total-descriptors.pb',
+        sampler=Sampler(SimpleNamespace(region=self.region,descriptors=Path(__file__).parent/self.region_config.descriptor,
             output=self.output/'version-receipts',client_version=self.client_version,proxy=self.proxy,
             stop_file=self.stop_file,deadline=self.deadline))
-        try:sampler.version(include_cdn=True)
+        try:sampler.version(include_cdn=self.region=='jp')
         except VersionError as error:raise CatalogRequestError('version',error.receipt) from None
         version=sampler.master_version
         cdn=sampler.cdn or {}
-        if cdn.get('x-sirius-env','').rstrip('/')!='https://static.bang-dream-on.jp':
-            raise ValueError('unverified Version CDN origin')
-        password=cdn.get('x-sirius-cred')
-        if not isinstance(password,str) or not password:
-            raise ValueError('Version CDN credential missing')
-        authorization='Basic '+base64.b64encode((username+':'+password).encode()).decode()
+        headers={}
+        if self.region=='jp':
+            if cdn.get('x-sirius-env','').rstrip('/')!='https://static.bang-dream-on.jp':
+                raise ValueError('unverified Version CDN origin')
+            password=cdn.get('x-sirius-cred')
+            if not isinstance(password,str) or not password:raise ValueError('Version CDN credential missing')
+            headers['Authorization']='Basic '+base64.b64encode((username+':'+password).encode()).decode()
+            master_root=config['masterRemoteRoot']
+        else:
+            master_root=self.international_root(sampler)
         sampler.cdn=None
         if not re.fullmatch(r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*',version) or '..' in version:raise ValueError('invalid Master version')
         directory=self.output/hashlib.sha256(version.encode()).hexdigest();directory.mkdir(exist_ok=True)
         opener=build_opener(ProxyHandler({'https':self.proxy} if self.proxy else {}),NoRedirect())
         def fetch(name,limit):
             sampler.check_control()
-            request=Request(config['masterRemoteRoot']+'/'+version+'/'+name,headers={'Authorization':authorization})
+            request=Request(master_root+'/'+version+'/'+name,headers=headers)
             try:
                 with opener.open(request,timeout=20) as response: raw=response.read(limit+1)
             except HTTPError as error:
@@ -154,6 +162,28 @@ class OfficialCatalog:
             if not isinstance(tables[table].get('_allData'),list):raise ValueError('invalid Master table')
             if not cached:atomic_write(path,raw)
             digests[table]=digest
-        result=project(tables,version,int(time.time()*1000));result['tableHashes']=digests
+        result=project(tables,version,int(time.time()*1000),self.region);result['tableHashes']=digests
         atomic_write(directory/'catalog.json',json.dumps(result).encode('utf-8'))
         return result
+
+    def international_root(self, sampler):
+        from transport import SERVERS
+        receipt, response, _=sampler.rpc(SERVERS, sampler.message('app.playerlogin.GetServerListRequest'),
+            'app.playerlogin.GetServerListResponse', 'server-list')
+        if response is None:raise CatalogRequestError('server-list',receipt)
+        area={'tw':2,'en':3,'kr':4}[self.region]
+        rows=[row for row in response.servers if str(row.areaID)==str(area)]
+        if len(rows)!=1:raise ValueError('Missing or ambiguous official region')
+        row=rows[0]
+        if self.region_config.origin not in row.apiServerRoot.split('|'):
+            raise ValueError('Official discovery API region mismatch')
+        allowed=({'l14-prod-hk-patch-sirius.gamerfusiontech.com','l12-prod-hk-patch-sirius.gamerfusiontech.com'}
+            if self.region=='tw' else {'l14-prod-sg-patch-sirius.bilibiligame.net','l12-prod-sg-patch-sirius.bilibiligame.net'})
+        roots=row.cdnRoot.split('|')
+        prefix={'tw':'hk','en':'en','kr':'kr'}[self.region]
+        for root in roots:
+            url=urlsplit(root)
+            if (url.scheme!='https' or url.hostname not in allowed or url.netloc!=url.hostname
+                or url.query or url.fragment or not re.fullmatch('/prod/'+prefix+'_[a-f0-9]{32}',url.path)):
+                raise ValueError('Unverified international CDN region')
+        return roots[0]+'/master'

@@ -1,5 +1,5 @@
 # L3 — GEB
-# Input: Fixed JP unary request, credential header factory and bounded I/O controls.
+# Input: Fixed regional unary request, credential header factory and bounded I/O controls.
 # Output: HTTP/2 status, allowlisted headers and trailers, response body and memory-only CDN metadata.
 # Pos: [Map](../../L2.md); direct Python transport for the standalone collector.
 # Effects/Dependencies: TCP/TLS with optional loopback CONNECT; h2 framing and no persistence.
@@ -19,13 +19,14 @@ from h2.exceptions import H2Error, ProtocolError
 from h2.settings import SettingCodes
 
 from lifecycle import normalize_proxy
+from regions import region_config
 
 HOST = 'api.bang-dream-on.jp'
 ORIGIN = 'https://' + HOST
 MAX_BODY = 16777216
 HEADER_NAMES = {'server', 'date', 'grpc-status', 'grpc-message', 'x-asset-version', 'x-error-code', 'retry-after'}
 TRAILER_NAMES = {'grpc-status', 'grpc-message', 'x-error-code', 'retry-after'}
-_resolution = None
+_resolutions = {}
 _resolution_lock = threading.Lock()
 
 
@@ -71,25 +72,25 @@ def receive(stream, deadline, check_control):
             wait_socket(stream, deadline, check_control, True)
 
 
-def addresses(deadline, check_control):
-    global _resolution
+def addresses(deadline, check_control, host=HOST):
     remaining(deadline, check_control)
     with _resolution_lock:
+        _resolution = _resolutions.get(host)
         if (_resolution is None or (_resolution['done'].is_set()
                 and (_resolution.get('error') is not None or time.monotonic() - _resolution['started'] > 60))):
             result = {'done': threading.Event(), 'started': time.monotonic()}
-            _resolution = result
+            _resolutions[host] = result
 
             def resolve():
                 try:
-                    result['addresses'] = socket.getaddrinfo(HOST, 443, type=socket.SOCK_STREAM)
+                    result['addresses'] = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
                 except OSError as error:
                     result['error'] = error
                 finally:
                     result['done'].set()
 
             threading.Thread(target=resolve, daemon=True).start()
-        result = _resolution
+        result = _resolutions[host]
     while not result['done'].wait(min(.2, remaining(deadline, check_control))):
         pass
     if result.get('error') is not None:
@@ -127,8 +128,8 @@ def connect(candidates, deadline, check_control):
     raise OSError('Official API connect failed')
 
 
-def connect_proxy(stream, deadline, check_control):
-    send(stream, f'CONNECT {HOST}:443 HTTP/1.1\r\nHost: {HOST}:443\r\n\r\n'.encode('ascii'), deadline, check_control)
+def connect_proxy(stream, deadline, check_control, host=HOST):
+    send(stream, f'CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n'.encode('ascii'), deadline, check_control)
     response = bytearray()
     while b'\r\n\r\n' not in response:
         chunk = receive(stream, deadline, check_control)
@@ -143,13 +144,13 @@ def connect_proxy(stream, deadline, check_control):
         raise OSError('Proxy tunnel rejected')
 
 
-def secure_socket(stream, deadline, check_control):
+def secure_socket(stream, deadline, check_control, host=HOST):
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.load_default_certs(ssl.Purpose.SERVER_AUTH)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20')
     context.set_alpn_protocols(['h2'])
-    connection = context.wrap_socket(stream, server_hostname=HOST, do_handshake_on_connect=False)
+    connection = context.wrap_socket(stream, server_hostname=host, do_handshake_on_connect=False)
     connection.setblocking(False)
     try:
         while True:
@@ -185,7 +186,8 @@ def add_headers(response, values, trailer=False, include_cdn=False):
             response['cdn'][name] = value.decode('utf-8', errors='replace')
 
 
-def post(path, body, header_factory, *, proxy='', connect_ip=None, timeout=20, check_control=lambda: None, include_cdn=False):
+def post(path, body, header_factory, *, proxy='', connect_ip=None, timeout=20, check_control=lambda: None, include_cdn=False, region='jp'):
+    host = region_config(region).host
     if len(body) > 4096:
         raise ValueError('Request too large')
     proxy = normalize_proxy(proxy)
@@ -199,17 +201,17 @@ def post(path, body, header_factory, *, proxy='', connect_ip=None, timeout=20, c
             endpoint = urlsplit(proxy)
             candidates = numeric_address(endpoint.hostname, endpoint.port)
         else:
-            candidates = numeric_address(connect_ip, 443) if connect_ip else addresses(deadline, check_control)
+            candidates = numeric_address(connect_ip, 443) if connect_ip else addresses(deadline, check_control, host)
         stream = connect(candidates, deadline, check_control)
         if proxy:
-            connect_proxy(stream, deadline, check_control)
-        stream = secure_socket(stream, deadline, check_control)
+            connect_proxy(stream, deadline, check_control, host)
+        stream = secure_socket(stream, deadline, check_control, host)
         response['http_version'] = '2.0'
         headers = header_factory()
         connection = H2Connection(config=H2Configuration(client_side=True))
         connection.initiate_connection()
         connection.update_settings({SettingCodes.ENABLE_PUSH: 0, SettingCodes.MAX_HEADER_LIST_SIZE: 65536})
-        connection.send_headers(1, [(':method', 'POST'), (':scheme', 'https'), (':authority', HOST),
+        connection.send_headers(1, [(':method', 'POST'), (':scheme', 'https'), (':authority', host),
             (':path', path), ('content-type', 'application/grpc'), ('content-length', str(len(body))), *headers])
         connection.send_data(1, body, end_stream=True)
         send(stream, connection.data_to_send(), deadline, check_control)

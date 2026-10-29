@@ -12,7 +12,7 @@
 
 采集端使用 Python 的 TLS 与 HTTP/2 实现，在 Windows、Linux 和 macOS 复用同一协议与数据库；没有 PowerShell 子进程或凭据请求文件。CLI、离线安装与进程锁的使用方式见 [README.md](README.md)。
 
-接口前缀 `/api/v2/game/records/jp`：
+接口前缀 `/api/v2/game/records/{region}`，region 为运行目录固定的 `jp`、`tw`、`en` 或 `kr`。其他分区路径返回 404：
 
 | GET 路径 | 返回 |
 | --- | --- |

@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'core'))
 from process_lock import process_lock as lock_file
 from lifecycle import normalize_proxy
+from regions import REGIONS, region_config
 FORMAT = 'haneoka:official-jp-collector/1'
 DESCRIPTOR_SHA256 = 'e8225c67eb066c1cdb2232a4c95f661a460d54dd88420f634ea2c8242de71adf'
 
@@ -46,6 +47,12 @@ def doctor():
     for name in ('app.masterdata.VersionResponse', 'app.event.GetChallengeMusicRankingResponse',
                  'app.event.GetChallengeMusicTotalRankingResponse'):
         pool.FindMessageTypeByName(name)
+    intl=ROOT/'core'/'intl-descriptors.pb'
+    if hashlib.sha256(intl.read_bytes()).hexdigest()!='23971ce32a7d1bbb94d7f044ffc2cb8b5fb47a2b0d95fa0f4d6df219d3b18d4d':
+        raise ValueError('Bundled international descriptor checksum mismatch')
+    intl_pool=pool_from_file(intl)
+    for name in ('app.playerlogin.GetServerListResponse','app.event.GetChallengeMusicRankingResponse','app.event.GetChallengeMusicTotalRankingResponse'):
+        intl_pool.FindMessageTypeByName(name)
     manifest = ROOT / 'MANIFEST.json'
     if manifest.exists():
         for relative, expected in json.loads(manifest.read_text(encoding='utf-8')).items():
@@ -59,8 +66,9 @@ def doctor():
 
 
 def validate_settings(config):
-    if set(config) != {'format', 'credentials', 'interval', 'hours', 'client_version', 'proxy', 'master_config'}:
+    if set(config)-{'region'} != {'format', 'credentials', 'interval', 'hours', 'client_version', 'proxy', 'master_config'}:
         raise ValueError('Unexpected configuration fields')
+    region_config(config.get('region','jp'))
     if config['format'] != FORMAT:
         raise ValueError('Not a standalone collector runtime')
     if type(config['interval']) is not int or config['interval'] < 60:
@@ -84,10 +92,12 @@ def initialize(args):
         raise ValueError('Keep Master config outside the runtime and tool directories')
     if credentials.is_relative_to(output) or credentials.is_relative_to(ROOT):
         raise ValueError('Keep credentials outside the runtime and tool directories')
-    config = dict(format=FORMAT, credentials=str(credentials), interval=args.interval,
+    config = dict(format=FORMAT, region=args.region, credentials=str(credentials), interval=args.interval,
                   hours=args.hours, client_version=args.client_version, proxy=normalize_proxy(args.proxy),
                   master_config=str(Path(args.master_config).resolve()))
     validate_settings(config)
+    from lifecycle import credential_generation
+    credential_generation(credentials,args.region)
     # Refusing every existing directory prevents adopting an active legacy soak.
     output.mkdir(parents=True, exist_ok=False)
     from continuous import atomic_json
@@ -118,7 +128,7 @@ def run_collector(output, config, launch_token=None):
     from continuous import run
     if not Path(config['master_config']).is_file():
         raise ValueError('official Master configuration is missing')
-    credential_generation(config['credentials'])
+    credential_generation(config['credentials'],config.get('region','jp'))
     identity = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     run(SimpleNamespace(output=str(output), config_identity=identity, launch_token=launch_token,
                         **{key: value for key, value in config.items() if key != 'format'}))
@@ -129,7 +139,7 @@ def start(output, config):
     from lifecycle import credential_generation
     if not Path(config['master_config']).is_file():
         raise ValueError('official Master configuration is missing')
-    credential_generation(config['credentials'])
+    credential_generation(config['credentials'],config.get('region','jp'))
     with lock_file(output / 'launch.lock'):
         if running(output):
             raise ValueError('This runtime already has a collector')
@@ -201,15 +211,17 @@ def backup(output, destination):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Local JP ranking collector (Python 3.12+)')
+    parser = argparse.ArgumentParser(description='Local four-region ranking collector (Python 3.12+)')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('doctor', help='Check dependencies and bundled protocol without networking')
     catalog = commands.add_parser('catalog', help='Refresh official catalog in a separate directory, without game credentials or ranking requests')
+    catalog.add_argument('--region', choices=tuple(REGIONS), default='jp')
     catalog.add_argument('--output', required=True)
     catalog.add_argument('--master-config', required=True)
     catalog.add_argument('--client-version', default='1.1.0')
     catalog.add_argument('--proxy', default='')
     init = commands.add_parser('init', help='Create a new isolated runtime; never starts sampling')
+    init.add_argument('--region', choices=tuple(REGIONS), default='jp')
     init.add_argument('--output', required=True)
     init.add_argument('--credentials', required=True)
     init.add_argument('--master-config', required=True)
@@ -282,7 +294,7 @@ def main():
             raise ValueError('No observations database yet; run sampling first')
         from history import History
         from api import server
-        with server(History(output / 'history.sqlite3', read_only=True), args.port) as http:
+        with server(History(output / 'history.sqlite3', read_only=True), args.port,config.get('region','jp')) as http:
             emit(dict(status='serving', url=f'http://127.0.0.1:{http.server_port}'))
             http.serve_forever()
     elif args.command == 'backup':

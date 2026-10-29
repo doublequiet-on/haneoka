@@ -7,7 +7,12 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-def server(history, port):
+def server(history, port, region='jp'):
+    from regions import region_config
+    region_config(region)
+    prefix='/api/v2/game/records/'+region
+    catalog=history.catalog()
+    if catalog is not None and catalog['region']!=region:raise ValueError('API region does not match stored catalog')
     class Handler(BaseHTTPRequestHandler):
         def respond(self, status, body):
             raw=json.dumps(body,ensure_ascii=False).encode()
@@ -39,19 +44,19 @@ def server(history, port):
         def read_response(self):
             url=urlsplit(self.path)
             status=200
-            if url.path=='/api/v2/game/records/jp/status':
+            if url.path==prefix+'/status':
                 state_path=Path(history.path).parent/'collector-state.json'
                 state=json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
                 if not isinstance(state,dict):raise ValueError('invalid collector state')
                 now=int(time.time()*1000)
                 with history.connect() as db:
-                    latest=db.execute('SELECT max(observed_ms) FROM observations WHERE error IS NULL').fetchone()[0]
+                    latest=db.execute('SELECT max(observed_ms) FROM observations WHERE error IS NULL AND region=?',(region,)).fetchone()[0]
                 age=now-latest if latest is not None else None
                 body=dict(contract='haneoka:ranking-status/1',serverTimeMs=now,
                     collectorStatus=state.get('status','not_started'),samplingIntervalSeconds=state.get('interval'),
                     lastSuccessfulObservationAtMs=latest,ageMs=age,stale=age is None or age<0 or age>600000,
                     pollAfterSeconds=15,catalogProvider='official-master')
-            elif url.path=='/api/v2/game/records/jp/events/current':
+            elif url.path==prefix+'/events/current':
                 body=history.catalog()
                 if body is None: status=404
                 else:
@@ -64,7 +69,7 @@ def server(history, port):
                     body.update(serverTimeMs=now,ageMs=age,
                         stale=bool(body.get('stale')) or age is None or age<0 or age>600000 or expired)
             else:
-                match=re.fullmatch(r'/api/v2/game/records/jp/events/([1-9][0-9]*)/(total|challenges/([1-9][0-9]*))/(latest|history)',url.path)
+                match=re.fullmatch(prefix+r'/events/([1-9][0-9]*)/(total|challenges/([1-9][0-9]*))/(latest|history)',url.path)
                 if not match:
                     status,body=404,{'error':'not_found'}
                 else:
@@ -75,7 +80,7 @@ def server(history, port):
                         if after is not None and not 0<=after<=9223372036854775807: raise ValueError()
                     except ValueError:
                         return 400,{'error':'invalid_query'}
-                    rows=history.read(('jp',event,'challenge' if challenge else 'total',challenge or ''),after)
+                    rows=history.read((region,event,'challenge' if challenge else 'total',challenge or ''),after)
                     body=({'observations':rows,'nextCursor':rows[-1]['cursor'] if rows else after}
                           if operation=='history' else (rows[0] if rows else None))
                     if body is None: status=404

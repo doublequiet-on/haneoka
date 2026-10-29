@@ -10,7 +10,7 @@ FILES = ('collector.py', 'setup.py', 'requirements.txt', 'build-requirements.txt
          'README.md', 'INTERFACES.md', 'NOTICES.md', 'LICENSE', 'LICENSE.py3rijndael.txt',
          'build.py', 'core/history.py', 'core/lifecycle.py', 'core/sample.py',
          'core/continuous.py', 'core/status.py', 'core/api.py', 'core/transport.py',
-         'core/official_catalog.py', 'core/http2.py', 'core/process_lock.py', 'core/total-descriptors.pb')
+         'core/regions.py', 'core/intl-descriptors.pb', 'core/official_catalog.py', 'core/http2.py', 'core/process_lock.py', 'core/total-descriptors.pb')
 DISTRIBUTIONS = {
     'protobuf-6.33.0-py3-none-any.whl': '25c9e1963c6734448ea2d308cfa610e692b801304ba0908d7bfa564ac5132995',
     'py3rijndael-0.3.3.tar.gz': 'b6655a3ebff3a10540eaed049e8788eea3ac93d6b71b3a6ac2b00224bbece9a8',
@@ -33,7 +33,7 @@ def build(wheelhouse, output):
     payloads['MANIFEST.json'] = json.dumps(manifest, indent=2).encode()
     with zipfile.ZipFile(output, 'x', compression=zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(payloads.items()):
-            info = zipfile.ZipInfo('haneoka-jp-collector-official/' + name, date_time=(2026, 10, 29, 0, 0, 0))
+            info = zipfile.ZipInfo('haneoka-ranking-collector-official/' + name, date_time=(2026, 10, 29, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, data)
     print(json.dumps(dict(file=str(Path(output).resolve()), files=len(payloads),

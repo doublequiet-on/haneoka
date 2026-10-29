@@ -63,7 +63,7 @@ class History:
 
     def record(self, identity, observation_id, observed_ms, body=None, receipt=None, error=None):
         region, event, kind, challenge = identity
-        if region != 'jp' or not event.isdecimal() or kind not in ('challenge', 'total'):
+        if region not in ('jp','tw','en','kr') or not event.isdecimal() or kind not in ('challenge', 'total'):
             raise ValueError('invalid board identity')
         if (kind == 'total' and challenge) or (kind == 'challenge' and not challenge.isdecimal()):
             raise ValueError('invalid challenge identity')
