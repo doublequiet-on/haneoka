@@ -12,7 +12,7 @@ import { modal } from "../ui/modal";
 import { iconButton, inputChip } from "../ui/controls";
 import type { TeamBuilder } from "../team-builder";
 import type { BuildSettings } from "./types";
-import { resultSettings, usesPtResults } from "./score-goal";
+import { resultRequest, resultSettings, usesPtResults } from "./score-goal";
 import { resultMetric, type ResultMetric } from "./result-metric";
 
 export interface ComparisonEntry {
@@ -78,7 +78,7 @@ function entry(
   host: TeamBuilder,
   hit: EngineHit,
   source: string,
-  result: SongResult,
+  result: Pick<SongResult, "proven" | "placements">,
   input: EngineRequest,
   session: string,
   settings = resultSettings(host, hit),
@@ -156,15 +156,23 @@ export class ResultComparison {
           )
         : [];
     }
+    const challenge = host.results?.cpChallenge;
+    const input = challenge ? resultRequest(host, challenge) : null;
+    const converted = challenge && input && selected.has(identity("cp-challenge", challenge))
+      ? [entry(host, challenge, "cp-challenge", { proven: true }, input, host.resultSession)] : [];
     return host.resultInputs
-      ? (host.results?.results.flatMap((result) =>
+      ? [...converted, ...(host.results?.results.flatMap((result) =>
           result.hits
             .filter((hit) => selected.has(identity("build", hit)))
             .map((hit) => entry(host, hit, "build", result, host.resultInputs!, host.resultSession)),
-        ) ?? [])
+        ) ?? [])]
       : [];
   }
   private source(host: TeamBuilder, hit: EngineHit) {
+    if (hit === host.results?.cpChallenge) {
+      const input = resultRequest(host, hit);
+      return input ? { result: { proven: true }, input, source: "cp-challenge", settings: resultSettings(host, hit) } : null;
+    }
     const pt = usesPtResults(host),
       task = pt ? host.pt.job?.tasks.find((task) => task.result?.hits.includes(hit)) : undefined;
     const result = pt ? task?.result : host.results?.results.find((result) => result.hits.includes(hit));

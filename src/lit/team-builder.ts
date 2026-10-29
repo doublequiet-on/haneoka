@@ -291,6 +291,9 @@ export class TeamBuilder extends LitElement {
   set resultTab(value: string) {
     this.taskResult.tab = value;
   }
+  restoreFarmingResult(results: EngineResponse, settings: BuildSettings, inputs: EngineRequest, context: string, session: string) {
+    this.taskResults.set("farm", { results, settings, inputs, context, session, tab: "overall" });
+  }
   get hasTaskResults() {
     return this.tab === "pt" &&
       this.settings.rewardMode !== "plan" &&
@@ -1267,7 +1270,7 @@ export class TeamBuilder extends LitElement {
     const request = this.request();
     if (request) request.timeLimitMs = null;
     return JSON.stringify([
-      "native-conservative-bounds-v3",
+      "native-conservative-bounds-v4",
       this.snapshot?.owner,
       this.loadedServer,
       this.data?.identity,
@@ -1365,6 +1368,7 @@ export class TeamBuilder extends LitElement {
           },
         ),
       );
+      if (accepted && this.tab === "pt" && settings.goal === "event") await this.pt.rememberResult();
     } catch (error) {
       if (
         generation === this.runGeneration &&

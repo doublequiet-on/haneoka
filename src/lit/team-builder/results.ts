@@ -24,7 +24,7 @@ import { songPerformerAdornment } from "../shared/song-performer-adornment";
 import { sectionHeading } from "./catalog";
 import type { TeamBuilder } from "../team-builder";
 import type { BuildSettings } from "./types";
-import { resultSettings, usesPtResults, scoreGoal, scoreProof } from "./score-goal";
+import { resultRequest, resultSettings, usesPtResults, scoreGoal, scoreProof } from "./score-goal";
 import { resolveBox } from "../../lib/team-builder/engine/box";
 import { effectPercent, resolveSlotSkill } from "../../lib/team-builder/engine/skills";
 import { memberEventPercent, snapEventPercent } from "../../lib/team-builder/engine/power";
@@ -35,7 +35,7 @@ import { roomRequiredScore, teamPowerNeeded } from "../../lib/chart-rates";
 
 const RANK_NAMES: Record<string, string> = { "1": "E", "2": "D", "3": "C", "4": "B", "5": "A", "6": "S", "7": "SS" };
 export const timelines = new Map<string, Timeline | "loading" | "error">();
-const resultInputs = (host: TeamBuilder) => (usesPtResults(host) ? (host.pt.job?.request ?? null) : host.resultInputs);
+const resultInputs = resultRequest;
 function growthPolicyLabel(host: TeamBuilder, settings: BuildSettings): string {
   const input = resultInputs(host);
   if (!input) return "—";
@@ -47,7 +47,7 @@ function growthPolicyLabel(host: TeamBuilder, settings: BuildSettings): string {
 }
 function conditionLines(host: TeamBuilder, hit: EngineHit): string[] {
   const s = resultSettings(host, hit),
-    input = resultInputs(host);
+    input = resultInputs(host, hit);
   const source = hit.song ? host.catalog!.songIdentity(hit.song.songId) : host.catalog!.data.identity;
   return [
     source.server.toUpperCase(),
@@ -572,7 +572,7 @@ function orderTimeline(host: TeamBuilder, hit: EngineHit, index: number) {
   const key = `${timelineKey(host, hit)}|${index}`;
   const value = timelines.get(key);
   if (value) return value;
-  const request = resultInputs(host);
+  const request = resultInputs(host, hit);
   const task = request && host.engine && hit.song ? host.acquireTask("timeline") : null;
   if (request && host.engine && hit.song && task) {
     timelines.set(key, "loading");
@@ -823,7 +823,7 @@ function skillOrderView(host: TeamBuilder, hit: EngineHit): TemplateResult {
 }
 
 export function resultImageDecorator(host: TeamBuilder, hit: EngineHit, assetsBase = location.href) {
-  const input = resultInputs(host);
+  const input = resultInputs(host, hit);
   const selectedSong = hit.song ?? (input?.goal.kind === "power" ? input.goal.song : input && "songs" in input.goal && input.goal.songs.length === 1 ? input.goal.songs[0]! : null);
   const song = selectedSong ? resultSong(host, selectedSong) : nothing;
   const metrics = chips(host, hit);
@@ -905,7 +905,7 @@ export function saveTeam(
 
 /** Song analysis for this team: its power and each member's score and Perfect score skills with their snap extension. */
 function songMetaHref(host: TeamBuilder, hit: EngineHit): string | null {
-  const inputs = resultInputs(host);
+  const inputs = resultInputs(host, hit);
   const master = host.master;
   if (!inputs || !master || hit.members.length !== 5) return null;
   const box = resolveBox(
@@ -971,7 +971,7 @@ export function renderHit(
       <header class="tb-hit__header">
         <div class="tb-hit__main">
           <span class="tb-hit__label">
-            <span class="tb-hit__rank">#${options.rank ?? index + 1}</span>
+            <span class="tb-hit__rank">${options.rank ?? `#${index + 1}`}</span>
             ${main.label}${
               options.subtitle
                 ? html`
@@ -1316,6 +1316,12 @@ export function renderResults(host: TeamBuilder): TemplateResult {
                 </div>
               </section>
             `
+          : nothing
+      }
+      ${
+        results.cpChallenge
+          ? renderHit(host, results.cpChallenge, -1, { rank: icon("swords", 18),
+              subtitle: host.t("pt.challengeBest", "Challenge team"), stale })
           : nothing
       }
       ${

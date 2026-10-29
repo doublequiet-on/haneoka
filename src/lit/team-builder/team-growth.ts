@@ -27,7 +27,7 @@ import { tileMedia } from "../ui/tile";
 import { accordion } from "../ui/accordion";
 import type { TeamBuilder } from "../team-builder";
 import type { BuildSettings } from "./types";
-import { resultSettings, usesPtResults } from "./score-goal";
+import { resultRequest, resultSettings, usesPtResults } from "./score-goal";
 import { resultMetric } from "./result-metric";
 
 interface Source {
@@ -113,7 +113,7 @@ export class TeamGrowthComparison {
   }
   openResult(hit: EngineHit, upgrade?: { kind: "members" | "snaps"; key: string }) {
     const host = this.host;
-    const input = usesPtResults(host) ? host.pt.job?.request : host.resultInputs;
+    const input = resultRequest(host, hit);
     if (!input || host.running) return;
     const settings = structuredClone(resultSettings(host, hit));
     const request = freshGrowthRequest(input);

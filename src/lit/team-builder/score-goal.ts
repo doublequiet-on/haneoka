@@ -1,4 +1,4 @@
-import type { EngineHit } from "../../lib/team-builder/engine/api";
+import type { EngineHit, EngineRequest } from "../../lib/team-builder/engine/api";
 import { manualEventFromEffects } from "../../lib/team-builder/manual-event";
 import { DEFAULT_SETTINGS, type BuildSettings } from "./types";
 import type { TeamBuilder } from "../team-builder";
@@ -49,6 +49,19 @@ export const usesPtResults = (host: TeamBuilder) =>
   host.tab === "pt" &&
   host.settings.rewardMode !== "plan" &&
   (host.farmResultMode ?? host.settings.rewardMode) === "recommendation";
+export const resultRequest = (host: TeamBuilder, hit?: EngineHit): EngineRequest | null => {
+  const input = usesPtResults(host) ? (host.pt.job?.request ?? null) : host.resultInputs;
+  if (!input || !hit || hit !== host.results?.cpChallenge || input.goal.kind !== "event") return input;
+  const auto = input.goal.rewardPlan?.autoCp;
+  if (!auto) return input;
+  const { aggregation: _aggregation, shard: _shard, floors: _floors, cutoff: _cutoff, rewardCutoff: _rewardCutoff,
+    rewardPhase: _rewardPhase, completed: _completed, seeds: _seeds, seedOnly: _seedOnly, seeded: _seeded,
+    resolveRewardPlan: _resolveRewardPlan, ...request } = input;
+  const { autoCp: _autoCp, ...plan } = input.goal.rewardPlan!;
+  return { ...request, k: 1, goal: { ...input.goal, route: "challenge", songs: auto.songs,
+    consumption: auto.consumption, ranking: "primary", gekiso: undefined, cpExchange: undefined,
+    rewardPlan: { ...plan, levels: plan.levels.slice(0, 1) } } };
+};
 export const resultSettings = (
   host: TeamBuilder,
   hit?: EngineHit,
@@ -82,6 +95,12 @@ export const resultSettings = (
     };
   }
   const settings = host.resultSettings ?? host.searchSettings;
+  if (hit && hit === host.results?.cpChallenge) {
+    const input = resultRequest(host, hit);
+    if (input?.goal.kind === "event") return { ...settings, route: "challenge", aggregation: "individual", ptCycle: false,
+      ptMode: "solo", songs: input.goal.songs, challengePoints: input.goal.consumption,
+      farming: { ...settings.farming, play: "challenge", ptCycle: false } };
+  }
   if (settings.goal === "plan" && hit)
     return {
       ...settings,

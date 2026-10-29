@@ -337,7 +337,7 @@ export class EngineClient {
       || request.shard || request.noFloor || request.seedOnly || request.seedVariant || request.seeded || request.rewardPhase
       || request.resolveRewardPlan || request.floors || request.rewardIncumbent || request.cutoff || request.rewardCutoff !== undefined || request.completed?.length) return null;
     const { timeLimitMs: _time, deadline: _deadline, requestId: _id, contextKey: _context, ...input } = request;
-    return JSON.stringify(["native-conservative-bounds-v3", input]);
+    return JSON.stringify(["native-conservative-bounds-v4", input]);
   }
 
   run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler): Promise<EngineResponse> {
@@ -421,8 +421,11 @@ export class EngineClient {
     }
     let stopped = false;
     let lastShown = -Infinity;
+    let cpChallenge: EngineHit | undefined;
     const publish = (response: EngineResponse, force = false) => {
       if (stopped) return;
+      if (response.cpChallenge) cpChallenge = response.cpChallenge;
+      if (cpChallenge) response.cpChallenge = cpChallenge;
       const hadCandidate = latest.overall.length > 0;
       for (const result of response.results) {
         const previous = latest.results.find(part => part.song?.songId === result.song?.songId && part.song?.difficulty === result.song?.difficulty);
@@ -477,6 +480,8 @@ export class EngineClient {
         const resolved = await idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, resolveRewardPlan: true } });
         if (stopped) return latest;
         if (!resolved.resolvedRewardPlan) return { ...latest, stopReason: resolved.stopReason ?? "budget" };
+        cpChallenge = resolved.cpChallenge;
+        if (cpChallenge) publish({ ...latest, cpChallenge }, true);
         request = { ...request, goal: { ...request.goal, rewardPlan: resolved.resolvedRewardPlan } };
       }
       if ((request.aggregation === "mean" && (request.goal.kind === "score" || request.goal.kind === "event" || request.goal.kind === "gekiso")) || (request.goal.kind === "gekiso" && request.goal.arena?.mode === "shared")) {

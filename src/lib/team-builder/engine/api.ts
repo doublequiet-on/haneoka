@@ -256,6 +256,8 @@ export interface PlanSummary {
 }
 export interface EngineResponse {
   resolvedRewardPlan?: RewardRankingPlan;
+  /** Proven challenge team used to price automatic CP conversion. */
+  cpChallenge?: EngineHit;
   stopReason?: StopReason;
   error?: string;
   /** Phase durations sum work across Workers; wallMs includes queueing and all phases. */

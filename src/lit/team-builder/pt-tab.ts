@@ -22,7 +22,7 @@ import {
   type PtMeasure,
   type PtScope,
 } from "../../lib/team-builder/pt-recommendation";
-import { improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
+import { completeResponse, improvementPercent, pendingSong } from "../../lib/team-builder/engine/execution";
 import { PtCheckpoint } from "../../lib/team-builder/pt-checkpoint";
 import { renderHit, renderResults } from "./results";
 import {
@@ -41,8 +41,9 @@ import { icon } from "../ui/icon";
 import { accordion } from "../ui/accordion";
 import { issueField, ptField } from "./pt-fields";
 import { farmingConditions, farmingMode, farmingSettings } from "./workspace-state";
-import type { FarmingSettings } from "./types";
+import type { BuildSettings, FarmingSettings } from "./types";
 import { usesPtResults } from "./score-goal";
+import { changeRewardMode } from "../../lib/team-builder/reward-plan";
 
 export class PtController {
   private task: symbol | null = null;
@@ -243,12 +244,20 @@ export class PtController {
     let hash = "";
     try {
       hash = await digest(data);
-      const job = await this.store.latest(data.identity.server, owner);
+      const [job, saved] = await Promise.all([
+        this.store.latest(data.identity.server, owner),
+        this.store.latestResult<BuildSettings>(data.identity.server, owner),
+      ]);
       if (generation !== this.generation) return;
       for (const task of job?.tasks ?? []) if (task.status === "running") task.status = "queued";
       this.dataFingerprint = hash;
       this.job = job?.dataFingerprint === hash ? job : null;
-      if (this.job && !this.host.farmResultMode) this.host.farmResultMode = "recommendation";
+      if (!this.host.farmResultMode) {
+        if (saved?.dataFingerprint === hash && saved.owner === owner && saved.updatedAt >= (this.job?.updatedAt ?? 0)) {
+          this.host.restoreFarmingResult(saved.response, saved.settings, saved.request, saved.contextKey, saved.session);
+          this.host.farmResultMode = "event";
+        } else if (this.job) this.host.farmResultMode = "recommendation";
+      }
       this.storageError = false;
     } catch (error) {
       console.warn("pt-checkpoint-restore", error);
@@ -258,6 +267,18 @@ export class PtController {
       if (!hash) this.error = "pt-data-fingerprint";
     }
     this.host.requestUpdate();
+  }
+  async rememberResult() {
+    const host = this.host;
+    if (!host.data || !host.results || !host.resultInputs || !host.resultSettings || !this.dataFingerprint
+        || !completeResponse(host.results) || host.results.stopReason !== "complete") return;
+    try {
+      await this.store.saveResult({ server: host.data.identity.server, owner: this.owner, dataFingerprint: this.dataFingerprint,
+        contextKey: host.resultsFor, request: host.resultInputs, response: host.results, settings: host.resultSettings,
+        session: host.resultSession, updatedAt: Date.now() });
+    } catch {
+      this.storageError = true;
+    }
   }
   stop() {
     ++this.generation;
@@ -489,6 +510,17 @@ function renderSetup(host: TeamBuilder): TemplateResult {
               boostControl(host, s.boosts, (boosts) => host.updateSettings({ boosts })),
             )
       }
+      ${s.route === "live" && challenge && plan.primary !== "challenge-points" ? html`
+        <label class="tb-check" id="tb-reward-scope">
+          <md-checkbox touch-target="wrapper" .checked=${autoCp}
+            @change=${(event: Event) => {
+              const checked = (event.target as HTMLInputElement).checked;
+              const next = changeRewardMode(plan, "challenge-points", checked ? "convert" : "ignore");
+              next.options["challenge-points"].auto = checked;
+              set({ rewardPlan: next, ptCycle: false, weighted: false, measure: next.primary });
+            }}></md-checkbox>
+          <span>${host.t("farm.cpConversion", "Include challenge rewards from earned CP")}</span>
+        </label>` : nothing}
     </section>
     ${renderRewardPlan(host, plan)}
     ${
