@@ -1,3 +1,4 @@
+import { projectCardGrowth } from "./card-growth-data";
 import { projectHaneokaTranscript } from "@haneoka/vega-plugin-haneoka/transcript";
 import { resolveSongPerformer } from "./song-performer";
 import { storyCharacterIds } from "./story-characters";
@@ -7,7 +8,6 @@ import {
   associatedReward,
   characterRankAssociations,
   entityReference,
-  skillDisplay,
   upgradeSteps,
   type ReferenceResolver,
 } from "./entity-associations";
@@ -480,59 +480,10 @@ function skillReferenceSubset(graph: Graph, item: RecordValue): RecordValue {
 }
 
 function cardAux(graph: Graph, item: RecordValue, support: boolean): RecordValue {
-  const levelView = support ? "support-card-levels" : "member-card-levels";
-  const levelGroup = Number(support ? item.supportCardLevelGroup : item.memberCardLevelGroup);
-  const skillGroups = new Set(
-    numbers([item.liveSkillLevelResourceGroup, item.gekisouSkillLevelResourceGroup, item.linkSkillLevelResourceGroup]),
-  );
-  const aux: RecordValue = {
-    [levelView]: (graph.views[levelView] || []).filter((row) => Number(row.group) === levelGroup),
-    "skill-level-resources": (graph.views["skill-level-resources"] || []).filter((row) =>
-      skillGroups.has(Number(row.group)),
-    ),
-    "skill-reference": skillReferenceSubset(graph, item),
-  };
-  if (support) {
-    const rankGroup = Number(item.supportCardRankGroup || item.supportCardLevelGroup);
-    aux.progression = {
-      supportCardRanks: progressionSubset(graph, "supportCardRanks", (raw) => Number(raw._group) === rankGroup),
-    };
-  } else {
-    const awakeGroup = Number(item.memberCardAwakeGroup || 1);
-    const rankGroup = Number(item.memberCardRankGroup || 1);
-    const resourceGroup = Number(item.memberCardAwakeResourceGroup);
-    aux["member-card-awake-resources"] = (graph.views["member-card-awake-resources"] || []).filter(
-      (row) => Number(row.group) === resourceGroup,
-    );
-    aux.progression = {
-      memberCardAwake: progressionSubset(graph, "memberCardAwake", (raw) => Number(raw._group) === awakeGroup),
-      memberCardRanks: progressionSubset(graph, "memberCardRanks", (raw) => Number(raw._group) === rankGroup),
-      memberCardLevelLimits: progressionSubset(
-        graph,
-        "memberCardLevelLimits",
-        (raw) => Number(raw._rarity) === Number(item.rarity),
-      ),
-    };
-  }
-  const resolve = referenceResolver(graph);
-  const progression = asRecord(aux.progression) || {};
-  aux.associations = {
-    skills: skillDisplay(item, asRecord(aux["skill-reference"]) || {}),
-    upgrades: [
-      ...upgradeSteps("live", rows(aux["skill-level-resources"]).filter(
-        (row) => Number(row.group) === Number(item.liveSkillLevelResourceGroup)), "level", resolve),
-      ...upgradeSteps("gekisou", rows(aux["skill-level-resources"]).filter(
-        (row) => Number(row.group) === Number(item.gekisouSkillLevelResourceGroup)), "level", resolve),
-      ...upgradeSteps("link", rows(aux["skill-level-resources"]).filter(
-        (row) => Number(row.group) === Number(item.linkSkillLevelResourceGroup)), "level", resolve),
-      ...upgradeSteps("training", rows(aux["member-card-awake-resources"]), "awakeCount", resolve),
-      ...upgradeSteps(support ? "rank" : "awakening",
-        rows(progression[support ? "supportCardRanks" : "memberCardRanks"]), "rank", resolve,
-        support ? { resource: "support-cards", id: String(item.supportCardId) }
-          : { resource: "items", id: String(item.rankUpItemId) }),
-    ],
-  };
-  return aux;
+  return projectCardGrowth({
+    views: graph.views, progression: graph.progression,
+    skillReference: skillReferenceSubset(graph, item), resolve: referenceResolver(graph),
+  }, item, support);
 }
 
 /** Everything the character archive's tabs list, filtered to one character. */

@@ -10,6 +10,7 @@ import { iconButton, segmented } from "../ui/controls";
 import { icon } from "../ui/icon";
 import { modal } from "../ui/modal";
 import { tileMedia } from "../ui/tile";
+import { growthSteps } from "../ui/growth-steps";
 import type { TeamBuilder } from "../team-builder";
 
 type Kind = "members" | "snaps";
@@ -296,18 +297,8 @@ export function renderCardEditor(host: TeamBuilder): TemplateResult | typeof not
     host.write([...(owned ? [] : [{ key: `${p}.${cardId}.own`, value: true }, { key: `${p}.${cardId}.use`, value: true }]), ...changes]);
   };
   const fieldKey = (field: string) => `${kind === "members" ? "m" : "s"}${cardId}.${({ awk: "awake", lvl: "level", rnk: "rank", sk: "liveSkillLevel", gsk: "gekisoSkillLevel" } as Record<string,string>)[field] ?? field}`;
-  const steps = (label: string, field: string, value: number | null, max: number) => ptField(host, fieldKey(field), html`
-    <div class="tb-field">
-      <span class="tb-field__label">${label}</span>
-      ${segmented({
-        label,
-        value: value === null ? "" : String(value),
-        grow: false,
-        options: Array.from({ length: max }, (_, index) => ({ value: String(index + 1), label: String(index + 1) })),
-        onSelect: (next) => write(field, Number(next)),
-      })}
-    </div>
-  `);
+  const steps = (label: string, field: string, value: number | null, max: number) => ptField(host, fieldKey(field),
+    growthSteps(label, value, Array.from({ length: max }, (_, index) => index + 1), field === "awk" || field === "rnk", next => write(field, next)));
   const levelField = (value: number | null, cap: number) => ptField(host, fieldKey("lvl"), html`
     <div class="tb-field">
       <span class="tb-field__label">${host.t("level", "Level")}<output>${value === null ? "—" : Math.min(value, cap)} / ${cap}</output></span>

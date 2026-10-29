@@ -544,6 +544,8 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                                       ],
                                       { numeric: true },
                                     )}
+                        ${row ? html`<button class="button button--tonal" type="button" ?disabled=${host.running}
+                          @click=${() => host.teamGrowth.openManual(row)}>${host.t("tg.title", "Team growth comparison")}</button>` : nothing}
                       </div>
                     </li>
                   `,
@@ -569,6 +571,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                             `
                           : nothing
                       }
+                        <th scope="col">${host.t("tg.title", "Team growth comparison")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -591,6 +594,8 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                                             `
                                           : nothing
                                       }
+                          <td>${row ? html`<button class="button button--text" type="button" ?disabled=${host.running}
+                            @click=${() => host.teamGrowth.openManual(row)}>${host.t("tg.title", "Team growth comparison")}</button>` : nothing}</td>
                         </tr>
                       `,
                     )}

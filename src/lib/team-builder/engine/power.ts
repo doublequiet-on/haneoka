@@ -1,3 +1,4 @@
+import { memberStat, snapshotPercent } from "../../card-growth";
 /** Exact deck power (CardParameterCalculator) split into additive per-slot terms.
  * One stat point is 10 000 BP; percentages use 10 000 BP = 100 %. Float steps are binary32. */
 import type { EngineMaster, MemberCard, SkillEffectRow, SnapCard, Stat3, TargetRow } from "./master";
@@ -87,10 +88,7 @@ export function resolveMember(master: EngineMaster, key: string, card: MemberCar
   const max = card.statMax;
   const own: BP3 = [0, 0, 0];
   for (let i = 0; i < 3; i++) {
-    const levelPoints = floorF32Div(level[i]! * max[i]!);
-    const awakePoints = Math.floor(f(f(awake[i]! / 10000) * f(max[i]!)));
-    const rankPoints = floorF32Div(Math.imul(rank.rates[i]!, max[i]!));
-    own[i] = (levelPoints + awakePoints + rankPoints) * 10000;
+    own[i] = memberStat(max[i]!, level[i]!, awake[i]!, rank.rates[i]!) * 10000;
   }
   const gekiso = master.gekisoSkills.get(card.gekisoSkillId);
   return {
@@ -111,7 +109,7 @@ export function resolveSnap(master: EngineMaster, key: string, card: SnapCard, g
   const level = master.snapLevels.get(card.levelGroup)?.get(growth.level);
   const rank = master.snapRanks.get(card.rankGroup)?.get(growth.rank);
   if (!level || !rank) return null;
-  const percent: BP3 = [0, 1, 2].map((i) => floorF32Div(Math.imul(level[i]!, card.statMax[i]!))) as BP3;
+  const percent: BP3 = [0, 1, 2].map((i) => snapshotPercent(card.statMax[i]!, level[i]!)) as BP3;
   return {
     key,
     card,
