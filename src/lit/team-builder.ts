@@ -53,7 +53,7 @@ import {
   type FarmingSettings,
   type Tab,
 } from "./team-builder/types";
-import { farmingConditions, farmingSettings, parseOpponents, restoreBuildSettings } from "./team-builder/workspace-state";
+import { farmingConditions, farmingSettings, parseOpponents, resolveLuckSamples, restoreBuildSettings } from "./team-builder/workspace-state";
 import { renderBuildTab } from "./team-builder/build-tab";
 import { snackbar } from "../lib/snackbar";
 import { renderBoxTab, renderCardEditor, renderUndoAction } from "./team-builder/box-tab";
@@ -1037,6 +1037,12 @@ export class TeamBuilder extends LitElement {
     const gekiso = recommendation ? s.ptMode === "gekiso" : s.goal === "gekiso";
     if (gekiso && (!Number.isInteger(s.minComboBonus) || s.minComboBonus < 1))
       add("tb-combo", "invalidCombo", "Enter a positive integer");
+    if (s.goal === "gekiso" && s.gekisoSamplingMode === "manual" &&
+      (!Number.isInteger(resolveLuckSamples(s)) || resolveLuckSamples(s) < 0))
+      add("tb-luck-samples", "pt.invalidSamples", "Enter zero or a positive integer");
+    if (s.goal === "event" && s.ptMode === "gekiso" && s.route === "live" && s.ptSamplingMode === "manual" &&
+      (!Number.isInteger(resolveLuckSamples(s, "rewards")) || resolveLuckSamples(s, "rewards") < 1))
+      add("tb-luck-samples", "invalidCombo", "Enter a positive integer");
     if (!recommendation && s.goal === "gekiso" && s.gekisoPlacementMode === "opponents") {
       const parsed = parseOpponents(s.gekisoOpponents);
       if (parsed.empty) add("tb-placement", "needOpponents", "Enter opponent scores");
@@ -1077,6 +1083,11 @@ export class TeamBuilder extends LitElement {
     return issues;
   }
   async focusInput(field: string) {
+    if (field === "tb-luck-samples") {
+      this.expanded.add(this.tab === "pt" ? "farm-advanced" : `sampling-${this.tab}-${this.buildMode}`);
+      this.requestUpdate();
+      await this.updateComplete;
+    }
     if (field === "tb-manual-cards") {
       this.expanded.add("manual-pickups");
       this.requestUpdate();
@@ -1128,7 +1139,7 @@ export class TeamBuilder extends LitElement {
       rank: s.gekisoPlacementMode === "opponents" ? 1 : s.gekisoRank,
       minComboBonus: s.minComboBonus,
       ...(s.gekisoPlacementMode === "opponents" ? { opponents: parseOpponents(s.gekisoOpponents).ranges } : {}),
-      seeds: s.gekisoSeeds,
+      seeds: resolveLuckSamples(s),
     };
   }
   goal(): Goal | null {
@@ -1168,7 +1179,7 @@ export class TeamBuilder extends LitElement {
             ranking: s.ptMode === "gekiso" && s.route === "live" ? "pt-only" : "primary",
             route: s.route, eventId: s.eventId, songs: s.route === "skip" ? [] : s.songs,
             consumption: s.route === "challenge" ? s.challengePoints : s.boosts, play,
-            ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
+            ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: resolveLuckSamples(s, "rewards"), rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
           };
         }
         return {
@@ -1189,7 +1200,7 @@ export class TeamBuilder extends LitElement {
                 },
               }
             : {}),
-          ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: s.ptLuckSamples, rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
+          ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: resolveLuckSamples(s, "rewards"), rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
           ranking: s.ptMode === "gekiso" && s.route === "live" ? "pt-only" : s.fullRanking ? undefined : "primary",
           route: s.route,
           eventId: s.eventId,

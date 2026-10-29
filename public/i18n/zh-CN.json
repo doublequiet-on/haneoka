@@ -2708,6 +2708,8 @@
         "gekiso": "激奏",
         "baselineJust": "基础 JUST 比例（%）",
         "luckSamples": "Luck 抽样次数",
+        "luckSampling": "LUCK 计算",
+        "invalidSamples": "请输入0或正整数",
         "chooseChallenge": "挑战曲目",
         "challengeCost": "每次挑战消耗 CP",
         "constraints": "队长与留影",

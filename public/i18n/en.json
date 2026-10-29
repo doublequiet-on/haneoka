@@ -2708,6 +2708,8 @@
         "gekiso": "Gekiso",
         "baselineJust": "Baseline JUST (%)",
         "luckSamples": "Luck samples",
+        "luckSampling": "LUCK calculation",
+        "invalidSamples": "Enter zero or a positive integer",
         "chooseChallenge": "Challenge songs",
         "challengeCost": "CP per challenge",
         "constraints": "Leader and snapshots",

@@ -12,7 +12,7 @@ import { songRulesControl } from "./song-rules";
 import { saveTeam } from "./results";
 import { renderSongComparison } from "./song-comparison-view";
 import { toolLayout } from "./tool-layout";
-import { eventSection, gekisoSamplesControl, playConditions, songList } from "./build-tab";
+import { eventSection, gekisoSamplingAdvanced, playConditions, songList } from "./build-tab";
 import { segmented } from "../ui/controls";
 import { clock } from "../../lib/team-builder/engine/execution";
 import { compareHits } from "../../lib/team-builder/engine/merge";
@@ -37,8 +37,18 @@ function teamSpec(host: TeamBuilder) {
     leader: `m${members[leader]}`,
   };
 }
+function manualSamplingReady(host: TeamBuilder): boolean {
+  const goal = host.manualGoal();
+  if (goal.kind !== "gekiso" || (Number.isInteger(goal.seeds) && goal.seeds >= 0)) return true;
+  host.submitted = true;
+  host.error = host.t("pt.invalidSamples", "Enter zero or a positive integer");
+  host.requestUpdate();
+  void host.focusInput("tb-luck-samples");
+  return false;
+}
 async function evaluate(host: TeamBuilder) {
   if (!manualReady(host) || !host.engine || !host.manualGoal().songs.length || host.running) return;
+  if (!manualSamplingReady(host)) return;
   const task = host.acquireTask("evaluation");
   if (!task) return;
   const context = host.manualContext();
@@ -78,6 +88,7 @@ async function evaluate(host: TeamBuilder) {
 async function suggest(host: TeamBuilder, slot: number) {
   const base = host.request(host.manualGoal());
   if (!base || !host.engine || !manualReady(host) || host.running) return;
+  if (!manualSamplingReady(host)) return;
   const task = host.acquireTask("suggestion");
   if (!task) return;
   const context = host.manualSuggestionContext();
@@ -469,7 +480,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                                       })),
                                       onSelect: (value) => host.updateSettings({ gekisoRank: Number(value) }),
                                     })}
-                    ${gekisoSamplesControl(host)}
+                    ${gekisoSamplingAdvanced(host)}
                   `
             }
               <span class="tb-field__label">${host.t("unknownPolicy", "Growth not entered")}</span>

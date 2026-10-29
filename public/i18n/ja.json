@@ -2708,6 +2708,8 @@
         "gekiso": "撃奏",
         "baselineJust": "基本 JUST 率（%）",
         "luckSamples": "Luck サンプル数",
+        "luckSampling": "LUCK 計算",
+        "invalidSamples": "0以上の整数を入力",
         "chooseChallenge": "チャレンジ楽曲",
         "challengeCost": "チャレンジ 1 回の消費 CP",
         "constraints": "リーダーとスナップ",

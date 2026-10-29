@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Saved build preferences, opponent drafts and chart selections.
-// Output: Migrated farming drafts, effective reward conditions, validated opponents and selection transactions.
+// Output: Migrated drafts, resolved Luck sampling counts, effective reward conditions and selection transactions.
 // Pos: [Map](../L2-2.md); team workspace input projection.
 // Effects/Dependencies: Pure transformations; no persistence or engine calls.
 import { readSongRules } from "../../lib/team-builder/arena";
@@ -25,8 +25,17 @@ export function parseOpponents(drafts: readonly string[]) {
   return { ranges, invalid, empty: ranges.every(range => !range.length) };
 }
 
+export function resolveLuckSamples(settings: Pick<BuildSettings,
+  "gekisoSamplingMode" | "gekisoSeeds" | "ptSamplingMode" | "ptLuckSamples">,
+  context: "score" | "rewards" = "score"): number {
+  if (context === "rewards") return settings.ptSamplingMode === "manual" ? settings.ptLuckSamples : 32;
+  return settings.gekisoSamplingMode === "manual" ? settings.gekisoSeeds : 0;
+}
+
 export function restoreBuildSettings(stored: Partial<BuildSettings> = {}): BuildSettings {
   const settings = { ...structuredClone(DEFAULT_SETTINGS), ...stored, songRules: readSongRules(stored.songRules) };
+  settings.gekisoSamplingMode = stored.gekisoSamplingMode === "manual" ? "manual" : "auto";
+  settings.ptSamplingMode = stored.ptSamplingMode === "manual" ? "manual" : "auto";
   const { attribute, ...manualEvent } = settings.manualEvent as typeof settings.manualEvent & { attribute?: number | null };
   settings.manualEvent = { ...manualEvent, attributes: manualEvent.attributes ?? (attribute ? [attribute] : attribute === 0 ? [] : null) };
   if (stored.gekisoPlacementMode === undefined)

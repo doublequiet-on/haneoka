@@ -2708,6 +2708,8 @@
         "gekiso": "격주",
         "baselineJust": "기본 JUST 비율(%)",
         "luckSamples": "Luck 샘플 수",
+        "luckSampling": "LUCK 계산",
+        "invalidSamples": "0 이상의 정수를 입력하세요",
         "chooseChallenge": "챌린지 곡",
         "challengeCost": "챌린지 1회 소모 CP",
         "constraints": "리더와 스냅",

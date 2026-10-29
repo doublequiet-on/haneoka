@@ -5,6 +5,7 @@ import { emptyManualEvent, type ManualEventDraft } from "../../lib/team-builder/
 
 export type Tab = "build" | "arena" | "box" | "account" | "teams" | "pt" | "song-comparison";
 export type GoalKind = "score" | "gekiso" | "power" | "event" | "potential" | "plan";
+export type LuckSamplingMode = "auto" | "manual";
 export interface BuildSettings {
   aggregation: "individual" | "mean";
   songRules?: import("../../lib/team-builder/arena").SongRules;
@@ -16,6 +17,7 @@ export interface BuildSettings {
   ptCycle: boolean;
   ptMode: "solo" | "gekiso";
   ptJust: number;
+  ptSamplingMode: LuckSamplingMode;
   ptLuckSamples: number;
   goal: GoalKind;
   songs: SongRef[];
@@ -69,7 +71,8 @@ export interface BuildSettings {
   gekisoRank: number;
   gekisoPlacementMode: "rank" | "opponents";
   minComboBonus: number;
-  /** Zero retains nominal expectations; positive counts average seeds 0 through n-1. */
+  gekisoSamplingMode: LuckSamplingMode;
+  /** Manual draft: zero retains nominal expectations; positive counts average seeds 0 through n-1. */
   gekisoSeeds: number;
   /** Opponents' scores per range as typed (numbers separated by spaces or commas). */
   gekisoOpponents: [string, string, string];
@@ -98,6 +101,7 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   ptCycle: false,
   ptMode: "solo",
   ptJust: 25,
+  ptSamplingMode: "auto",
   ptLuckSamples: 32,
   goal: "score",
   songs: [],
@@ -143,6 +147,7 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   gekisoRank: 1,
   gekisoPlacementMode: "rank",
   minComboBonus: 1,
+  gekisoSamplingMode: "auto",
   gekisoSeeds: 0,
   gekisoOpponents: ["", "", ""],
 };

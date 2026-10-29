@@ -30,6 +30,7 @@ import {
   renderBuildRun,
   renderCandidates,
   comboBonusControl,
+  gekisoSamplesControl,
   eventSection,
   playSection,
   songList,
@@ -40,7 +41,7 @@ import { rovingKeydown, segmented } from "../ui/controls";
 import { icon } from "../ui/icon";
 import { accordion } from "../ui/accordion";
 import { issueField, ptField } from "./pt-fields";
-import { farmingConditions, farmingMode, farmingSettings } from "./workspace-state";
+import { farmingConditions, farmingMode, farmingSettings, resolveLuckSamples } from "./workspace-state";
 import type { BuildSettings, FarmingSettings } from "./types";
 import { usesPtResults } from "./score-goal";
 import { changeRewardMode } from "../../lib/team-builder/reward-plan";
@@ -73,6 +74,7 @@ export class PtController {
       host.editing = { kind: card[1] === "m" ? "members" : "snaps", cardId: Number(card[2]) };
     } else host.tab = /^(cr|bi|p)\./u.test(field) ? "account" : field === "inventory" ? "box" : "pt";
     if (field === "constraints" || field === "minBonus") host.expanded.add("candidates");
+    if (field === "gekiso-input") host.expanded.add("farm-advanced");
     host.requestUpdate();
     await host.updateComplete;
     await host.ensureConditionsVisible();
@@ -93,7 +95,7 @@ export class PtController {
       block: "center",
       behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
     });
-    const control = target.querySelector<HTMLElement>(
+    const control = target.querySelector<HTMLElement>("#tb-luck-samples") ?? target.querySelector<HTMLElement>(
       "input, md-outlined-text-field, md-outlined-select, md-slider, button:not([disabled]), md-checkbox",
     );
     if (control && "updateComplete" in control) await control.updateComplete;
@@ -134,7 +136,7 @@ export class PtController {
         ? {
             gekiso: {
               just: s.ptJust / 100,
-              luckSamples: s.ptLuckSamples,
+              luckSamples: resolveLuckSamples(s, "rewards"),
               rank: 1 as const,
               minComboBonus: s.minComboBonus,
             },
@@ -625,16 +627,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                 ? ptField(
                     host,
                     "gekiso-input",
-                    html`
-                      <md-outlined-text-field
-                        type="number"
-                        min="1"
-                        step="1"
-                        label=${host.t("pt.luckSamples", "Luck samples")}
-                        .value=${live(String(s.ptLuckSamples))}
-                        @change=${(e: Event) => host.updateSettings({ ptLuckSamples: Number((e.target as HTMLInputElement).value) })}
-                      ></md-outlined-text-field>
-                    `,
+                    gekisoSamplesControl(host, "rewards"),
                   )
                 : html`
                     <label class="tb-check">
