@@ -505,7 +505,7 @@ const profiles: Record<string, Profile> = {
     document: "entries",
     detail: ["description", "characterIds", "releasedAt"],
     presentation: "stamp",
-    defaultSort: "id",
+    defaultSort: "release",
     defaultOrder: "desc",
   },
   backgrounds: {
