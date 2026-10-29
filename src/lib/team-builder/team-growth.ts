@@ -4,8 +4,7 @@
 // Pos: [Map](L2-2.md); growth comparison request projection, not a scoring implementation.
 // Effects/Dependencies: No Box writes; preserves the source's candidates and scoring conditions.
 import type { EngineHit, EngineRequest } from "./engine/api";
-import type { MemberInput } from "./engine/box";
-import { maxMemberGrowth, maxSnapGrowth } from "./engine/box";
+import { maxMemberGrowth, maxSnapGrowth, memberGrowth, snapGrowth, type MemberInput, type SnapInput } from "./engine/box";
 import type { EngineMaster } from "./engine/master";
 import { memberLevelCap, snapLevelCap } from "./engine/power";
 import type { GrowthAction } from "../growth-comparison";
@@ -63,7 +62,10 @@ export function teamGrowthChange(
   const max = maximum as Omit<MemberInput, "key" | "cardId">;
   if (choice.action === "full") {
     const fields = Object.keys(maximum) as (keyof typeof max)[];
-    if (fields.every((field) => values[field] === max[field])) return { ...result, status: "at-cap" };
+    const effective = (member
+      ? memberGrowth(master, member, values, source.unknownPolicy)
+      : snapGrowth(master, snap!, row as SnapInput, source.unknownPolicy)) as typeof max;
+    if (fields.every((field) => effective[field] === max[field])) return { ...result, status: "at-cap" };
     const request = freshGrowthRequest(source);
     Object.assign(
       request[choice.kind].find((row) => row.key === choice.key)!,
