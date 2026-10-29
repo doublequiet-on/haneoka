@@ -286,12 +286,35 @@ export class TeamGrowthComparison {
         return change.request ? [{ kind, key: row.key, request: change.request }] : [];
       }),
     );
+    const responses: EngineResponse[] = [];
+    const pending: Array<{ index: number; key: string; request: EngineRequest }> = [];
+    let done = 0;
+    for (const [index, candidate] of candidates.entries()) {
+      const key = this.cacheKey(candidate.request);
+      const cached = this.cached(key);
+      if (cached && completeResponse(cached) && !cached.error) {
+        responses[index] = cached;
+        progress(++done, candidates.length);
+      } else pending.push({ index, key, request: {
+        ...candidate.request,
+        seeds: cached?.overall,
+        completed: cached?.results.filter((row) => row.proven),
+      } });
+    }
+    if (pending.length) await this.host.engine!.runBatch(pending.map((item) => item.request), (index, result) => {
+      if (identity !== this.identity()) throw new DOMException("Cancelled", "AbortError");
+      const item = pending[index]!;
+      this.remember(item.key, result);
+      if (result.error) throw new Error(result.error);
+      if (!completeResponse(result)) throw new DOMException("Cancelled", "AbortError");
+      responses[item.index] = result;
+      progress(++done, candidates.length);
+    });
     const upgrades = [];
     const settings = resultSettings(this.host);
     const metric = (hit: EngineHit) => resultMetric(this.host, hit, settings).value;
     for (const [index, candidate] of candidates.entries()) {
-      const response = await evaluate(candidate.request),
-        team = response.overall[0] ?? null;
+      const team = responses[index]!.overall[0] ?? null;
       if (team)
         upgrades.push({
           kind: candidate.kind,
@@ -300,7 +323,6 @@ export class TeamGrowthComparison {
           gain: metric(team) - metric(base.overall[0]),
           team,
         });
-      progress(index + 1, candidates.length);
     }
     upgrades.sort((a, b) => b.gain - a.gain);
     return { base: metric(base.overall[0]), upgrades };
