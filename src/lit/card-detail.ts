@@ -1,3 +1,4 @@
+import { memberStat, snapshotPercent } from "../lib/card-growth";
 import { html, nothing } from "lit";
 import "../styles/card-detail.css";
 import { renderLevelSwitch } from "./ui/level-switch";
@@ -92,15 +93,14 @@ export function renderCardStats(c: Controller, item: Item) {
   const awakening = data.support
     ? {}
     : data.rankRows.find((row: Item) => Number(row._rank) === c.detailAwakening) || {};
-  const rate = (key: string) => {
+  const value = (key: string) => {
     const name = key === "technique" ? "technic" : key;
-    return (
-      Number(selected?.[`${name}Rate`] || 10000) +
-      Number(training[`_${name}Rate`] || 0) +
-      Number(awakening[`_${name}Rate`] || 0)
+    const maximum = c.stat(item, key);
+    const level = Number(selected?.[`${name}Rate`] ?? 10000);
+    return data.support ? snapshotPercent(maximum, level) : memberStat(
+      maximum, level, Number(training[`_${name}Rate`] ?? 0), Number(awakening[`_${name}Rate`] ?? 0),
     );
   };
-  const value = (key: string) => Math.floor((c.stat(item, key) * rate(key)) / 10000);
   const stats = [value("performance"), value("technique"), value("visual")];
   return html`
     <section class="detail-section card-stat-section">

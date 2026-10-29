@@ -7,11 +7,13 @@ import { compileRewardPlan, effectiveRewardPlan, legacyRewardPlan } from "../lib
 import { resolveManualEvent } from "../lib/team-builder/manual-event";
 import { renderCardPicker } from "./team-builder/card-picker";
 import { ResultComparison } from "./team-builder/result-comparison";
+import { TeamGrowthComparison } from "./team-builder/team-growth";
 import { usesPtResults } from "./team-builder/score-goal";
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
 import { LitElement, html, nothing, render, type TemplateResult } from "lit";
 import { hydrateWorkspace as hydrate } from "./shared/hydrate-workspace";
 import { readPageData } from "../lib/page-data";
+import { navigationDocumentUrl } from "../lib/document-url";
 import type { TeamBuilderPageData } from "../server/tool-page-data";
 import "@material/web/checkbox/checkbox.js";
 import "@material/web/select/outlined-select.js";
@@ -103,6 +105,7 @@ export class TeamBuilder extends LitElement {
   imports: ImportController = new ImportController(this);
   pt = new PtController(this);
   songComparison = new SongComparison(this);
+  teamGrowth = new TeamGrowthComparison(this);
   private task: { token: symbol; kind: string } | null = null;
   acquireTask(kind: string) {
     if (this.task || this.running || this.manualBusy) return null;
@@ -125,6 +128,7 @@ export class TeamBuilder extends LitElement {
     this.requestUpdate();
   }
   private resetTasks() {
+    this.teamGrowth.close();
     this.songComparison.dispose();
     this.pt.dispose();
     this.farmResultMode = null;
@@ -345,6 +349,7 @@ export class TeamBuilder extends LitElement {
     return this;
   }
   connectedCallback() {
+    const openBox = navigationDocumentUrl().searchParams.get("tab") === "box";
     const payload = readPageData<TeamBuilderPageData>(this);
     if (payload?.schema === "haneoka-team-builder-page-v1") this.preparePage(payload);
     super.connectedCallback();
@@ -366,6 +371,9 @@ export class TeamBuilder extends LitElement {
     this.layoutObserver.observe(this);
     if (this.closest("#main-content")) this.layoutObserver.observe(this.closest("#main-content")!);
     void this.load(readReleaseServer() || this.server);
+    if (openBox) void this.updateComplete.then(() => {
+      if (this.isConnected) this.setTab("box");
+    });
   }
   preparePage(payload: TeamBuilderPageData, server = payload.server, allowedServers?: readonly string[]) {
     this.pageData = payload;
@@ -1319,7 +1327,7 @@ export class TeamBuilder extends LitElement {
   }
 
   async recommendGrowth() {
-    const request = this.request();
+    const request = this.resultInputs ? structuredClone(this.resultInputs) : null;
     if (!request || !this.engine || this.running || this.growth?.result === null) return;
     const task = this.acquireTask("growth");
     if (!task) return;
@@ -1328,7 +1336,7 @@ export class TeamBuilder extends LitElement {
     this.growth = { context, done: 0, total: 0, result: null };
     this.requestUpdate();
     try {
-      const result = await this.engine.growth(request, (done, total) => {
+      const result = await this.teamGrowth.priorities(request, (done, total) => {
         if (!this.ownsTask(task) || this.growth?.context !== context) return;
         this.growth = { ...this.growth, done, total };
         this.requestUpdate();
@@ -1346,6 +1354,10 @@ export class TeamBuilder extends LitElement {
   }
 
   cancel() {
+    if (this.taskKind === "team-growth") {
+      this.teamGrowth.stop();
+      return;
+    }
     if (this.songComparison.running) {
       this.songComparison.stop();
       return;
@@ -1597,6 +1609,7 @@ export class TeamBuilder extends LitElement {
     }
     if (this.pt.correcting && this.tab !== "pt") this.pt.sync();
     this.songComparison.sync();
+    this.teamGrowth.sync();
     this.comparison.sync(this);
     const buildPanel = () => html`
       <div class="stack tb-build-panel">
@@ -1654,7 +1667,7 @@ export class TeamBuilder extends LitElement {
         >
           ${panel}
         </section>
-        ${renderCardPicker(this)} ${this.comparison.dialog(this)} ${renderCardEditor(this)} ${this.songPicker ? renderSongPicker(this) : nothing}
+        ${renderCardPicker(this)} ${this.comparison.dialog(this)} ${this.teamGrowth.render()} ${renderCardEditor(this)} ${this.songPicker ? renderSongPicker(this) : nothing}
         ${this.imports.render()} ${this.renderSnackbar()}
       </div>
     `;

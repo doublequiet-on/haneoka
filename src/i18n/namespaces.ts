@@ -156,7 +156,7 @@ export const featureNamespaceForRoute = (route = "/"): MainI18nNamespace => {
   )
     return STAMP_MAKER_I18N_NAMESPACE;
   if (pathname === "/song-puzzle" || pathname.startsWith("/song-puzzle/")) return SONG_PUZZLE_I18N_NAMESPACE;
-  if (pathname === "/team-builder" || pathname.startsWith("/team-builder/")) return TEAM_BUILDER_I18N_NAMESPACE;
+  if (/^\/team-builder(\/|$)/u.test(pathname)) return TEAM_BUILDER_I18N_NAMESPACE;
   if (/^\/(?:catalog\/)?events\/tracker(?:\/|$)/u.test(pathname)) return EVENT_TRACKER_I18N_NAMESPACE;
   if (pathname.includes("anon-tokyo")) return ANON_I18N_NAMESPACE;
   if (pathname === "/charts" || pathname.startsWith("/charts/")) return COMMUNITY_I18N_NAMESPACE;

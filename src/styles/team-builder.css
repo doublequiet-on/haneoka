@@ -1,5 +1,62 @@
 @import "./components/selection-pane.css";
 
+@layer pages {
+  .team-builder .tb-team-growth {
+    width: min(1160px, calc(100vw - 32px));
+    height: min(900px, calc(100dvh - 32px));
+    max-height: calc(100dvh - 32px);
+    padding: var(--md-sys-spacing-4);
+    gap: var(--md-sys-spacing-4);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .team-builder .tb-team-growth__body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: var(--md-sys-spacing-4);
+    overflow: auto;
+    align-items: start;
+    min-height: 0;
+  }
+  .team-builder .tb-team-growth__results,
+  .team-builder .tb-team-growth__settings,
+  .team-builder .tb-team-growth__values > * { min-width: 0; }
+  .team-builder .tb-team-growth__values {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--md-sys-spacing-3);
+  }
+  .team-builder .tb-team-growth__settings-toggle { display: none; }
+  .team-builder .tb-team-growth__value {
+    font-size: var(--md-sys-typescale-headline-small-size);
+    overflow-wrap: anywhere;
+  }
+  .team-builder .tb-team-growth__transition { text-align: center; font-size: var(--md-sys-typescale-title-large-size); }
+  .team-builder .tb-team-growth__settings .button { width: 100%; min-height: 48px; }
+  .team-builder .tb-team-growth__status { min-height: 3em; overflow-wrap: anywhere; }
+  .team-builder .tb-team-growth .spec-list dd { overflow-wrap: anywhere; }
+  @media (max-width: 850px) {
+    .team-builder .tb-team-growth { width: calc(100vw - 16px); height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); }
+    .team-builder .tb-team-growth__body { grid-template-columns: minmax(0, 1fr); }
+    .team-builder .tb-team-growth__settings.is-open { grid-row: 1; }
+    .team-builder .tb-team-growth__settings-toggle { display: inline-flex; min-height: 48px; }
+    .team-builder .tb-team-growth__settings:not(.is-open) .tb-team-growth__fields { display: none; }
+    .team-builder .tb-team-growth__settings:not(.is-open) .tb-team-growth__status:empty { display: none; }
+    .team-builder .tb-team-growth__settings { gap: var(--md-sys-spacing-2); padding: var(--md-sys-spacing-3); }
+    .team-builder .tb-team-growth__values { grid-template-columns: minmax(0, 1fr); }
+    .team-builder .tb-team-growth__values > .surface {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      padding: var(--md-sys-spacing-4);
+      gap: var(--md-sys-spacing-2);
+      align-items: center;
+    }
+    .team-builder .tb-team-growth__values h3 { grid-column: 1; grid-row: 1; }
+    .team-builder .tb-team-growth__values > .surface > span:first-of-type { grid-column: 1; grid-row: 2; }
+    .team-builder .tb-team-growth__value { grid-column: 2; grid-row: 1; text-align: end; }
+    .team-builder .tb-team-growth__values [role="status"] { grid-column: 2; grid-row: 2; text-align: end; }
+  }
+}
+
 /* ==========================================================================
    Shared choosers and review dialogs
    The selection pane, the Box and screenshot review dialogs and their field

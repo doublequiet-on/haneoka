@@ -68,6 +68,10 @@
   ],
   "excluded_policy": "External repositories, preserved vendor code and generated Worker binding types are owned by their source or generator; do not add GEB headers.",
   "core_files": [
+    "src/lib/card-growth.ts",
+    "src/lib/card-growth-data.ts",
+    "src/lib/growth-comparison.ts",
+    "src/server/growth-page-data.ts",
     "src/server/high-score-rating-page-data.ts",
     "astro.config.mjs",
     "src/middleware.ts",
@@ -279,7 +283,9 @@
     "src/lib/cubism-runtime.ts",
     "src/lit/runtime/chart-image-export.ts",
     "worker/chart-image.ts",
-    "src/lit/team-builder/results.ts"
+    "src/lit/team-builder/results.ts",
+    "src/lib/team-builder/team-growth.ts",
+    "src/lit/team-builder/team-growth.ts"
   ],
   "entry_documents": [
     "AGENTS.md",

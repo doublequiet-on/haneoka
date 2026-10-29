@@ -41,6 +41,7 @@ import {
 import { chartRates } from "./chart-rates";
 import { finishStaticBuildInputs } from "./static-input-store";
 import { highScoreRatingPageData } from "./high-score-rating-page-data";
+import { growthPageData } from "./growth-page-data";
 
 async function prepareAll(tasks: Array<() => Promise<unknown>>): Promise<void> {
   let cursor = 0;
@@ -107,6 +108,7 @@ export async function prepareStaticInputs(): Promise<void> {
         () => homePageData(server, locale),
         () => loadCalendarData(server, locale),
         () => announcementPageData(server, locale),
+        () => growthPageData(server, locale),
       ];
       for (const route of ROUTES) {
         if (

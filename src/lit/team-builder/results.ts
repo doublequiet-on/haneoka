@@ -980,6 +980,9 @@ export function renderHit(
       <div class="cluster tb-hit__chips">${chips(host, hit, true)}</div>
       ${options.content ?? nothing} ${formation(host, hit)}
       <div class="tb-hit__actions">
+        ${resultSettings(host, hit).scope !== "theoretical" && resultSettings(host, hit).goal !== "plan" ? html`
+          <button class="button button--tonal" type="button" ?disabled=${host.running}
+            @click=${() => host.teamGrowth.openResult(hit)}>${host.t("tg.title", "Team growth comparison")}</button>` : nothing}
         <button
           class="button button--tonal"
           ?disabled=${stale}
@@ -1104,6 +1107,10 @@ function growthSection(host: TeamBuilder): TemplateResult {
                             +${format(host, row.gain, Math.abs(row.gain) < 100 ? 2 : 0)}${base > 0 ? ` (+${format(host, (row.gain / base) * 100, 2)}%)` : ""}
                           </span>
                         </span>
+                        <button class="button button--text" type="button" ?disabled=${host.running}
+                          @click=${() => { const hit = host.results?.overall[0]; if (hit) host.teamGrowth.openResult(hit, row); }}>
+                          ${host.t("tg.title", "Team growth comparison")}
+                        </button>
                       </li>
                     `;
                   })}

@@ -2898,7 +2898,51 @@
       "adjustCardRange": "調整卡牌範圍",
       "allNoSnaps": "五人均未配置留影",
       "comparisonValue": "指標值",
-      "playJudgements": "演奏判定"
+      "playJudgements": "演奏判定",
+      "growthComparison": {
+        "action": "養成項目",
+        "target": "目標等級",
+        "next": "下一等級",
+        "cap": "目前上限",
+        "card": "卡牌",
+        "edit": "補登養成",
+        "status": {
+          "ready": "可對照",
+          "missing-state": "待補登",
+          "missing-data": "資料缺漏",
+          "at-cap": "已達上限",
+          "invalid-state": "養成值異常"
+        },
+        "expUnknown": "所需經驗：未登錄目前經驗",
+        "loadError": "卡庫讀取失敗"
+      },
+      "tg": {
+        "title": "養成方案",
+        "full": "全部升滿",
+        "fixedBefore": "原隊伍",
+        "fixedAfter": "原隊伍 · 養成後",
+        "searchAfter": "重新配隊 · 養成後",
+        "searchBefore": "重新配隊 · 養成前後",
+        "fixedGain": "原隊伍提升",
+        "rebuildGain": "重配額外提升",
+        "totalGain": "相對原隊伍提升",
+        "searchGrowthGain": "養成前後重配差值",
+        "scenario": "模擬養成",
+        "inTeam": "目前隊伍",
+        "inPool": "候選卡庫",
+        "snapshot": "原結果條件",
+        "original": "原結果",
+        "pending": "待計算",
+        "partial": "搜尋未完成",
+        "complete": "已完成",
+        "failed": "計算失敗",
+        "noTeam": "無符合條件的隊伍",
+        "runFixed": "計算隊伍提升",
+        "runSearch": "重新配隊",
+        "continue": "繼續配隊",
+        "pool": "成員 / 留影",
+        "materials": "材料與技能資料"
+      }
     },
     "calendar": {
       "title": "日曆",
