@@ -25,9 +25,7 @@ export function resultMetric(host: TeamBuilder, hit: EngineHit, s: BuildSettings
     unit,
     relative,
   });
-  if (hit.aggregate && !hit.event) return metric("arena-shared-mean", s.goal === "gekiso"
-    ? host.t("gekisoAverageScore", "Average GEKISO score across songs")
-    : host.t("arena.mean", "Average across songs"), hit.key);
+  if (hit.aggregate && !hit.event) return metric("arena-shared-mean", host.t("arena.mean", "Average across songs"), hit.key);
   if (s.goal === "potential" && hit.potential)
     return metric("potential", host.t("potential", "Potential"), hit.potential.value);
   if ((s.goal === "event" || s.goal === "plan") && hit.event) {
@@ -69,15 +67,6 @@ export function resultMetric(host: TeamBuilder, hit: EngineHit, s: BuildSettings
     );
   }
   if (s.goal !== "power" && hit.score) {
-    if (s.goal === "gekiso") {
-      const labels = {
-        mean: ["gekisoMeanScore", "Average GEKISO score"],
-        max: ["gekisoBestScore", "Highest GEKISO score"],
-        min: ["gekisoWorstScore", "Lowest GEKISO score"],
-      } as const;
-      const [label, fallback] = labels[s.criterion];
-      return metric(s.criterion, host.t(label, fallback), hit.score[s.criterion]);
-    }
     const goal = scoreGoal(s),
       orders = hit.score.orders,
       target = s.targetScore ?? 0;

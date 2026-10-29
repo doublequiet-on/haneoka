@@ -881,57 +881,6 @@ function copyText(host: TeamBuilder, hit: EngineHit) {
   });
 }
 
-function snapshotSkills(host: TeamBuilder, hit: EngineHit): TemplateResult | typeof nothing {
-  const goal = resultInputs(host, hit)?.goal;
-  if (!(goal?.kind === "gekiso" || goal?.kind === "event" && goal.gekiso)) return nothing;
-  const catalog = host.catalog!;
-  const snapshots = hit.snaps.flatMap((key) => {
-    const card = key ? catalog.snap(cardIdOf(key)) : undefined;
-    return card ? [card] : [];
-  });
-  if (!snapshots.length) return nothing;
-  const key = `${hitKey(hit)}|snapshot-skills`;
-  const expanded = host.expanded.has(key);
-  return accordion({
-    id: `tb-snapshot-skills-${hitKey(hit).replace(/[^a-z0-9]/giu, "-")}`,
-    label: host.t("snapshotSkills", "Snapshot skills"),
-    expanded,
-    onExpandedChange: (open) => {
-      if (open) host.expanded.add(key);
-      else host.expanded.delete(key);
-      host.requestUpdate();
-    },
-    content: expanded ? html`<div class="stack">${snapshots.map((card) => html`
-      <section class="stack stack--tight">
-        <a class="detail-object" href=${entityHref({
-          kind: "support-cards", id: String(card.id), locale: host.locale as Locale,
-          server: (catalog.data.crossServer?.owners.snapshots?.[String(card.id)] ?? catalog.data.identity.server) as ReleaseServer,
-        })}>
-          <img src=${card.image} alt="" width="64" height="36" loading="lazy" decoding="async" />
-          <strong>${catalog.cardName("snaps", card.id)}</strong>
-        </a>
-        <dl class="spec-list">
-          ${([
-            ["support", "supportSkill", card.supportSkillIds],
-            ["gekisoSupport", "gekisouSupportSkill", card.gekisoSupportSkillIds],
-          ] as const).map(([family, label, ids]) => html`
-            <div>
-              <dt>${host.common(`catalog.cards.fields.${label}`, label === "supportSkill" ? "Support Skill" : "Gekiso Support Skill")}</dt>
-              <dd class="stack stack--tight">${ids.filter(Boolean).map((id) => {
-                const skill = catalog.data.skills[family]?.[String(id)];
-                return skill ? html`<span class="row row--start">
-                  ${skill.icon ? html`<img class="shrink-0" src=${String(skill.icon)} alt="" width="20" height="20" loading="lazy" decoding="async" />` : nothing}
-                  <span class="grow">${catalog.text(skill.skillName)}</span>
-                </span>` : nothing;
-              })}</dd>
-            </div>
-          `)}
-        </dl>
-      </section>
-    `)}</div>` : nothing,
-  });
-}
-
 export function saveTeam(
   host: TeamBuilder,
   members: number[],
@@ -1127,7 +1076,6 @@ export function renderHit(
           ],
         })}
       </div>
-      ${snapshotSkills(host, hit)}
       ${
         hit.aggregate
           ? nothing
