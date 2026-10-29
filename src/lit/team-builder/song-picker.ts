@@ -22,6 +22,7 @@ import { snackbar } from "../../lib/snackbar";
 import { selectionPane } from "../ui/selection-pane";
 import { chartKey, uniqueCharts } from "./workspace-state";
 import type { TeamBuilder } from "../team-builder";
+import { renderResourceSort, sortedCharts, songMetricSort } from "./catalog-sort";
 
 export interface SongPickerState {
   songs: SongRef[];
@@ -150,11 +151,13 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
         .filter(legal),
     );
   catalog.loadSongMetadata(allCharts.map((song) => song.songId));
+  const metricSort = songMetricSort(host);
+  const needsMetadata = state.maxSeconds != null || metricSort;
   const durationLoading =
-    state.maxSeconds != null && allCharts.some((song) => catalog.metadataStatus(song.songId) === "loading");
+    needsMetadata && allCharts.some((song) => catalog.metadataStatus(song.songId) === "loading");
   const durationError =
-    state.maxSeconds != null && allCharts.some((song) => catalog.metadataStatus(song.songId) === "error");
-  const incomplete = durationLoading || durationError;
+    needsMetadata && allCharts.some((song) => catalog.metadataStatus(song.songId) === "error");
+  const incomplete = state.maxSeconds != null && (durationLoading || durationError);
   const visible = allCharts.filter((ref) => {
     const id = ref.songId,
       song = songView(id);
@@ -194,7 +197,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
   const validSelected = state.songs.filter(legal);
   const unavailable = state.songs.filter((song) => !legal(song));
   const outside = validSelected.filter((song) => !visibleKeys.has(chartKey(song)));
-  const shown = state.view === "outside" ? outside : state.view === "unavailable" ? unavailable : visible;
+  const shown = sortedCharts(host, state.view === "outside" ? outside : state.view === "unavailable" ? unavailable : visible, songView);
   const selected = new Set(state.songs.map(chartKey));
   const shownKeys = new Set(shown.map(chartKey));
   const selectableShown = shown.filter(legal);
@@ -399,6 +402,7 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
             update({ maxSeconds: raw === "" ? null : Number(raw) });
           }}
         ></md-outlined-text-field>`)}
+        ${chooserGroup(host.common("common.actions.sort", "Sort"), renderResourceSort(host, "songs"))}
     `,
     kind: "song",
     items: shown.map((song) => {
@@ -422,13 +426,13 @@ export function renderSongPicker(host: TeamBuilder): TemplateResult {
     status: durationError
       ? asyncRegion({
           state: "error",
-          message: host.t("durationFailed", "Duration could not be loaded"),
+          message: metricSort ? host.common("common.loading.failed", "Loading failed") : host.t("durationFailed", "Duration could not be loaded"),
           retryLabel: host.common("common.actions.retry", "Retry"),
           onRetry: () => catalog.retrySongMetadata(allCharts.map((song) => song.songId)),
         })
       : html`
           <span role="status">
-            ${durationLoading ? host.t("durationLoading", "Loading durations") : state.maxSeconds != null ? host.t("unknownDuration", "Unknown duration {count}", { count: allCharts.filter((song) => catalog.metadataStatus(song.songId) === "ready" && typeof catalog.chartMetadata(song)?.time !== "number").length }) : ""}
+            ${durationLoading ? metricSort ? host.common("common.states.loading", "Loading") : host.t("durationLoading", "Loading durations") : state.maxSeconds != null ? host.t("unknownDuration", "Unknown duration {count}", { count: allCharts.filter((song) => catalog.metadataStatus(song.songId) === "ready" && typeof catalog.chartMetadata(song)?.time !== "number").length }) : ""}
           </span>
           ${
             !shown.length && !incomplete

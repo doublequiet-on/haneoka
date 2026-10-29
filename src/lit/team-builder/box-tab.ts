@@ -12,6 +12,8 @@ import { modal } from "../ui/modal";
 import { tileMedia } from "../ui/tile";
 import { growthSteps } from "../ui/growth-steps";
 import type { TeamBuilder } from "../team-builder";
+import { renderResourceSort, sortedCards } from "./catalog-sort";
+import { chooserGroup } from "../ui/chooser-filters";
 
 type Kind = "members" | "snaps";
 interface Row {
@@ -27,14 +29,9 @@ export function visibleCards(host: TeamBuilder): Row[] {
   const kind = f.kind;
   const ids = Object.keys(kind === "members" ? catalog.data.members : catalog.data.snapshots).map(Number);
   const owned = kind === "members" ? view.members : view.snaps;
-  return ids
+  return sortedCards(host, kind, ids
     .filter((id) => host.boxQuickEntry || (f.show === "owned" ? owned.has(id) : f.show === "unowned" ? !owned.has(id) : true))
-    .filter((id) => matchesCardFilters(host, kind, id, f))
-    .sort((a, b) => {
-      const ca = kind === "members" ? catalog.member(a) : catalog.snap(a);
-      const cb = kind === "members" ? catalog.member(b) : catalog.snap(b);
-      return (cb?.rarity ?? 0) - (ca?.rarity ?? 0) || b - a;
-    })
+    .filter((id) => matchesCardFilters(host, kind, id, f)))
     .map((id) => ({ kind, id, owned: owned.get(id) }));
 }
 
@@ -231,7 +228,7 @@ export function renderBoxTab(host: TeamBuilder): TemplateResult {
         </div>
         ${host.filtersOpen
           ? html`
-              <div class="chooser-filters">${renderCardFilters(host, f, set)}</div>
+              <div class="chooser-filters">${renderCardFilters(host, f, set)}${chooserGroup(host.common("common.actions.sort", "Sort"), renderResourceSort(host, f.kind))}</div>
             `
           : nothing}
         <div class="row row--wrap tb-toolbar__row tb-bulk">

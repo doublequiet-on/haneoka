@@ -10,6 +10,7 @@ import catalogPageRollout from "../../config/catalog-page-rollout.json";
 import { CatalogPageRefresh } from "../lib/catalog-page-refresh";
 import { validPageSelector } from "../lib/catalog-page-contract";
 import { catalogLabelPath } from "../config/catalog-labels";
+import { catalogSortOptions, compareCatalogSort, type CatalogSortPresentation } from "../lib/catalog-sort";
 import { relativeTimeWindow, relativeTimestamp, TIME_REGIONS, type TimeRegion } from "../lib/relative-time";
 import {
   CARD_SKILL_FACETS,
@@ -70,6 +71,7 @@ import { localizedContent, localizedList } from "./ui/localized-content";
 import "../styles/model-tile.css";
 import "../styles/character-voices.css";
 import { difficultyKey } from "./ui/difficulty-picker";
+import { sortControl } from "./ui/sort-control";
 import { observeSongDisplay, songTitle } from "../lib/song-display";
 import { observeDifficultyDisplay } from "../lib/difficulty-display";
 import { resolveLocalizedText } from "../lib/localized-text";
@@ -3063,6 +3065,9 @@ export class CatalogScreen extends LitElement {
     const items = source.filter((item) => this.matchesFacets(item, "", facets) && this.queryTextMatches(item, query.text));
     const direction = this.order === "asc" ? 1 : -1;
     const now = Date.now();
+    const numeric = (this.profile.presentation === "song" &&
+      ["level", "time", "nativeScore", "score", "eff", "bpm", "n", "nps", "sr", "justable", "justableRate", "luck", ...DECK_METRICS].includes(this.sort)) ||
+      (this.profile.presentation === "system" && ["startAt", "endAt"].includes(this.sort));
     items.sort((a, b) => {
       if (this.sort === "availability") {
         const left = this.availabilityRank(a, now);
@@ -3070,32 +3075,14 @@ export class CatalogScreen extends LitElement {
         const tie = this.itemId(b).localeCompare(this.itemId(a), "en", { numeric: true });
         return (left[0] - right[0] || left[1] - right[1] || tie) * direction;
       }
-      const left = this.sortValue(a);
-      const right = this.sortValue(b);
-      const leftNumber = Array.isArray(left) ? Number(left[0]) : Number(left);
-      const rightNumber = Array.isArray(right) ? Number(right[0]) : Number(right);
-      if (
-        (this.profile.presentation === "song" &&
-          ["level", "time", "nativeScore", "score", "eff", "bpm", "n", "nps", "sr", "justable", "justableRate", "luck", ...DECK_METRICS].includes(
-            this.sort,
-          )) ||
-        (this.profile.presentation === "system" && ["startAt", "endAt"].includes(this.sort))
-      ) {
-        const leftValid = Number.isFinite(leftNumber),
-          rightValid = Number.isFinite(rightNumber);
-        if (leftValid !== rightValid) return leftValid ? -1 : 1;
-        if (!leftValid && !rightValid)
-          return this.itemId(a).localeCompare(this.itemId(b), "en", { numeric: true }) * direction;
-      }
-      const comparison =
-        Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
-          ? leftNumber - rightNumber
-          : this.displayValue(left).localeCompare(this.displayValue(right), this.settings.locale, {
-              numeric: true,
-              sensitivity: "base",
-            });
-      const tie = this.itemId(a).localeCompare(this.itemId(b), "en", { numeric: true, sensitivity: "base" });
-      return (comparison || tie) * direction;
+      return compareCatalogSort(this.sortValue(a), this.sortValue(b), {
+        locale: this.settings.locale,
+        order: this.order,
+        leftId: this.itemId(a),
+        rightId: this.itemId(b),
+        numeric,
+        text: value => this.displayValue(value),
+      });
     });
     return { items, source: source.length };
   }
@@ -5273,40 +5260,24 @@ export class CatalogScreen extends LitElement {
       )}
       ${filterGroup(
         this.label("sort", "Sort"),
-        html`
-          <div class="row">
-            <md-outlined-select
-              class="grow"
-              label=${this.label("sort", "Sort")}
-              value=${this.sort}
-              @change=${(event: Event) => {
-                this.sort = String(
-                  (event.target as HTMLElement & { value?: string }).value || this.profile.defaultSort,
-                );
-                if (this.sort === "availability") this.order = "asc";
-                this.ensureSongMeta();
-                this.syncUrl();
-              }}
-            >
-              ${this.sortOptions().map(
-                (option) => html`
-                  <md-select-option value=${option.value} ?selected=${this.sort === option.value}>
-                    <div slot="headline">${option.label}</div>
-                  </md-select-option>
-                `,
-              )}
-            </md-outlined-select>
-            ${iconButton({
-              label: this.label(this.order === "asc" ? "ascending" : "descending", this.order),
-              icon: this.order === "asc" ? "arrow_upward" : "arrow_downward",
-              variant: "outlined",
-              onClick: () => {
-                this.order = this.order === "asc" ? "desc" : "asc";
-                this.syncUrl();
-              },
-            })}
-          </div>
-        `,
+        sortControl({
+          label: this.label("sort", "Sort"),
+          sort: this.sort,
+          order: this.order,
+          options: this.sortOptions(),
+          ascendingLabel: this.label("ascending", "asc"),
+          descendingLabel: this.label("descending", "desc"),
+          changeSort: (value) => {
+            this.sort = value || this.profile.defaultSort;
+            if (this.sort === "availability") this.order = "asc";
+            this.ensureSongMeta();
+            this.syncUrl();
+          },
+          changeOrder: (order) => {
+            this.order = order;
+            this.syncUrl();
+          },
+        }),
       )}
     `;
   }
@@ -5329,38 +5300,13 @@ export class CatalogScreen extends LitElement {
     this.syncUrl();
   }
   private sortOptions() {
-    const options: Record<Presentation, Array<[string, string, string]>> = {
-      member: [
-        ["id", "id", "ID"],
-        ["title", "title", "Title"],
-        ["character", "character", "Character"],
-        ["band", "band", "Band"],
-        ["cardType", "attribute", "Attribute"],
-        ["rarity", "rarity", "Rarity"],
-        ["performance", "performance", "Performance"],
-        ["technique", "technique", "Technique"],
-        ["visual", "visual", "Visual"],
-        ["total", "total", "Total"],
-        ["leaderSkill", "leaderSkill", "Leader skill"],
-        ["liveSkill", "liveSkill", "Live skill"],
-        ["gekisouSkill", "gekisouSkill", "Gekisou skill"],
-        ["release", "release", "Release"],
-      ],
-      support: [
-        ["id", "id", "ID"],
-        ["title", "title", "Title"],
-        ["character", "character", "Character"],
-        ["band", "band", "Band"],
-        ["cardType", "attribute", "Attribute"],
-        ["rarity", "rarity", "Rarity"],
-        ["performance", "performance", "Performance"],
-        ["technique", "technique", "Technique"],
-        ["visual", "visual", "Visual"],
-        ["total", "total", "Total"],
-        ["supportSkill", "supportSkill", "Support skill"],
-        ["gekisouSupportSkill", "gekisouSupportSkill", "Gekiso support skill"],
-        ["release", "release", "Release"],
-      ],
+    const presentation = this.profile.presentation;
+    if (presentation === "member" || presentation === "support" || presentation === "song")
+      return catalogSortOptions(presentation, (key, fallback, alias) => this.label(alias ?? key, fallback), {
+        nativeScore: presentation === "song" && this.hasNativeMetaReference(),
+        liveDeck: this.settings.resource === "song-meta" && this.metaMode === "live",
+      });
+    const options: Record<Exclude<Presentation, CatalogSortPresentation>, Array<[string, string, string]>> = {
       character: [
         ["order", "order", "Order"],
         ["id", "id", "ID"],
@@ -5380,36 +5326,6 @@ export class CatalogScreen extends LitElement {
         ["release", "release", "Release"],
       ],
       background: [["title", "title", "Title"]],
-      song: [
-        ["order", "order", "Order"],
-        ["id", "id", "ID"],
-        ["title", "title", "Title"],
-        ["musicType", "musicType", "Music type"],
-        ["band", "band", "Band"],
-        ["level", "level", "Level"],
-        ["time", "time", "Time"],
-        ["score", "metaScoreFactor", this.label("metaScore", "Factor")],
-        ["eff", "eff", "Efficiency"],
-        ...(this.settings.resource === "song-meta" && this.metaMode === "live"
-          ? ([
-              ["deckScore", "catalog.analysis.fields.metaDeckScore", "Average score"],
-              ["deckPower", "catalog.analysis.fields.metaDeckPower", "Power needed"],
-              ["deckPowerEvery", "catalog.analysis.fields.metaDeckPowerEvery", "Power needed in every order"],
-              ["deckReach", "catalog.analysis.fields.metaDeckReach", "Reach rate"],
-              ["deckPerMinute", "catalog.analysis.fields.metaDeckPerMinute", "Score per minute"],
-              ["deckSkip", "catalog.analysis.fields.metaDeckSkip", "Skip score"],
-            ] as [string, string, string][])
-          : []),
-        ["bpm", "bpm", "BPM"],
-        ["n", "n", "Notes"],
-        ["nps", "nps", "NPS"],
-        ["sr", "sr", "Skill ratio"],
-        ["category", "category", "Category"],
-        ["composer", "composer", "Composer"],
-        ["lyrics", "lyrics", "Lyrics"],
-        ["arrangement", "arrangement", "Arrangement"],
-        ["release", "release", "Release"],
-      ],
       band: [["title", "title", "Title"]],
       "band-item": [
         ["order", "order", "Order"],
@@ -5435,13 +5351,7 @@ export class CatalogScreen extends LitElement {
     };
     const rows = this.settings.resource === "chat-customizations"
       ? [["id", "id", "ID"], ["title", "title", "Title"], ["kind", "type", "Type"]]
-      : [...options[this.profile.presentation]];
-    if (this.profile.presentation === "song" && this.hasNativeMetaReference())
-      rows.splice(
-        rows.findIndex(([value]) => value === "score"),
-        0,
-        ["nativeScore", "metaNativeScore", "Score"],
-      );
+      : [...options[presentation]];
     return rows.map(([value, key, fallback]) => ({
       value,
       label: this.label(key, fallback),

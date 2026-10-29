@@ -9,6 +9,8 @@ import { matchesCardFilters, renderCardFilters } from "./card-filters";
 import { manualEventTemplate } from "../../lib/team-builder/manual-event";
 import { selectionPane } from "../ui/selection-pane";
 import { icon } from "../ui/icon";
+import { renderResourceSort, sortedCards } from "./catalog-sort";
+import { chooserGroup } from "../ui/chooser-filters";
 
 export function renderCardPicker(host: TeamBuilder): TemplateResult | typeof nothing {
   const picker = host.slotPicker;
@@ -41,13 +43,12 @@ export function renderCardPicker(host: TeamBuilder): TemplateResult | typeof not
   };
   const theoretical = event || host.tab !== "song-comparison" && host.searchSettings.scope === "theoretical";
   const owned = kind === "members" ? host.view!.members : host.view!.snaps;
-  const ids = (
+  const ids = sortedCards(host, kind, (
     theoretical
       ? Object.keys(kind === "members" ? catalog.data.members : catalog.data.snapshots).map(Number)
       : [...owned.keys()]
   )
-    .filter((id) => matchesCardFilters(host, kind, id, filters))
-    .sort((a, b) => b - a);
+    .filter((id) => matchesCardFilters(host, kind, id, filters)));
   const current = "slot" in picker ? (kind === "members" ? host.manual.members[picker.slot] : host.manual.snaps[picker.slot]) : null;
   return selectionPane({
     id: "tb-slot-picker",
@@ -64,7 +65,7 @@ export function renderCardPicker(host: TeamBuilder): TemplateResult | typeof not
     query: filters.query,
     search: (value) => set({ query: value }),
     filterLayout: "facets",
-    filters: renderCardFilters(host, filters, set),
+    filters: html`${renderCardFilters(host, filters, set)}${chooserGroup(host.common("common.actions.sort", "Sort"), renderResourceSort(host, kind))}`,
     kind: kind === "members" ? "member" : "support",
     items: ids.map((id) => ({ ...catalog.cardOptions(kind, id)!, value: String(id) })),
     selected: current === null || current === undefined ? "" : String(current),
