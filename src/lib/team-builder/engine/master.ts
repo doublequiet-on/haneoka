@@ -175,6 +175,7 @@ export interface EngineMaster {
     /** Note judgement types with a Just timing row, and every judgement type with a timing row. */
     justTypes: ReadonlySet<number>;
     timingTypes: ReadonlySet<number>;
+    perfectAfterMs: ReadonlyMap<number, number>;
     /** The longest judgement window after a note, ms. */
     afterMs: number;
     /** Skill effect type → update phase (1 or 2). */
@@ -439,6 +440,7 @@ function compile(tables: Tables): EngineMaster {
       settings: new Map(tables.liveSettings.map((row) => [String(row.key), String(row.value)])),
       justTypes: new Set(tables.judgementTimings.filter((row) => num(row.noteSimulateJudgement) === 6).map((row) => num(row.noteJudgementType))),
       timingTypes: new Set(tables.judgementTimings.map((row) => num(row.noteJudgementType))),
+      perfectAfterMs: new Map(tables.judgementTimings.filter((row) => num(row.assistLevel) === 0 && num(row.noteSimulateJudgement) === 5).map((row) => [num(row.noteJudgementType), num(row.afterMs ?? row.after)])),
       afterMs: Math.max(0, ...tables.judgementTimings.map((row) => num(row.afterMs ?? row.after))),
       phases: new Map(tables.effectSettings.map((row) => [num(row.skillEffectType), num(row.phase, 1)])),
       gekiso: {

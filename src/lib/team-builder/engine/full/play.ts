@@ -120,6 +120,20 @@ export function judgementStream(master: EngineMaster, chart: FullChart, gekisou:
   chooseEvenly(eligible.length, Math.round(eligible.length * accuracy.just), (k) => (grade[eligible[k]!] = 6));
   const every = Math.floor(accuracy.missEvery ?? 0);
   if (every > 0) for (let i = every - 1; i < total; i += every) grade[i] = 1;
+  if (gekisou) for (const [range, [start, end]] of gekisou.fevers.entries()) {
+    if (gekisou.missions[range] !== 1) continue;
+    const first = rows.findIndex((row) => row.note.timeMs >= start && row.note.timeMs <= end);
+    if (first < 0) continue;
+    const opening = rows[first]!;
+    let after = first + 1;
+    while (after < rows.length && rows[after]!.frame === opening.frame && rows[after]!.note.timeMs <= end) after++;
+    const chord = rows.slice(first, after);
+    const next = times[opening.frame + 1];
+    if (chord.length < 2 || next === undefined || next >= end
+      || chord.some(({ note }) => note.timeMs !== opening.note.timeMs || (note.op !== 1 && note.op !== 40)
+        || next - note.timeMs > (master.live.perfectAfterMs.get(note.judgementType) ?? -1))) continue;
+    for (const row of chord.slice(1)) row.frame++;
+  }
   const out: PlayFrame[] = times.map((timeMs) => ({ timeMs, judged: [] }));
   rows.forEach((r, i) => out[r.frame]!.judged.push({ noteId: r.note.id, judgement: grade[i]!, timeMs: r.note.timeMs }));
   return { frames: out, dt: times.map(() => DT), justEligibleIds: eligible.map((i) => rows[i]!.note.id) };
