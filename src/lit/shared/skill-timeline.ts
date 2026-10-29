@@ -25,7 +25,7 @@ export interface SkillTimelineOptions {
   bucketMs?: number;
   fever: readonly (readonly [number, number])[];
   windows: readonly SkillTimelineWindow[];
-  /** Label of each fever (Gekisou) section, drawn at its start. */
+  /** Full accessible label of each fever (Gekisou) section. */
   feverLabel?: (index: number) => string;
 }
 
@@ -53,12 +53,12 @@ export function skillTimeline(options: SkillTimelineOptions): TemplateResult {
   return html`
     <figure class="skill-timeline" style=${`--skill-lanes:${Math.max(1, lanes.length)}`}>
       <div class="skill-timeline__plot" role="img" aria-label=${options.label}>
-        ${options.fever.map(
-          ([start, end], index) =>
-            html`<span class="skill-timeline__fever" style=${`inset-inline-start:${at(start)};width:calc(${at(end)} - ${at(start)})`}
-              >${options.feverLabel?.(index) ?? nothing}</span
-            >`,
-        )}
+        ${options.fever.map(([start, end], index) => {
+          const label = options.feverLabel?.(index);
+          return html`<span class="skill-timeline__fever" style=${`inset-inline-start:${at(start)};width:calc(${at(end)} - ${at(start)})`}
+            >${label ? html`<span aria-hidden="true">${index + 1}</span><span class="sr-only">${label}</span>` : nothing}</span
+          >`;
+        })}
         <svg class="skill-timeline__density" viewBox="0 0 1000 40" preserveAspectRatio="none" aria-hidden="true">
           ${svg`<polygon points=${`0,40 ${points} 1000,40`}></polygon>`}
         </svg>
