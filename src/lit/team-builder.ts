@@ -1270,7 +1270,7 @@ export class TeamBuilder extends LitElement {
     const request = this.request();
     if (request) request.timeLimitMs = null;
     return JSON.stringify([
-      "native-conservative-bounds-v4",
+      "native-conservative-bounds-v5",
       this.snapshot?.owner,
       this.loadedServer,
       this.data?.identity,

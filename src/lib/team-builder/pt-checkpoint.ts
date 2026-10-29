@@ -8,6 +8,7 @@ import type { EngineRequest, EngineResponse } from "./engine/api";
 
 export interface PtResultCheckpoint<Settings> {
   version: "reward-cycle-result-v1";
+  modelVersion: typeof PT_VERSION;
   server: string;
   owner: string;
   dataFingerprint: string;
@@ -79,8 +80,8 @@ export class PtCheckpoint implements PtJobStore {
       request.onerror = () => reject(request.error);
     });
   }
-  async saveResult<Settings>(value: Omit<PtResultCheckpoint<Settings>, "version">): Promise<void> {
-    const snapshot = { ...structuredClone(value), version: "reward-cycle-result-v1" as const };
+  async saveResult<Settings>(value: Omit<PtResultCheckpoint<Settings>, "version" | "modelVersion">): Promise<void> {
+    const snapshot = { ...structuredClone(value), version: "reward-cycle-result-v1" as const, modelVersion: PT_VERSION };
     const db = await this.open();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction("results", "readwrite");
@@ -97,7 +98,7 @@ export class PtCheckpoint implements PtJobStore {
       const request = tx.objectStore("results").get(JSON.stringify([owner, server]));
       request.onsuccess = () => {
         const value = request.result as PtResultCheckpoint<Settings> | undefined;
-        resolve(value?.version === "reward-cycle-result-v1" ? value : null);
+        resolve(value?.version === "reward-cycle-result-v1" && value.modelVersion === PT_VERSION ? value : null);
       };
       request.onerror = () => reject(request.error);
     });

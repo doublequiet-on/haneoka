@@ -60,41 +60,59 @@ class Fixed extends Checker {
   }
 }
 class And extends Checker {
+  private override: number | null = null;
   private readonly resettable: boolean[];
   constructor(readonly items: Checker[]) {
     super();
     this.resettable = items.map((item) => item.countResettable());
   }
   check(ctx: CheckCtx): [boolean, number] {
+    this.override = null;
     let hit = 0;
     for (let i = 0; i < this.items.length; i++) {
       const [ok, h] = this.items[i]!.check(ctx);
       hit = Math.max(hit, h);
       if (!ok) {
+        this.override = null;
         if (!this.resettable[i]) this.items.forEach((c, k) => this.resettable[k] && c.resetCount(ctx));
         return [false, 0];
       }
+      const time = this.items[i]!.overrideTime();
+      if (time !== null) this.override = this.override === null ? time : Math.max(this.override, time);
     }
     return [true, hit];
   }
+  overrideTime() {
+    return this.override;
+  }
   reset(ctx: CheckCtx) {
+    this.override = null;
     for (const item of this.items) item.reset(ctx);
   }
 }
 class Or extends Checker {
+  private override: number | null = null;
   constructor(readonly items: Checker[]) {
     super();
   }
   check(ctx: CheckCtx): [boolean, number] {
+    this.override = null;
     let hit = 0;
     for (const c of this.items) {
       const [ok, h] = c.check(ctx);
       hit = Math.max(hit, h);
-      if (ok) return [true, hit];
+      if (ok) {
+        this.override = c.overrideTime();
+        return [true, hit];
+      }
     }
     return [false, 0];
   }
+  overrideTime() {
+    return this.override;
+  }
   reset(ctx: CheckCtx) {
+    this.override = null;
     for (const item of this.items) item.reset(ctx);
   }
 }
