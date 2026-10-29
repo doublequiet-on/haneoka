@@ -101,7 +101,14 @@ async function configFor(env: Env, region: GameRecordsRegion): Promise<Collector
     || typeof config.clientVersion !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+$/u.test(config.clientVersion)) {
     throw new Error("invalid_collector_config");
   }
-  return { clientVersion: config.clientVersion, credentials, masterConfig: object(config.masterConfig), generation: await officialDigest(canonical(credentials)) };
+  const deviceId = auth.device_id || null;
+  const bid = region === "jp" ? undefined : auth.bid || undefined;
+  if (deviceId !== null && typeof deviceId !== "string" || bid !== undefined && typeof bid !== "string" || region === "jp" && auth.bid) {
+    throw new Error("invalid_collector_config");
+  }
+  const authentication = { player_id: auth.player_id, credential: auth.credential, device_id: deviceId, ...(bid ? { bid } : {}) };
+  return { clientVersion: config.clientVersion, credentials, masterConfig: object(config.masterConfig),
+    generation: await officialDigest(canonical({ region, origin: credentials.origin, auth: authentication })) };
 }
 
 function validateCatalog(value: unknown, region: GameRecordsRegion): asserts value is OfficialCatalog {
