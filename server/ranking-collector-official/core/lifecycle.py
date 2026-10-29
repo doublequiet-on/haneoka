@@ -43,7 +43,10 @@ def credential_generation(path):
         if not isinstance(credentials.get(key),str) or not credentials[key]:raise ValueError('incomplete credential')
     if credentials.get('bid'):raise ValueError('international identity rejected')
     identity=hashlib.sha256(credentials['player_id'].encode()).hexdigest()
-    generation=hashlib.sha256(json.dumps({key:credentials[key] for key in ('player_id','credential')},sort_keys=True).encode()).hexdigest()
+    auth={key:credentials[key] for key in ('player_id','credential')}
+    auth['device_id']=credentials.get('device_id') or None
+    if auth['device_id'] is not None and not isinstance(auth['device_id'],str):raise ValueError('invalid device identity')
+    generation=hashlib.sha256(json.dumps(auth,sort_keys=True).encode()).hexdigest()
     return identity,generation
 
 def credential_ready(state, identity, generation):

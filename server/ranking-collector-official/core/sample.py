@@ -52,6 +52,9 @@ def run(args):
                 if (kind,challenge) not in targets(definition,int(time.time()*1000)):continue
                 oid=uuid.uuid4().hex;identity=('jp',str(event['id']),kind,challenge)
                 receipt=None
+                window_end=(event['endAtMs'] if kind=='total' else next(
+                    row['endAtMs'] for row in event['challenges'] if row['id']==challenge))
+                sampler.args.deadline=min(args.deadline,window_end/1000+event.get('aggregationSeconds',0))
                 try:
                     if credential_generation(args.credentials)!=credential:raise RuntimeError('credential changed during round')
                     method='GetChallengeMusicRanking' if challenge else 'GetChallengeMusicTotalRanking'
@@ -77,13 +80,16 @@ def run(args):
                     acquired+=1
                     print(json.dumps({'board':kind,'challenge':challenge,'snapshotId':oid,'players':len(players)}),flush=True)
                 except InterruptedError:
-                    break
+                    if stopped():break
+                    continue
                 except Exception as error:
                     failures+=1
                     history.record(identity,oid,int(time.time()*1000),receipt=receipt,error=type(error).__name__)
                     print(json.dumps({'board':kind,'challenge':challenge,'error':type(error).__name__}),flush=True)
                     if receipt and (receipt.get('status') in (401,403,429) or receipt.get('grpc_status') in ('7','8','16')):
                         raise RuntimeError('Identity or rate limit requires intervention') from None
+                finally:
+                    sampler.args.deadline=args.deadline
             if args.rounds==0 or count<args.rounds:
                 try:sampler.wait(max(0,args.interval-(time.monotonic()-start)))
                 except InterruptedError:break
