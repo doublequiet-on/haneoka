@@ -29,7 +29,7 @@ import { canUseStaticCatalogScope, visibleContentServers } from "../lib/content-
 import type { TeamBuilderData } from "../lib/team-builder/data";
 import { compileFromTeamData, type EngineMaster } from "../lib/team-builder/engine/master";
 import { maxMemberGrowth, maxSnapGrowth } from "../lib/team-builder/engine/box";
-import { clock } from "../lib/team-builder/engine/execution";
+import { clock, singleSongRequest } from "../lib/team-builder/engine/execution";
 import { EngineClient } from "../lib/team-builder/engine/client";
 import type {
   EngineHit,
@@ -1235,7 +1235,7 @@ export class TeamBuilder extends LitElement {
         : [...(kind === "m" ? this.view!.members : this.view!.snaps).values()]
             .filter((row) => row.lock && row.use)
             .map((row) => `${kind}${row.cardId}`);
-    return {
+    return singleSongRequest({
       songRules: this.songRules(goal),
       ...(s.aggregation === "mean" && this.tab !== "arena" && (goal.kind === "score" || goal.kind === "gekiso" || (goal.kind === "event" && goal.route !== "skip")) ? { aggregation: "mean" as const } : {}),
       members: cards.members,
@@ -1262,7 +1262,7 @@ export class TeamBuilder extends LitElement {
       },
       k: s.k,
       timeLimitMs: s.timeLimit ? s.timeLimit * 1000 : null,
-    };
+    });
   }
   private activeContext = "";
   private runGeneration = 0;

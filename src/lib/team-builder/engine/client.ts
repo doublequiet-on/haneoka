@@ -8,7 +8,7 @@ import { dataRows, objectRow, type TeamBuilderData } from "../data";
 import { teamBuilderSourceIdentity } from "../data/source";
 import type { EngineHit, EngineRequest, EngineResponse, GrowthResult, SongRef, TeamEvaluation, Timeline, RewardFloor } from "./api";
 import type { EngineCall, EngineChart, EngineChartSources, EngineReply, EvaluateRequest, ExplainRequest, EngineSnapshot, StopReason } from "./protocol";
-import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs, requestChartSongs } from "./execution";
+import { clock, deadlineOf, remaining, emptyResponse, completeResponse, requestSongs, requestChartSongs, singleSongRequest } from "./execution";
 import { aspirationHeld, compareHits, mergeShardResponses } from "./merge";
 import { chartKey, EngineCharts } from "./charts";
 import engineUrl from "./generated/team-engine.wasm?url";
@@ -341,6 +341,7 @@ export class EngineClient {
   }
 
   run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler): Promise<EngineResponse> {
+    request = singleSongRequest(request);
     const started = clock();
     const generation = this.generation;
     const task = { ...request, timeLimitMs: null, deadline: deadlineOf(request), requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
@@ -378,8 +379,11 @@ export class EngineClient {
     if (!requests.length) return Promise.resolve([]);
     const started = clock();
     const generation = this.generation;
-    const tasks = requests.map(request => ({ ...request, timeLimitMs: null, deadline: deadlineOf(request),
-      requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) }));
+    const tasks = requests.map(input => {
+      const request = singleSongRequest(input);
+      return { ...request, timeLimitMs: null, deadline: deadlineOf(request),
+        requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) };
+    });
     return this.enqueue(async () => {
       const responses: EngineResponse[] = new Array(tasks.length);
       let next = 0;

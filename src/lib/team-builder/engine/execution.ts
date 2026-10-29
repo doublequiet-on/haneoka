@@ -4,15 +4,30 @@ import type { EngineRequest, EngineResponse, SongRef, SongResult } from "./api";
 export const clock = () => performance.timeOrigin + performance.now();
 export const deadlineOf = (request: EngineRequest) => request.deadline ?? (request.timeLimitMs == null ? Infinity : clock() + request.timeLimitMs);
 export const remaining = (deadline: number) => Math.max(0, deadline - clock());
-export const requestSongs = (request: EngineRequest): (SongRef | null)[] => {
+export function singleSongRequest(request: EngineRequest): EngineRequest {
+  const goal = request.goal;
+  if (goal.kind !== "score" && goal.kind !== "event" && goal.kind !== "gekiso") return request;
+  if (request.aggregation !== "mean" && !(goal.kind === "gekiso" && goal.arena?.mode === "shared")) return request;
+  const first = goal.songs[0];
+  if (!first || goal.songs.some(song => song.songId !== first.songId || song.difficulty !== first.difficulty)) return request;
+  const { aggregation: _aggregation, ...input } = request;
+  return { ...input, goal: goal.kind === "gekiso" && goal.arena?.mode === "shared"
+    ? { ...goal, songs: [first], arena: { ...goal.arena, mode: "individual" } }
+    : { ...goal, songs: [first] } };
+}
+export const requestSongs = (input: EngineRequest): (SongRef | null)[] => {
+  const request = singleSongRequest(input);
   const goal = request.goal;
   if (request.aggregation === "mean" || (goal.kind === "gekiso" && goal.arena?.mode === "shared")) return [null];
   return goal.kind === "power" ? [goal.song] : goal.kind === "potential" ? [null] : goal.kind === "plan"
     ? [...goal.challengeSongs, ...goal.normalSongs] : goal.kind === "event" && !goal.songs.length && goal.route === "skip" ? [null] : goal.songs;
 };
-export const requestChartSongs = (request: EngineRequest): (SongRef | null)[] => [
-  ...((request.aggregation === "mean" && (request.goal.kind === "score" || request.goal.kind === "event")) || (request.goal.kind === "gekiso" && (request.goal.arena || request.aggregation === "mean")) ? request.goal.songs : requestSongs(request)), ...(request.goal.kind === "event" ? request.goal.rewardPlan?.autoCp?.songs ?? [] : []),
-];
+export const requestChartSongs = (input: EngineRequest): (SongRef | null)[] => {
+  const request = singleSongRequest(input);
+  return [
+    ...((request.aggregation === "mean" && (request.goal.kind === "score" || request.goal.kind === "event")) || (request.goal.kind === "gekiso" && (request.goal.arena || request.aggregation === "mean")) ? request.goal.songs : requestSongs(request)), ...(request.goal.kind === "event" ? request.goal.rewardPlan?.autoCp?.songs ?? [] : []),
+  ];
+};
 export const pendingSong = (song: SongRef | null): SongResult => ({
   song, hits: [], proven: false, bound: Infinity,
   stats: { leaders: 0, memberNodes: 0, snapNodes: 0, candidates: 0, exact: 0, elapsedMs: 0 },

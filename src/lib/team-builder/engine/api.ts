@@ -37,7 +37,7 @@ import type { GekisoJustSummary } from "./gekiso-just";
 import { gekisoRewardObjective } from "./gekiso-reward-objective";
 import { GekisoScoreCache } from "./gekiso-score-cache";
 import { GekisoContextCache } from "./gekiso-context-cache";
-import { deadlineOf, remaining, requestSongs, pendingSong, acceptsReward, excludesBound, type RewardCutoff } from "./execution";
+import { deadlineOf, remaining, requestSongs, pendingSong, acceptsReward, excludesBound, singleSongRequest, type RewardCutoff } from "./execution";
 import type { EngineSnapshot, StopReason } from "./protocol";
 import { isLiveBoostCost } from "./boosts";
 import type { ArenaRule } from "../arena";
@@ -450,6 +450,7 @@ function mergeRewardScoreTies<Detail>(first: readonly SearchHit<Detail>[], tied:
 export const GEKISO_CLOSED_FORM_MARGIN = 3e-5;
 
 export async function runEngine(master: EngineMaster, charts: ChartCache, request: EngineRequest, onProgress?: (done: number, total: number) => void, onSnapshot?: (snapshot: EngineSnapshot) => void): Promise<EngineResponse> {
+  request = singleSongRequest(request);
   if (request.songRules) throw new Error("song-rules-native-required");
   if (request.aggregation === "mean") throw new Error("shared-native-required");
   if (request.goal.kind === "gekiso" && request.goal.arena) throw new Error("arena-native-required");
