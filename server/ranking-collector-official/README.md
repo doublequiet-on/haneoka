@@ -24,7 +24,7 @@ python -m pip download --no-deps --no-binary=:all: --dest wheelhouse py3rijndael
 python build.py --wheelhouse wheelhouse --output <新的ZIP路径>
 ```
 
-解压后进入包目录，用目标 Python 安装。`setup.py` 会重建工具内的 `.venv`，只从包内 wheelhouse 安装固定依赖，再运行不联网的 `doctor`；运行目录及外置配置不受影响。
+解压后进入包目录，用工具虚拟环境之外的 Python 安装；升级前先停止采集。`setup.py` 会重建工具内的 `.venv`，只从包内 wheelhouse 安装固定依赖，再运行不联网的 `doctor`；运行目录及外置配置不受影响。
 
 ```sh
 python setup.py --python <Python3.13解释器>
