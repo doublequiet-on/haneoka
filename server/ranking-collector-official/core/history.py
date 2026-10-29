@@ -1,4 +1,8 @@
-"""L3: server/L2.md -> ranking-collector-official; SQLite observations and content-addressed payloads."""
+# L3 — GEB
+# Input: Region-scoped catalogs, observations and a local SQLite database.
+# Output: Immutable history and a durable single-region database identity.
+# Pos: [Map](../../L2.md); collector storage and legacy database adoption.
+# Effects/Dependencies: SQLite transactions and compressed content-addressed payloads.
 import gzip
 import hashlib
 import json
@@ -20,10 +24,13 @@ def decode_payload(digest, compressed):
     return body
 
 class History:
-    def __init__(self, path, read_only=False):
+    def __init__(self, path, read_only=False, region=None):
         self.path = str(path)
         self.read_only = read_only
+        self.region = region
         if read_only:
+            if region is not None:
+                self.assert_region(region)
             return
         with self.connect() as db:
             db.executescript('''PRAGMA journal_mode=WAL;
@@ -36,7 +43,11 @@ class History:
             CREATE INDEX IF NOT EXISTS board_observations ON observations(
               region,event_id,board_kind,challenge_id,sequence);
             CREATE TABLE IF NOT EXISTS catalog(id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS collector_identity(
+              id INTEGER PRIMARY KEY CHECK(id=1), region TEXT NOT NULL);
             ''')
+        if region is not None:
+            self.bind_region(region)
 
     @contextmanager
     def connect(self):
@@ -53,13 +64,71 @@ class History:
         finally:
             db.close()
 
+    def _database_region(self, db, audit=False):
+        from regions import region_config
+        stored = None
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='collector_identity'").fetchone():
+            row = db.execute('SELECT region FROM collector_identity WHERE id=1').fetchone()
+            stored = row[0] if row else None
+        if stored is not None and not audit:
+            region_config(stored)
+            return stored
+        values = {row[0] for row in db.execute('SELECT DISTINCT region FROM observations')}
+        if stored is not None:
+            values.add(stored)
+        row = db.execute('SELECT body FROM catalog WHERE id=1').fetchone()
+        if row:
+            body = json.loads(row[0])
+            if not isinstance(body, dict):
+                raise ValueError('invalid stored catalog')
+            values.add(body.get('region'))
+        for value in values:
+            region_config(value)
+        if len(values) > 1:
+            raise ValueError('database contains multiple ranking regions')
+        return next(iter(values), None)
+
+    def _check_region(self, db, region, audit=False):
+        from regions import region_config
+        region_config(region)
+        if self.region is not None and self.region != region:
+            raise ValueError('history region changed')
+        stored = self._database_region(db, audit)
+        if stored is not None and stored != region:
+            raise ValueError('database region changed')
+
+    def assert_region(self, region, audit=True):
+        with self.connect() as db:
+            self._check_region(db, region, audit)
+
+    def bind_region(self, region):
+        if self.read_only:
+            raise ValueError('read-only history cannot bind a region')
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            self._check_region(db, region, audit=True)
+            db.execute('INSERT OR IGNORE INTO collector_identity VALUES(1,?)', (region,))
+        self.region = region
+
+    def _claim_region(self, db, region):
+        self._check_region(db, region)
+        db.execute('INSERT OR IGNORE INTO collector_identity VALUES(1,?)', (region,))
+        self._check_region(db, region)
+
     def catalog(self, value=None):
         with self.connect() as db:
             if value is not None:
+                db.execute('BEGIN IMMEDIATE')
+                self._claim_region(db, value['region'])
                 db.execute('INSERT INTO catalog VALUES(1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body',
                            (json.dumps(value),))
             row = db.execute('SELECT body FROM catalog WHERE id=1').fetchone()
-            return json.loads(row[0]) if row else None
+            body = json.loads(row[0]) if row else None
+            if row:
+                if not isinstance(body, dict):
+                    raise ValueError('invalid stored catalog')
+                self._check_region(db, body['region'])
+            return body
 
     def record(self, identity, observation_id, observed_ms, body=None, receipt=None, error=None):
         region, event, kind, challenge = identity
@@ -72,6 +141,8 @@ class History:
         raw = canonical(body) if body is not None else None
         digest = hashlib.sha256(raw).hexdigest() if raw is not None else None
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            self._claim_region(db, region)
             existing = db.execute('SELECT * FROM observations WHERE id=?', (observation_id,)).fetchone()
             if existing:
                 expected = (region,event,kind,challenge,observed_ms,digest,error)
@@ -89,6 +160,7 @@ class History:
 
     def read(self, identity, after=None):
         with self.connect() as db:
+            self._check_region(db, identity[0])
             query = '''SELECT o.*,p.body FROM observations o LEFT JOIN payloads p ON p.hash=o.payload_hash
               WHERE region=? AND event_id=? AND board_kind=? AND challenge_id=?'''
             if after is None:

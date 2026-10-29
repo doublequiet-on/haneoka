@@ -1,4 +1,8 @@
-"""L3: server/L2.md -> ranking-collector-official; loopback authority/origin-checked observation API."""
+# L3 — GEB
+# Input: A fixed-region history database and loopback HTTP requests.
+# Output: Read-only observations, catalog freshness and collector status.
+# Pos: [Map](../../L2.md); region and local-origin boundary for history reads.
+# Effects/Dependencies: Binds loopback HTTP; GET never writes or contacts the game.
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import re
@@ -11,8 +15,7 @@ def server(history, port, region='jp'):
     from regions import region_config
     region_config(region)
     prefix='/api/v2/game/records/'+region
-    catalog=history.catalog()
-    if catalog is not None and catalog['region']!=region:raise ValueError('API region does not match stored catalog')
+    history.assert_region(region)
     class Handler(BaseHTTPRequestHandler):
         def respond(self, status, body):
             raw=json.dumps(body,ensure_ascii=False).encode()
@@ -43,16 +46,21 @@ def server(history, port, region='jp'):
 
         def read_response(self):
             url=urlsplit(self.path)
+            if not url.path.startswith(prefix+'/'):
+                return 404,{'error':'not_found'}
+            history.assert_region(region, audit=False)
             status=200
             if url.path==prefix+'/status':
                 state_path=Path(history.path).parent/'collector-state.json'
                 state=json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
                 if not isinstance(state,dict):raise ValueError('invalid collector state')
+                if state and state.get('region','jp')!=region:
+                    raise ValueError('collector state region changed')
                 now=int(time.time()*1000)
                 with history.connect() as db:
                     latest=db.execute('SELECT max(observed_ms) FROM observations WHERE error IS NULL AND region=?',(region,)).fetchone()[0]
                 age=now-latest if latest is not None else None
-                body=dict(contract='haneoka:ranking-status/1',serverTimeMs=now,
+                body=dict(contract='haneoka:ranking-status/1',region=region,serverTimeMs=now,
                     collectorStatus=state.get('status','not_started'),samplingIntervalSeconds=state.get('interval'),
                     lastSuccessfulObservationAtMs=latest,ageMs=age,stale=age is None or age<0 or age>600000,
                     pollAfterSeconds=15,catalogProvider='official-master')
@@ -60,6 +68,7 @@ def server(history, port, region='jp'):
                 body=history.catalog()
                 if body is None: status=404
                 else:
+                    if body['region']!=region:raise ValueError('catalog region changed')
                     now=int(time.time()*1000)
                     observed=body.get('catalogObservedAtMs')
                     age=now-observed if observed is not None else None

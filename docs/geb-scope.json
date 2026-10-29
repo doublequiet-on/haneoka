@@ -308,7 +308,10 @@
     "src/lib/team-builder/engine/pt-eligibility.ts",
     "server/ranking-collector-official/core/http2.py",
     "server/ranking-collector-official/core/process_lock.py",
-    "server/ranking-collector-official/setup.py"
+    "server/ranking-collector-official/setup.py",
+    "server/ranking-collector-official/core/api.py",
+    "server/ranking-collector-official/core/history.py",
+    "server/ranking-collector-official/core/regions.py"
   ],
   "entry_documents": [
     "AGENTS.md",
