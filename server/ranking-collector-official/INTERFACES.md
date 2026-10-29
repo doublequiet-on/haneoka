@@ -22,7 +22,7 @@
 
 榜单合同仍为 `haneoka:ranking-observation/2`，保留snapshotId、cursor、payloadHash、eventId、challengeId、players、provenance、stale。新增官方主数据来源不应冒充Moenotes采集时间。榜单原始玩家字段不是完整图片资源；名片图片下载未接入。
 
-当前状态stale阈值为10分钟；状态接口的最后成功时间是全局最新值，**不能代替某一榜单自己的observedAtMs/stale**。collectorStatus是最后持久状态，不是操作系统存活证明；停止更新时仍须按age判断。全部接口Cache-Control:no-store；404表示尚无该成功观测，400表示查询参数错误。数据损坏必须报错，不能将空榜视为成功。
+当前状态stale阈值为10分钟；状态接口的最后成功时间是全局最新值，**不能代替某一榜单自己的observedAtMs/stale**。collectorStatus是最后持久状态，不是操作系统存活证明；停止更新时仍须按age判断。全部接口Cache-Control:no-store；Host只接受当前端口的127.0.0.1或localhost，存在Origin时也只接受本机HTTP来源，其余返回403。404表示尚无该成功观测，400表示查询参数错误，存储损坏或读取失败返回500。数据损坏不能将空榜视为成功。
 
 ## 网站接入方案（尚未实施或部署）
 
@@ -38,5 +38,7 @@
 独立目录转换/自动换期可用固定Master表及模拟时间验证；不能替代新活动真实发布、紧急关闭或当前客户端边界语义验证。当前官方获取已通过独立 catalog 入口实服验证；动态密码变化与换期使用隔离模拟验证。真实实服换期、新版连续榜单采样和公网网页及时刷新未验收。既有采集器实验与本版本证据分别记录，不将旧结果计入本版本。
 
 目录包含 highestEventId 高水位（尚未接收活动时为0），活动空档仍保留；此字段用于重启后拒绝回退，不是当前活动ID。
+
+挑战条目的status按自身窗口返回upcoming、nowOn、aggregation或finished；目录保留当前活动的全部挑战身份，实际采样再按窗口与开关选择目标。
 
 `events/current` 的 `stale` / `ageMs` / `serverTimeMs` 在GET时计算；目录超过600秒、时间在未来或越过存储的活动阶段时为陈旧，`catalogObservedAtMs`保持原值。该读取不刷新目录、不改写SQLite。目录限流以`catalog_rate_limited`与持久`retryAfter`记录，其他HTTP错误以`catalog_failed`附安全阶段/HTTP/gRPC状态记录。

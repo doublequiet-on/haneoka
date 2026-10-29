@@ -54,6 +54,10 @@ if(-not $taskAnonymous){
   $taskAuth=Get-Content -LiteralPath $taskSpec.credential_file -Raw | ConvertFrom-Json
   if($taskAuth.region -ne 'jp' -or $taskAuth.origin -ne 'https://api.bang-dream-on.jp'){throw 'Credential origin mismatch'}
   if(-not $taskAuth.credentials.player_id -or -not $taskAuth.credentials.credential){throw 'Incomplete game identity'}
+  $taskHasher=[System.Security.Cryptography.SHA256]::Create()
+  try { $taskIdentity=[BitConverter]::ToString($taskHasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes([string]$taskAuth.credentials.player_id))).Replace('-','').ToLowerInvariant() }
+  finally { $taskHasher.Dispose() }
+  if($taskSpec.credential_identity -cnotmatch '^[a-f0-9]{64}$' -or $taskIdentity -cne $taskSpec.credential_identity){throw 'Credential account changed'}
   $taskHeaders['x-player-id']=[string]$taskAuth.credentials.player_id
   $taskHeaders['x-player-credential']=[string]$taskAuth.credentials.credential
   if($taskAuth.credentials.device_id){$taskHeaders['x-device-id']=[string]$taskAuth.credentials.device_id}

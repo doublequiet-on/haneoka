@@ -1,4 +1,4 @@
-"""L3: server/L2.md -> ranking-collector-official; framed JP read-only RPC transport."""
+"""L3: server/L2.md -> ranking-collector-official; framed JP read-only RPC transport with account and stop boundaries."""
 import base64
 import json
 from pathlib import Path
@@ -59,6 +59,20 @@ class Sampler:
         self.master_version = None
         self.last_request = None
 
+    def check_control(self):
+        stop_file=getattr(self.args,'stop_file',None)
+        deadline=getattr(self.args,'deadline',None)
+        if (stop_file is not None and Path(stop_file).exists()) or (deadline is not None and time.time()>=deadline):
+            raise InterruptedError('Collector stopped')
+
+    def wait(self, seconds):
+        until=time.monotonic()+max(0,seconds)
+        while True:
+            self.check_control()
+            remaining=until-time.monotonic()
+            if remaining<=0:return
+            time.sleep(min(.2,remaining))
+
     def message(self, name, data=None):
         message = message_factory.GetMessageClass(self.pool.FindMessageTypeByName(name))()
         if data:
@@ -66,8 +80,9 @@ class Sampler:
         return message
 
     def rpc(self, name, request, response_name, label, include_cdn=False):
+        self.check_control()
         if self.last_request is not None:
-            time.sleep(max(0, 2 - (time.monotonic() - self.last_request)))
+            self.wait(2 - (time.monotonic() - self.last_request))
         spec = {
             'path': name, 'client_version': self.args.client_version,
             'proxy': self.args.proxy,
@@ -76,8 +91,10 @@ class Sampler:
             'include_cdn': include_cdn and name == VERSION,
         }
         if name != VERSION:
-            spec.update(credential_file=str(self.args.credentials.resolve()), master_version=self.master_version)
+            spec.update(credential_file=str(self.args.credentials.resolve()), master_version=self.master_version,
+                        credential_identity=self.args.credential_identity)
         for attempt in range(1, 4):
+            self.check_control()
             attempt_label = label if attempt == 1 else f'{label}-attempt-{attempt}'
             request_file = self.output / (attempt_label + '-request.json')
             response_file = self.output / (attempt_label + '-response.json')
@@ -95,7 +112,7 @@ class Sampler:
             if receipt.get('status') is not None or not receipt.get('error_type') or attempt == 3:
                 break
             print(json.dumps({'operation': label, 'transport_attempt': attempt, 'retry_after_seconds': 5 * attempt}), flush=True)
-            time.sleep(5 * attempt)
+            self.wait(5 * attempt)
         headers = {k.lower(): v for k, v in receipt['headers'].items()}
         trailers = {k.lower(): v for k, v in receipt['trailers'].items()}
         status = trailers.get('grpc-status', headers.get('grpc-status'))
