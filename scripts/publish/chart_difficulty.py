@@ -1,4 +1,4 @@
-"""Add only difficultyEstimate to an exact current chart/catalog projection."""
+"""Project difficulty or Gekiso timing fields into an exact current catalogue."""
 from __future__ import annotations
 import argparse
 import copy
@@ -79,7 +79,29 @@ def patch_meta(original, song, estimates):
     return updated
 
 
-def prepare(store, config, identity, staging, inputs):
+def patch_timing(original, song, timings, windows):
+    updated = copy.deepcopy(original)
+    updated["gekisou"]["perfectTimings"] = copy.deepcopy(windows)
+    for row in difficulty_rows(song):
+        projected = timings.get(str(row["scoreId"]))
+        if projected is None:
+            continue
+        segments = updated[str(row["difficulty"])]["gekisou"]["segments"]
+        for segment, timing in zip(segments, projected, strict=True):
+            segment["timing"] = copy.deepcopy(timing)
+    def without_timing(value):
+        value = copy.deepcopy(value)
+        value.get("gekisou", {}).pop("perfectTimings", None)
+        for row in difficulty_rows(song):
+            for segment in value.get(str(row["difficulty"]), {}).get("gekisou", {}).get("segments", []):
+                segment.pop("timing", None)
+        return value
+    if without_timing(updated) != without_timing(original):
+        raise ValueError("timing projection changed unrelated song-meta fields")
+    return updated
+
+
+def prepare(store, config, identity, staging, inputs, timing=False):
     if identity.get("server") != config.id or config.id not in {"intl", "jp"}:
         raise ValueError("difficulty current server mismatch")
     pointer_key = f"servers/{config.id}/current.json"
@@ -123,7 +145,7 @@ def prepare(store, config, identity, staging, inputs):
     if not songs or not any(difficulty_rows(song) for song in song_entities.values()):
         raise ValueError("current full songs have no referenced chart coverage")
     tables = {}
-    for name in ("MasterLiveMusic", "MasterLiveMusicScore"):
+    for name in ("MasterLiveMusic", "MasterLiveMusicScore", *(("MasterLiveJudgementTiming",) if timing else ())):
         entry = entries[f"game-client/master/{name}.bin"]
         tables[name] = raw_table(store, entry, name, config.master_crypto)
     music_rows = {str(row["_id"]):row for row in tables["MasterLiveMusic"]}
@@ -168,7 +190,31 @@ def prepare(store, config, identity, staging, inputs):
         raise ValueError("difficulty projection has no actual current chart input; not a valid noOp")
     write_json(inputs / "metadata/source-index.json", {"server":config.id,"sourceId":identity["sourceId"],"sources":selected_sources})
     # The existing chart_files producer is the sole converter/model runner; no _songs/score solver rebuild.
-    estimates = build_difficulty_estimates(SimpleNamespace(root=inputs,server=config.id), identity["sourceId"], files, score_rows)
+    timing_rows = [
+        {"assistLevel": int(row.get("_assistLevel") or 0),
+         "noteSimulateJudgement": int(row.get("_noteSimulateJudgement") or 0),
+         "noteJudgementType": int(row.get("_noteJudgementType") or 0),
+         "beforeMs": int(row.get("_beforeMs") or 0), "afterMs": int(row.get("_afterMs") or 0)}
+        for row in tables.get("MasterLiveJudgementTiming", [])
+    ]
+    windows = {str(row["noteJudgementType"]): {"beforeMs":row["beforeMs"],"afterMs":row["afterMs"]}
+               for row in timing_rows if row["assistLevel"] == 0 and row["noteSimulateJudgement"] == 5}
+    timings = {}
+    if timing:
+        if not windows:raise ValueError("timing projection has no base Perfect windows")
+        converted = subprocess.run(["node", str(Path(__file__).resolve().parents[1]/"build/song_metrics.ts")],
+            input=json.dumps({"files":{key:str(file) for key,file in files.items()},"judgementTimings":timing_rows}),
+            text=True,capture_output=True,check=True)
+        charts = json.loads(converted.stdout)
+        if set(charts) != set(files):raise ValueError("timing chart coverage differs")
+        timings = {key:chart["gekisoTiming"] for key,chart in charts.items()}
+        estimates = {}
+    else:
+        estimates = build_difficulty_estimates(SimpleNamespace(root=inputs,server=config.id), identity["sourceId"], files, score_rows)
+    def update_song(original, summary=False):
+        return copy.deepcopy(original) if timing else (patch_song_summary(original, estimates) if summary else patch_song(original, estimates))
+    def update_meta(original, song):
+        return patch_timing(original,song,timings,windows) if timing else patch_meta(original,song,estimates)
     selected = {}
     def select(path):
         if path not in selected:
@@ -178,8 +224,8 @@ def prepare(store, config, identity, staging, inputs):
     updated_meta = select(descriptors["song-meta"]["index"])
     updated_song_entities, updated_meta_entities = {}, {}
     for song_id, song in song_entities.items():
-        updated_songs[song_id] = patch_song_summary(songs[song_id],estimates)
-        updated_meta[song_id] = patch_meta(updated_meta[song_id],song,estimates)
+        updated_songs[song_id] = update_song(songs[song_id], summary=True)
+        updated_meta[song_id] = update_meta(updated_meta[song_id],song)
         for resource in ("songs", "song-meta"):
             partition = descriptors[resource]["entities"]
             if partition.get("algorithm") != "fnv1a32-mod-256" or partition.get("prefix") != f"api/v1/catalog/{resource}/entities/":
@@ -187,7 +233,7 @@ def prepare(store, config, identity, staging, inputs):
             shard = fnv1a32_shard(song_id)
             if shard not in partition["shards"]:raise ValueError("selected current song partition absent")
             path = partition["prefix"] + shard + ".json";entity = select(path)
-            entity[song_id] = patch_song(entity[song_id],estimates) if resource=="songs" else patch_meta(entity[song_id],song,estimates)
+            entity[song_id] = update_song(entity[song_id]) if resource=="songs" else update_meta(entity[song_id],song)
             (updated_song_entities if resource=="songs" else updated_meta_entities)[song_id] = copy.deepcopy(entity[song_id])
     for relation in descriptors["songs"].get("relations", {}).values():
         if relation.get("valueMode","records") != "records":continue
@@ -197,20 +243,20 @@ def prepare(store, config, identity, staging, inputs):
             value = select(relation["prefix"]+shard+".json")
             for group in value.values():
                 for song_id,summary in group.items():
-                    if song_id in songs:group[song_id]=patch_song_summary(summary,estimates)
+                    if song_id in songs:group[song_id]=update_song(summary, summary=True)
     for resource in ("songs", "song-meta"):
         legacy = f"api/{resource}.json"
         if legacy in entries:
             value = select(legacy)
             for song_id,song in song_entities.items():
-                value[song_id]=patch_song(value[song_id],estimates) if resource=="songs" else patch_meta(value[song_id],song,estimates)
+                value[song_id]=update_song(value[song_id]) if resource=="songs" else update_meta(value[song_id],song)
     allowed = {p for p,(old,new) in selected.items() if old!=new}
     for path in allowed:write_json(staging/path,selected[path][1])
     changed = release_entries(staging)
     if {r["path"] for r in changed} != allowed:raise ValueError("difficulty projection escaped selected JSON entries")
     reused = [r for r in records if r["path"] not in allowed]
     result = {"pointer":pointer,"pointerETag":head["ETag"],"sourceId":identity["sourceId"],"noOp":not changed,
-              "changedEntries":changed,"reusedEntryCount":len(reused),"estimates":estimates,"songs":updated_songs,
+              "changedEntries":changed,"reusedEntryCount":len(reused),"estimates":estimates,"timings":timings,"songs":updated_songs,
               "songMeta":updated_meta,"songEntities":updated_song_entities,"songMetaEntities":updated_meta_entities,"missingChartScoreIds":sorted(set(missing)),"referencedScoreCount":len(referenced),
               "materializedChartCount":len(files),"chartBytes":chart_bytes,"metadataBytes":metadata_bytes,
               "masterSHA256":{name:entries[f"game-client/master/{name}.bin"]["sha256"] for name in tables}}
@@ -226,7 +272,8 @@ def prepare(store, config, identity, staging, inputs):
 def verify_public(receipt,prepared,output):
     proofs=[]
     # One new valid ccac case plus explicitly unavailable rows when present; no old solver/UI matrices.
-    ids=[s for s in ("100070","100005","100012","100075") if s in prepared["songEntities"]]
+    selected_ids = (("100001","100026") if prepared["timings"] else ()) + ("100070","100005","100012","100075")
+    ids=[s for s in selected_ids if s in prepared["songEntities"]]
     for song_id in ids:
         for resource,key in (("songs","songEntities"),("song-meta","songMetaEntities")):
             url=f"https://haneoka.org/api/v1/servers/{receipt['server']}/{resource}/{song_id}?release={receipt['releaseId']}"
@@ -241,7 +288,8 @@ def verify_public(receipt,prepared,output):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument("--output",type=Path,required=True);args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument("--output",type=Path,required=True)
+    parser.add_argument("--timing",action="store_true");args=parser.parse_args()
     pin=os.environ["PRODUCER_PIN"]
     if not re.fullmatch(r"[a-f0-9]{40}",pin) or subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()!=pin:raise ValueError("difficulty producer pin mismatch")
     packed=os.environ["DIFFICULTY_CURRENT_IDENTITY_JSON"]
@@ -250,7 +298,7 @@ def main():
     if identity["server"]!=os.environ["RESOURCE_SERVER"]:raise ValueError("difficulty source/environment mismatch")
     config=load_server_config(identity["server"]);store=R2Store(config,concurrency=4);args.output.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="current-chart-difficulty-") as temp:
-        root=Path(temp);prepared=prepare(store,config,identity,root/"release",root/"inputs")
+        root=Path(temp);prepared=prepare(store,config,identity,root/"release",root/"inputs",timing=args.timing)
         quality=Counter(e["quality"]["status"] for e in prepared["estimates"].values());valid=sum(e["estimatedConstant"] is not None for e in prepared["estimates"].values())
         receipt={"schema":"haneoka-current-chart-difficulty-publication-v1","producerPin":pin,"server":config.id,"sourceId":identity["sourceId"],
                  "baseReleaseId":identity["releaseId"],"published":False,"promoted":False,"noOp":prepared["noOp"],
@@ -260,6 +308,13 @@ def main():
                  "chartBytes":prepared["chartBytes"],"metadataBytes":prepared["metadataBytes"],"originalMasterSHA256":prepared["masterSHA256"],
                  "nativeMetaScoresAndOfficialFieldsPreserved":True,"rawAPIBuildRun":False,"pipelineFingerprintPreserved":True,"reusedEntries":prepared["reusedEntryCount"],
                  "selectedEstimates":{k:prepared["estimates"].get(k) for k in ("10007003","10000501","10001201","10007503")}}
+        if args.timing:
+            for field in ("qualityCounts", "validCount", "nullCount", "selectedEstimates"):
+                receipt.pop(field)
+            receipt.update({"schema":"haneoka-current-gekiso-timing-publication-v1",
+                "timingChartCount":len(prepared["timings"]),
+                "openingSegments":sum("opening" in row for rows in prepared["timings"].values() for row in rows),
+                "endingSegments":sum("ending" in row for rows in prepared["timings"].values() for row in rows)})
         if not prepared["noOp"]:
             receipt.update({"releaseId":prepared["manifest"]["releaseId"],"changedPaths":[r["path"] for r in prepared["changedEntries"]],"changedBytes":sum(r["bytes"] for r in prepared["changedEntries"])})
             if os.environ.get("PUBLISH")=="true":receipt["pointer"]=publish(store,config,prepared,root/"release");receipt.update({"published":True,"promoted":True})

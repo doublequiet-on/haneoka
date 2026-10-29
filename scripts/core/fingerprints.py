@@ -25,6 +25,8 @@ BUILD_INPUTS = (
     "src/lib/chart-difficulty.ts",
     "src/lib/chart-difficulty-reading.ts",
     "src/lib/chart-difficulty-calibration.ts",
+    "src/lib/team-builder/gekiso-timing.ts",
+    "src/lib/team-builder/engine/runtime-chart.ts",
     "scripts/core",
     "scripts/extract",
     "scripts/ingest",

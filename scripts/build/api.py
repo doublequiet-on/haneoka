@@ -1616,13 +1616,14 @@ def _items(data: BuildData) -> dict[str, Any]:
     }
 
 
-def _canonical_score_charts(files: dict[str, Path]) -> dict[str, dict[str, Any]]:
+def _canonical_score_charts(files: dict[str, Path], judgement_timings: list[dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
     if not files:
         return {}
     helper = Path(__file__).with_name("song_metrics.ts")
     result = subprocess.run(
         ["node", str(helper)],
-        input=json.dumps({key: str(file.resolve()) for key, file in files.items()}),
+        input=json.dumps({"files": {key: str(file.resolve()) for key, file in files.items()},
+                          "judgementTimings": judgement_timings or []}),
         text=True,
         capture_output=True,
         check=False,
@@ -1969,6 +1970,9 @@ def _gekisou_chart_metrics(
                 "status": "proxy",
             }
         )
+    if "gekisoTiming" in chart:
+        for segment, timing in zip(segments, chart["gekisoTiming"]):
+            segment["timing"] = timing
     # Gekisou scores the whole chart; the fever segments additionally carry
     # the per-segment rank bonus, the notes outside them only the base value.
     justable_total = sum(segment["justable"] for segment in segments)
@@ -2362,7 +2366,15 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
         )
         if file is not None
     }
-    canonical_charts = _canonical_score_charts(chart_files)
+    judgement_timings = [
+        {"assistLevel": int(row.get("_assistLevel") or 0),
+         "noteSimulateJudgement": int(row.get("_noteSimulateJudgement") or 0),
+         "noteJudgementType": int(row.get("_noteJudgementType") or 0),
+         "beforeMs": int(row.get("_beforeMs") or 0),
+         "afterMs": int(row.get("_afterMs") or 0)}
+        for row in data.rows("MasterLiveJudgementTiming")
+    ]
+    canonical_charts = _canonical_score_charts(chart_files, judgement_timings)
     difficulty_estimates = build_difficulty_estimates(data, source_id, chart_files, score_rows)
     combo_audit: dict[str, Any] = {
         "source": "our-notes", "reference": "MasterLiveMusicScore._fullComboCount",
@@ -2428,6 +2440,11 @@ def _songs(data: BuildData, source_id: str) -> tuple[dict[str, Any], dict[str, A
         ]
         song_metadata["gekisou"] = {
             "missionPattern": mission_pattern,
+            "perfectTimings": {
+                str(timing["noteJudgementType"]): {"beforeMs": timing["beforeMs"], "afterMs": timing["afterMs"]}
+                for timing in judgement_timings
+                if timing["assistLevel"] == 0 and timing["noteSimulateJudgement"] == 5
+            },
             "missionTypes": [
                 GEKISOU_MISSION_TYPES.get(mission, "None") for mission in mission_pattern
             ],

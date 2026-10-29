@@ -45,6 +45,17 @@ observation from the supplied plan, not a controlled performance comparison.
 Measure real tar.zst bytes and prepare-plus-render cost with the same released
 input before attributing production savings to these changes.
 
+## Gekiso timing positions
+
+`gekiso-timing-projection.yml` reads one exact current jp/intl release and its
+original chart and judgement tables. Supply the reviewed producer commit and
+the current identity. The workflow calculates compact positions with the shared
+normal-play analyser, then optionally publishes only `gekisou.perfectTimings`
+and `gekisou.segments[].timing` through the existing conditional release writer.
+Native scores, difficulty estimates and other catalogue fields remain intact.
+After promotion the normal frontend build refreshes the song analysis and detail
+views. Future full resource builds emit the same fields through `song_metrics.ts`.
+
 ## Arena static inputs
 
 The Arena page uses the same immutable Master projection as its API. Before a

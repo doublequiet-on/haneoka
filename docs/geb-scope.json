@@ -72,6 +72,7 @@
     "server/ranking-collector-official/core/cloud_job.py",
     "src/lib/official-ranking.ts",
     "src/lib/team-builder/pt-checkpoint.ts",
+    "src/lib/team-builder/gekiso-timing.ts",
     "worker/official-ranking-api.ts",
     "worker/official-ranking-collector.ts",
     "worker/official-ranking-store.ts",

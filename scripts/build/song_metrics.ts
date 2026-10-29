@@ -3,7 +3,10 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { gunzipSync } from "node:zlib";
 import { luckCategory, tickToTimeMs } from "../../src/lib/team-builder/song-metrics.ts";
+import { gekisoTiming, perfectTimings, type GekisoTimingSegment, type JudgementTimingRow } from "../../src/lib/team-builder/gekiso-timing.ts";
+import { runtimeChart } from "../../src/lib/team-builder/engine/runtime-chart.ts";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -43,6 +46,7 @@ interface ScoreMetrics {
   bpmChanges: MetricBpmChange[];
   skillTimesMs: number[];
   feverRanges: { startTick: number; endTick: number }[];
+  gekisoTiming?: GekisoTimingSegment[];
 }
 
 interface ConverterExports {
@@ -104,10 +108,13 @@ function parseFiles(sourceText: string): Record<string, string> {
   return files;
 }
 
-const files = parseFiles(fs.readFileSync(0, "utf8"));
+const input = JSON.parse(fs.readFileSync(0, "utf8")) as Record<string, unknown>;
+const files = parseFiles(JSON.stringify(input.files ?? input));
+const timings = perfectTimings((input.judgementTimings ?? []) as JudgementTimingRow[]);
 const output: Record<string, ScoreMetrics> = {};
 for (const [key, file] of Object.entries(files)) {
-  const chart = convertChart(fs.readFileSync(String(file)));
+  const bytes = fs.readFileSync(String(file));
+  const chart = convertChart(bytes);
   const events = chart.notes
     .filter((note) => note.judged)
     .map((note) => ({
@@ -132,6 +139,9 @@ for (const [key, file] of Object.entries(files)) {
       startTick: Number(startTick),
       endTick: Number(endTick),
     })),
+    ...(timings.size ? { gekisoTiming: gekisoTiming(runtimeChart(JSON.parse(
+      (bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes).toString("utf8"),
+    )), timings) } : {}),
   };
 }
 
