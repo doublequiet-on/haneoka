@@ -57,10 +57,29 @@ export class TeamGrowthComparison {
   private catalogData?: GrowthPageData;
   private catalogError = false;
   private cache = new Map<string, EngineResponse>();
+  private cacheIdentity = "";
   private cacheKey(input: EngineRequest) {
+    const identity = this.identity();
+    if (identity !== this.cacheIdentity) {
+      this.cache.clear();
+      this.cacheIdentity = identity;
+    }
     const request = freshGrowthRequest(input);
     request.timeLimitMs = null;
-    return JSON.stringify([this.identity(), request]);
+    return JSON.stringify([identity, request]);
+  }
+  private cached(key: string) {
+    const result = this.cache.get(key);
+    if (result) {
+      this.cache.delete(key);
+      this.cache.set(key, result);
+    }
+    return result;
+  }
+  private remember(key: string, result: EngineResponse) {
+    this.cache.delete(key);
+    this.cache.set(key, result);
+    while (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value!);
   }
   private task: symbol | null = null;
   private stopped = false;
@@ -204,9 +223,9 @@ export class TeamGrowthComparison {
   }
   private restoreSearch() {
     if (!this.source) return;
-    this.results.searchBefore = this.cache.get(this.cacheKey(this.source.input));
+    this.results.searchBefore = this.cached(this.cacheKey(this.source.input));
     const change = this.change();
-    if (change?.request) this.results.searchAfter = this.cache.get(this.cacheKey(change.request));
+    if (change?.request) this.results.searchAfter = this.cached(this.cacheKey(change.request));
   }
   private async loadMaterials(source: Source) {
     this.catalogError = false;
@@ -217,15 +236,18 @@ export class TeamGrowthComparison {
         String(item.cardId)
       ] ?? this.host.data!.identity.server;
     const identity = this.host.data!.crossServer?.identities[server] ?? this.host.data!.identity;
-    if (this.catalogData?.identity.releaseId === identity.releaseId && this.catalogData.locale === this.host.locale)
-      return;
+    const matches = (data: GrowthPageData) =>
+      data.identity.server === identity.server &&
+      data.identity.releaseId === identity.releaseId &&
+      data.identity.sourceId === identity.sourceId &&
+      data.locale === this.host.locale;
+    if (this.catalogData && matches(this.catalogData)) return;
     this.catalogData = undefined;
     try {
       const response = await fetch(`/${server}/${this.host.locale}/growth-data.json`);
       if (!response.ok) throw new Error(String(response.status));
       const data: GrowthPageData = await response.json();
-      if (data.schema !== "haneoka-growth-page-v1" || data.identity.releaseId !== identity.releaseId)
-        throw new Error("growth-data-release");
+      if (data.schema !== "haneoka-growth-page-v1" || !matches(data)) throw new Error("growth-data-release");
       if (this.source === source && selection === `${this.choice.kind}:${this.choice.key}`) this.catalogData = data;
     } catch {
       if (this.source === source && selection === `${this.choice.kind}:${this.choice.key}`) this.catalogError = true;
@@ -238,7 +260,7 @@ export class TeamGrowthComparison {
     request.timeLimitMs = null;
     const evaluate = async (request: EngineRequest) => {
       const key = this.cacheKey(request),
-        cached = this.cache.get(key);
+        cached = this.cached(key);
       if (cached && completeResponse(cached) && !cached.error) return cached;
       const result = await this.host.engine!.run({
         ...request,
@@ -246,7 +268,7 @@ export class TeamGrowthComparison {
         completed: cached?.results.filter((row) => row.proven),
       });
       if (identity !== this.identity()) throw new DOMException("Cancelled", "AbortError");
-      this.cache.set(key, result);
+      this.remember(key, result);
       if (result.error) throw new Error(result.error);
       if (!completeResponse(result)) throw new DOMException("Cancelled", "AbortError");
       return result;
@@ -298,7 +320,7 @@ export class TeamGrowthComparison {
     const active = () => host.ownsTask(task) && this.source === source && source.identity === this.identity();
     const step = async (phase: Phase, input: EngineRequest) => {
       if (!active() || this.stopped) return false;
-      const previous = this.results[phase] ?? this.cache.get(this.cacheKey(input));
+      const previous = this.results[phase] ?? this.cached(this.cacheKey(input));
       if (previous) this.results[phase] = previous;
       if (previous && completeResponse(previous) && !previous.error) return true;
       this.phase = phase;
@@ -316,11 +338,11 @@ export class TeamGrowthComparison {
         delete calibration.goal.gekiso;
         delete calibration.goal.cpExchange;
         const key = this.cacheKey(calibration);
-        let calibrated = this.cache.get(key);
+        let calibrated = this.cached(key);
         if (!calibrated || !completeResponse(calibrated)) {
           calibrated = await engine.run(calibration);
           if (!active() || this.stopped) return false;
-          this.cache.set(key, calibrated);
+          this.remember(key, calibrated);
         }
         if (!completeResponse(calibrated) || calibrated.error)
           throw new Error(calibrated.error ?? "growth-cp-incomplete");
@@ -334,13 +356,13 @@ export class TeamGrowthComparison {
       const accept = (result: EngineResponse) => {
         if (!active()) return;
         this.results[phase] = result;
-        this.cache.set(this.cacheKey(input), result);
+        this.remember(this.cacheKey(input), result);
         host.requestUpdate();
       };
       const result = await engine.run(request, undefined, (snapshot) => accept(snapshot.response));
       accept(result);
       if (result.error) throw new Error(result.error);
-      return active() && !this.stopped && result.stopReason !== "cancelled";
+      return active() && !this.stopped && completeResponse(result) && result.stopReason !== "cancelled";
     };
     try {
       if (search) {
@@ -427,7 +449,11 @@ export class TeamGrowthComparison {
                     (key, i) => html`
                       <div>
                         <dt>${this.host.common(`catalog.cards.fields.${key}`, key)}</dt>
-                        <dd>${beforeStats[i]} → ${afterStats[i]}${card.kind === "support" ? "%" : ""}</dd>
+                        <dd>
+                          ${card.kind === "support" ? new Intl.NumberFormat(this.host.locale, { maximumFractionDigits: 2 }).format(beforeStats[i]! / 100) : beforeStats[i]}
+                          →
+                          ${card.kind === "support" ? new Intl.NumberFormat(this.host.locale, { maximumFractionDigits: 2 }).format(afterStats[i]! / 100) : afterStats[i]}${card.kind === "support" ? "%" : ""}
+                        </dd>
                       </div>
                     `,
                   )}
@@ -454,7 +480,8 @@ export class TeamGrowthComparison {
               ${
                 action === "level"
                   ? html`
-                      <strong>${label} · ${from} → ${to}</strong>
+                      <strong>${label}</strong>
+                      <span>${from} → ${to}</span>
                       <span>${this.host.t("growthComparison.expUnknown", "—")}</span>
                     `
                   : summarizeCatalogCosts(track.costs, from, to).complete
@@ -474,17 +501,25 @@ export class TeamGrowthComparison {
                   (skill) =>
                     growthSkillLevel(skill, card, state) !== growthSkillLevel(skill, card, { ...state, [action]: to }),
                 )
-                .map(
-                  (skill) => html`
-                    <span>${skill.name}</span>
-                    <span>
-                      ${skill.levels.find((row) => row.level === growthSkillLevel(skill, card, state))?.description ?? "—"}
-                    </span>
-                    <span>
-                      ${skill.levels.find((row) => row.level === growthSkillLevel(skill, card, { ...state, [action]: to }))?.description ?? "—"}
-                    </span>
-                  `,
-                )}
+                .map((skill) => {
+                  const before = growthSkillLevel(skill, card, state),
+                    after = growthSkillLevel(skill, card, { ...state, [action]: to });
+                  return html`
+                    <section class="stack">
+                      <strong>${skill.name}</strong>
+                      <dl class="spec-list">
+                        <div>
+                          <dt>${this.host.t("level", "Level")} ${before}</dt>
+                          <dd>${skill.levels.find((row) => row.level === before)?.description ?? "—"}</dd>
+                        </div>
+                        <div>
+                          <dt>${this.host.t("level", "Level")} ${after}</dt>
+                          <dd>${skill.levels.find((row) => row.level === after)?.description ?? "—"}</dd>
+                        </div>
+                      </dl>
+                    </section>
+                  `;
+                })}
             </section>
           `;
         })}
@@ -596,14 +631,22 @@ export class TeamGrowthComparison {
           <div class="tb-team-growth__results stack">
             <div class="stack">
               <strong>${source.hit.song ? catalog.songTitle(source.hit.song.songId) : metric(source.hit).label}</strong>
-              <span class="supporting-text">
-                ${source.hit.song ? `${catalog.difficultyLabel(source.hit.song.songId, source.hit.song.difficulty)} · ` : ""}${t("snapshot")}
-              </span>
-
-              <span>
-                ${catalog.cardName(choice.kind, item.cardId)} ·
-                ${title(choice.action)}${change.from !== null && change.to !== null && choice.action !== "full" ? ` ${stageDisplay(choice.action, change.from)} → ${stageDisplay(choice.action, change.to)}` : ""}
-              </span>
+              <div class="cluster supporting-text">
+                ${
+                  source.hit.song
+                    ? html`
+                        <span>${catalog.difficultyLabel(source.hit.song.songId, source.hit.song.difficulty)}</span>
+                      `
+                    : nothing
+                }
+                <span>${t("snapshot")}</span>
+              </div>
+              <div class="stack">
+                <span>${catalog.cardName(choice.kind, item.cardId)}</span>
+                <span>
+                  ${title(choice.action)}${change.from !== null && change.to !== null && choice.action !== "full" ? ` ${stageDisplay(choice.action, change.from)} → ${stageDisplay(choice.action, change.to)}` : ""}
+                </span>
+              </div>
             </div>
             <div class="tb-team-growth__values">
               ${(["fixedBefore", "fixedAfter"] as const).map(
@@ -630,7 +673,8 @@ export class TeamGrowthComparison {
               label: host.t("formation", "Formation"),
               expanded: this.expanded.has("current"),
               onExpandedChange: (open) => {
-                open ? this.expanded.add("current") : this.expanded.delete("current");
+                if (open) this.expanded.add("current");
+                else this.expanded.delete("current");
                 host.requestUpdate();
               },
               content: formation(hit("fixedAfter") ?? source.hit, hit("fixedAfter") ? change.request! : source.input),
@@ -642,7 +686,8 @@ export class TeamGrowthComparison {
                     label: t("searchAfter"),
                     expanded: this.expanded.has("new"),
                     onExpandedChange: (open) => {
-                      open ? this.expanded.add("new") : this.expanded.delete("new");
+                      if (open) this.expanded.add("new");
+                      else this.expanded.delete("new");
                       host.requestUpdate();
                     },
                     content: html`
@@ -650,10 +695,12 @@ export class TeamGrowthComparison {
                         ${
                           hit("searchAfter")!.song
                             ? html`
-                                <span>
-                                  ${catalog.songTitle(hit("searchAfter")!.song!.songId)} ·
-                                  ${catalog.difficultyLabel(hit("searchAfter")!.song!.songId, hit("searchAfter")!.song!.difficulty)}
-                                </span>
+                                <div class="cluster">
+                                  <span>${catalog.songTitle(hit("searchAfter")!.song!.songId)}</span>
+                                  <span>
+                                    ${catalog.difficultyLabel(hit("searchAfter")!.song!.songId, hit("searchAfter")!.song!.difficulty)}
+                                  </span>
+                                </div>
                               `
                             : nothing
                         }
@@ -751,16 +798,29 @@ export class TeamGrowthComparison {
                     `
                   : nothing
               }
-              <div class="supporting-text">
-                ${t("pool")} · ${source.input.members.length} / ${source.input.snaps.length}
-              </div>
-              <span class="supporting-text">
-                ${host.t("unknownPolicy", "Growth not entered")} ·
-                ${host.t(source.input.unknownPolicy === "max" ? "unknownMax" : "unknownMin", source.input.unknownPolicy)}
-              </span>
+              <dl class="spec-list supporting-text">
+                <div>
+                  <dt>${t("pool")}</dt>
+                  <dd>${source.input.members.length} / ${source.input.snaps.length}</dd>
+                </div>
+                <div>
+                  <dt>${host.t("unknownPolicy", "Growth not entered")}</dt>
+                  <dd>
+                    ${host.t(source.input.unknownPolicy === "max" ? "unknownMax" : "unknownMin", source.input.unknownPolicy)}
+                  </dd>
+                </div>
+              </dl>
             </div>
-            <div class="tb-team-growth__status" role="status">
-              ${this.error || (this.phase ? `${t(this.phase)} · ${host.computationStatus()}` : "")}
+            <div class="tb-team-growth__status" role="status" data-active=${!!(this.error || this.phase)}>
+              ${
+                this.error ||
+                (this.phase
+                  ? html`
+                      <span>${t(this.phase)}</span>
+                      <span>${host.computationStatus()}</span>
+                    `
+                  : nothing)
+              }
             </div>
             ${
               this.phase
@@ -793,7 +853,8 @@ export class TeamGrowthComparison {
               label: t("materials"),
               expanded: this.expanded.has("materials"),
               onExpandedChange: (open) => {
-                open ? this.expanded.add("materials") : this.expanded.delete("materials");
+                if (open) this.expanded.add("materials");
+                else this.expanded.delete("materials");
                 host.requestUpdate();
               },
               content: this.materials(item.cardId),
