@@ -40,7 +40,7 @@
     .team-builder .tb-team-growth__settings.is-open { grid-row: 1; }
     .team-builder .tb-team-growth__settings-toggle { display: inline-flex; min-height: 48px; }
     .team-builder .tb-team-growth__settings:not(.is-open) .tb-team-growth__fields { display: none; }
-    .team-builder .tb-team-growth__settings:not(.is-open) .tb-team-growth__status:empty { display: none; }
+    .team-builder .tb-team-growth__settings:not(.is-open) .tb-team-growth__status[data-active="false"] { display: none; }
     .team-builder .tb-team-growth__settings { gap: var(--md-sys-spacing-2); padding: var(--md-sys-spacing-3); }
     .team-builder .tb-team-growth__values { grid-template-columns: minmax(0, 1fr); }
     .team-builder .tb-team-growth__values > .surface {

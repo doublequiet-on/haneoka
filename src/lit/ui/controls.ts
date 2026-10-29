@@ -113,6 +113,7 @@ export interface SegmentedOptions<T extends string> {
  * which is what the catalog view switch used to be.
  */
 export function segmented<T extends string>(options: SegmentedOptions<T>): TemplateResult {
+  const tabStop = options.options.find((option) => option.value === options.value) ?? options.options[0];
   const classes = ["segmented", options.iconOnly ? "segmented--icon" : "", options.grow === false ? "segmented--compact" : options.grow ? "segmented--grow" : ""]
     .filter(Boolean)
     .join(" ");
@@ -135,7 +136,7 @@ export function segmented<T extends string>(options: SegmentedOptions<T>): Templ
             aria-checked=${String(option.value === options.value)}
             aria-label=${options.iconOnly ? option.label : nothing}
             title=${option.shortcut ? `${option.label} (${option.shortcut})` : options.iconOnly ? option.label : nothing}
-            tabindex=${option.value === options.value ? "0" : "-1"}
+            tabindex=${option === tabStop ? "0" : "-1"}
             @click=${() => options.onSelect(option.value)}
           >
             ${option.icon ? icon(option.icon, 20) : nothing}
