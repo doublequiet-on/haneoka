@@ -2,7 +2,7 @@
 // Input: 社区谱面 HTTP、账户、D1、R2 和受信服务器素材解析。
 // Output: 私有草稿、不可变版本、发布列表、只读播放数据、服务端统计／推荐难度、素材与 Sonolus 关卡投影。
 // Pos: [Map](L2.md)；社区谱面持久化、发布及访问控制所有者。
-// Effects/Dependencies: 认证／限流、D1 原子 CAS、R2 上传和谱面编译；公开读取检查发布与素材状态，模型升级期间保留旧版基础统计。
+// Effects/Dependencies: 认证／限流、D1 原子 CAS、R2 上传和谱面编译；列表与详情按需生成当前模型分析，模型升级期间保留旧版基础统计。
 import { getAuthSession } from "./auth";
 import { communityAccessState } from "./access";
 import { withPrimaryD1 } from "./d1-session";
@@ -27,8 +27,8 @@ import { preserveChartMedia, chartMediaSnapshot, type ChartMediaResolver } from 
 const PREFIX = "/api/v1/community/charts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MAX_AUDIO = 64 * 1024 * 1024;
-const LEGACY_ANALYSIS_VERSIONS = ["ournotes-fc-threshold-v6:community-native-v1", "ournotes-fc-threshold-v6:community-native-v2"];
-const TRANSITION_ANALYSIS_VERSION = "ournotes-fc-threshold-v6:community-native-v3";
+const LEGACY_ANALYSIS_VERSIONS = ["ournotes-fc-threshold-v6:community-native-v1", "ournotes-fc-threshold-v6:community-native-v2", "ournotes-fc-threshold-v6:community-native-v3"];
+const TRANSITION_ANALYSIS_VERSION = "ournotes-fc-threshold-v6:community-native-v4";
 type RecordValue = Record<string, unknown>;
 type Resolver = ChartMediaResolver;
 interface Row {
@@ -72,13 +72,14 @@ const columns = `c.id, c.owner_id AS ownerId, COALESCE(p.display_name, '') AS ow
  c.head, c.version, c.published_revision AS publishedRevision, c.visibility, c.updated_at AS updatedAt,
  r.revision, r.object_key AS objectKey, r.title, r.artist, r.charter, r.difficulty, r.level, r.summary,
  r.audio_json AS audioJson, r.cover_json AS coverJson, r.audio_url AS audioUrl, r.cover_url AS coverUrl,
- analysis.analysis_json AS analysisJson, COALESCE(NULLIF(legacy_v2.analysis_json, 'null'), legacy_v1.analysis_json) AS legacyAnalysisJson, analysis.created_at AS analysisCreatedAt, r.remix, r.upstream_id AS upstreamId, r.created_at AS createdAt, r.published_at AS publishedAt,
+ analysis.analysis_json AS analysisJson, COALESCE(NULLIF(legacy_v3.analysis_json, 'null'), NULLIF(legacy_v2.analysis_json, 'null'), legacy_v1.analysis_json) AS legacyAnalysisJson, analysis.created_at AS analysisCreatedAt, r.remix, r.upstream_id AS upstreamId, r.created_at AS createdAt, r.published_at AS publishedAt,
  r.data_key AS dataKey, r.data_hash AS dataHash,
  (SELECT count(*) FROM community_chart_like l WHERE l.chart_id = c.id) AS likeCount,
  EXISTS (SELECT 1 FROM community_chart_like l WHERE l.chart_id = c.id AND l.user_id = ?1) AS liked`;
 const joined = `FROM community_chart c JOIN community_profile p ON p.user_id = c.owner_id JOIN community_identity identity ON identity.user_id = c.owner_id JOIN community_chart_revision r ON r.chart_id = c.id LEFT JOIN community_chart_analysis analysis ON analysis.chart_id = r.chart_id AND analysis.revision = r.revision AND analysis.model_version = '${COMMUNITY_CHART_ANALYSIS_VERSION}'
  LEFT JOIN community_chart_analysis legacy_v1 ON legacy_v1.chart_id = r.chart_id AND legacy_v1.revision = r.revision AND legacy_v1.model_version = '${LEGACY_ANALYSIS_VERSIONS[0]}' AND '${COMMUNITY_CHART_ANALYSIS_VERSION}' = '${TRANSITION_ANALYSIS_VERSION}' AND r.published_at IS NOT NULL
- LEFT JOIN community_chart_analysis legacy_v2 ON legacy_v2.chart_id = r.chart_id AND legacy_v2.revision = r.revision AND legacy_v2.model_version = '${LEGACY_ANALYSIS_VERSIONS[1]}' AND '${COMMUNITY_CHART_ANALYSIS_VERSION}' = '${TRANSITION_ANALYSIS_VERSION}' AND r.published_at IS NOT NULL`;
+ LEFT JOIN community_chart_analysis legacy_v2 ON legacy_v2.chart_id = r.chart_id AND legacy_v2.revision = r.revision AND legacy_v2.model_version = '${LEGACY_ANALYSIS_VERSIONS[1]}' AND '${COMMUNITY_CHART_ANALYSIS_VERSION}' = '${TRANSITION_ANALYSIS_VERSION}' AND r.published_at IS NOT NULL
+ LEFT JOIN community_chart_analysis legacy_v3 ON legacy_v3.chart_id = r.chart_id AND legacy_v3.revision = r.revision AND legacy_v3.model_version = '${LEGACY_ANALYSIS_VERSIONS[2]}' AND '${COMMUNITY_CHART_ANALYSIS_VERSION}' = '${TRANSITION_ANALYSIS_VERSION}' AND r.published_at IS NOT NULL`;
 const json = (request: Request, value: unknown, status = 200) =>
   new Response(request.method === "HEAD" ? null : JSON.stringify(value), {
     status,
@@ -663,6 +664,8 @@ export async function handleCommunityChartRequest(
                 .all<Row>()
             ).results
           : await communityChartRows(primary);
+        for (let index = 0; index < rows.length; index += 2)
+          await Promise.all(rows.slice(index, index + 2).map((row) => ensureAnalysis(primary, row)));
         return json(request, { charts: rows.map((r) => item(r, owner)) });
       }
       if (!UUID.test(id ?? "") || extra !== undefined) return fail(request, 404, "chart_missing");

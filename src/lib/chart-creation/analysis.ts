@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 不可变社区工程与版本身份。
-// Output: 原生谱面统计与范围内的社区独立粗略推荐等级。
+// Output: 原生谱面统计与覆盖全部可播放社区谱面的独立粗略推荐等级。
 // Pos: [Map](../L2-2.md)；社区谱面分析适配。
 // Effects/Dependencies: 两个现有转换器交叉核对 combo；纯计算，无 HTTP 或存储。
 import { buildChart, parseScore } from "@haneoka/cassiopeia-plugin-our-notes";
@@ -13,7 +13,7 @@ import { CHART_DIFFICULTY_VERSION } from "../chart-difficulty";
 import { estimateCommunityDifficulty } from "./community-difficulty-model";
 import type { CommunityChartAnalysis } from "./community-types";
 
-export const COMMUNITY_CHART_ANALYSIS_VERSION = `${CHART_DIFFICULTY_VERSION}:community-native-v3`;
+export const COMMUNITY_CHART_ANALYSIS_VERSION = `${CHART_DIFFICULTY_VERSION}:community-native-v4`;
 
 export async function analyzeCommunityChart(project: Project, sourceId: string): Promise<CommunityChartAnalysis> {
   const ss = serializeSsForTarget({ ...project, extensions: {} }, false);
