@@ -9,6 +9,7 @@ import { type ObjectiveAdapter, type Team, type Totals } from "./search";
 import { resolveSlotSkill, windowMs, type SlotSkill } from "./skills";
 import { exchangedReward, type CpExchange } from "./pt-value";
 import { liveScoreCache } from "./live-score-cache";
+import { settleEventReward } from "../event-settlement";
 
 export type Criterion = "mean" | "min" | "max";
 export interface LiveDetail {
@@ -304,15 +305,13 @@ export interface EventRoute {
 }
 export const eventPoints = (route: EventRoute, bonus: number, rank: number) => {
   const value = route.points.get(rank) ?? 0;
-  return route.kind === "challenge"
-    ? Math.trunc(Math.imul(Math.imul(value, route.rate), (bonus + 10000) | 0) / 10000)
-    : Math.trunc(Math.imul(Math.imul((bonus + 10000) | 0, route.rate), value) / 10000);
+  return settleEventReward(value, bonus, route.rate);
 };
 export const eventItems = (route: EventRoute, bonus: number, rank: number) => {
   let total = 0;
   for (const reward of route.rewards)
     if (reward.scoreRank === rank && (!route.itemId || reward.resourceId === route.itemId))
-      total += (Math.trunc(Math.imul(Math.imul(reward.count, (bonus + 10000) | 0), route.rewardRate) / 10000) * reward.probability) / 10000;
+      total += (settleEventReward(reward.count, bonus, route.rewardRate) * reward.probability) / 10000;
   return total;
 };
 /** Fixed skip rank, or the rank of each played order. */

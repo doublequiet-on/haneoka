@@ -292,7 +292,8 @@
     "src/lit/arena-workspace.ts",
     "src/server/arena-master-inputs.ts",
     "scripts/build/arena_inputs.py",
-    "src/lit/team-builder/song-rules.ts"
+    "src/lit/team-builder/song-rules.ts",
+    "src/lib/team-builder/event-settlement.ts"
   ],
   "entry_documents": [
     "AGENTS.md",

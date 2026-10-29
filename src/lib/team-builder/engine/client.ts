@@ -337,7 +337,7 @@ export class EngineClient {
       || request.shard || request.noFloor || request.seedOnly || request.seedVariant || request.seeded || request.rewardPhase
       || request.resolveRewardPlan || request.floors || request.rewardIncumbent || request.cutoff || request.rewardCutoff !== undefined || request.completed?.length) return null;
     const { timeLimitMs: _time, deadline: _deadline, requestId: _id, contextKey: _context, ...input } = request;
-    return JSON.stringify(["native-rewards-signed-v1", input]);
+    return JSON.stringify(["native-rewards-wide-v2", input]);
   }
 
   run(request: EngineRequest, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler): Promise<EngineResponse> {
@@ -527,7 +527,10 @@ export class EngineClient {
       const wholeReward = wholeSongReward(this.data, request);
       const smallSampledReward = wholeReward && request.members.length < PARALLEL_MIN_MEMBERS
         && request.goal.kind === "event" && (request.goal.gekiso?.luckSamples ?? 0) >= 16 && request.constraints.leader === null;
+      const wholeChallenge = request.goal.kind === "event" && !request.goal.gekiso
+        && request.goal.route === "challenge" && request.goal.songs.length === 1 && request.k > 1;
       const parallel = this.pool.length > 1 && (request.members.length >= PARALLEL_MIN_MEMBERS || smallSampledReward) && request.goal.kind !== "plan" && !request.seedOnly
+        && !wholeChallenge
         && (!wholeReward || smallSampledReward)
         && !(request.goal.kind === "gekiso" && request.goal.songs.length === 1 && (request.constraints.leader !== null || request.goal.opponents));
       if (!parallel) {
