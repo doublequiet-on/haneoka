@@ -10,8 +10,8 @@ This file records the third-party material known to be vendored, adapted, genera
 
 The standalone `server/ranking-collector-official` tool uses an official JP Master
 catalog and the protocol descriptor validated by the isolated ranking experiments.
-Its offline candidate builder includes pinned protobuf, py3rijndael, setuptools and
-wheel distributions. Provenance, hashes, retained licenses and protocol limits are
+Its cross-platform Python collector uses pinned protobuf, h2, hpack, hyperframe and
+py3rijndael. Its offline builder also retains pinned setuptools and wheel distributions. Provenance, hashes, retained licenses and protocol limits are
 recorded in [collector notices](server/ranking-collector-official/NOTICES.md).
 The game protocol descriptor is not covered by Haneoka's MPL grant. The tool is
 operator-run and is not included in website deployment; credentials and game data

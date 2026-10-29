@@ -1,4 +1,8 @@
-/** Input qualification for the local AP solo/challenge reward trial. No inferred practice values. */
+// L3 — GEB
+// Input: Recorded card/player inputs, reward rules and an AP event request.
+// Output: Field issues for the native strict reward domain, including the 64-bit settlement range.
+// Pos: [Map](L2-2.md); shared UI and retained-TS reward input qualification.
+// Effects/Dependencies: Pure; preserves native integer bounds without filling unknown growth.
 import type { EngineRequest, SongRef } from "./api";
 import { resolveBox, memberGrowth, snapGrowth } from "./box";
 import type { ChartSource } from "./chart";
@@ -7,6 +11,7 @@ import { memberEventPercent, snapEventPercent } from "./power";
 import { resolveSlotSkill } from "./skills";
 import { missionPattern } from "./full/gekisou";
 import { liveBoostRow } from "./boosts";
+import { satI32 } from "./full/num";
 
 export interface PtIssue {
   code: "mode" | "inventory" | "practice" | "player" | "constraint" | "event" | "chart" | "skill" | "rules";
@@ -282,7 +287,9 @@ export function validatePtRequest(master: EngineMaster, request: EngineRequest):
       top(box.snaps.map((s) => snapEventPercent(event.effects, s, items ? 1 : 0)));
     const maxBase = items ? Math.max(0, ...rewards.map((row) => row.count)) : Math.max(0, ...(points?.values() ?? []));
     const rate = items ? boost.rewardRate : boost.eventPointRate;
-    if (bonus > 1_000_000 || (bonus + 10000) * rate * maxBase > 2_147_483_647) add("rules", "settlement-range");
+    if (bonus > 1_000_000 || (Number.isFinite(bonus) && Number.isFinite(maxBase) &&
+      (BigInt(Math.trunc(bonus)) + 10000n) * BigInt(satI32(rate)) * BigInt(Math.trunc(maxBase)) > 0x7fffffffffffffffn))
+      add("rules", "settlement-range");
     if (goal.cpExchange) {
       const cp = Math.max(0, ...master.liveChallengePoints.values()) * boost.eventPointRate;
       const payout = Math.ceil(maxBase * rate * 101) * (items ? rewards.length : 1);

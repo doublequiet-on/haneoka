@@ -304,7 +304,11 @@
     "src/server/destination-hub-data.ts",
     "src/lib/catalog-sort.ts",
     "src/lit/team-builder/catalog-sort.ts",
-    "src/lit/ui/sort-control.ts"
+    "src/lit/ui/sort-control.ts",
+    "src/lib/team-builder/engine/pt-eligibility.ts",
+    "server/ranking-collector-official/core/http2.py",
+    "server/ranking-collector-official/core/process_lock.py",
+    "server/ranking-collector-official/setup.py"
   ],
   "entry_documents": [
     "AGENTS.md",
