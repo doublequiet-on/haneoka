@@ -2,7 +2,7 @@
 // Input: 配队资料、Engine 请求及进度／快照／单 Worker 最终结果回调；私有分片可返回待补分候选。
 // Output: EngineClient、搜索／成长／评价／解释结果及当前 Worker 阶段。
 // Pos: [Map](L2-2.md)；主线程到当前引擎 Worker 的生命周期与分片协调。
-// Effects/Dependencies: 共享编译后的 WASM 模块和四张固定谱面的下载，允许预取已选谱面并与 Worker 初始化并行；创建和替换独立 Worker；交换完整评分候选及排序下界，独立保留合法候选，合并全部分片证明，取消与重试替换对应实例。
+// Effects/Dependencies: 共享编译后的 WASM 模块和四张固定谱面的下载，允许预取已选谱面并与 Worker 初始化并行；创建和替换独立 Worker，独立场景在现有池中各占单个 Worker 并沿用完整请求流程；交换完整评分候选及排序下界，独立保留合法候选，合并全部分片证明，取消与重试替换对应实例。
 /** Main-thread handle on the engine Worker. Cancelling replaces the Worker, so a long search never blocks. */
 import { dataRows, objectRow, type TeamBuilderData } from "../data";
 import { teamBuilderSourceIdentity } from "../data/source";
@@ -325,11 +325,11 @@ export class EngineClient {
     });
   }
   /** The idlest Worker, preferring one that has already compiled the release. */
-  private idlest() {
-    return [...this.pool].sort((a, b) => a.load - b.load || Number(b.started) - Number(a.started))[0]!;
+  private idlest(pool = this.pool) {
+    return [...pool].sort((a, b) => a.load - b.load || Number(b.started) - Number(a.started))[0]!;
   }
   private queue: Promise<unknown> = Promise.resolve();
-  private activeStop: ((reason: StopReason) => void) | null = null;
+  private readonly activeStops = new Set<(reason: StopReason) => void>();
   private generation = 0;
   private completed: { key: string; response: EngineResponse } | null = null;
   private responseKey(request: EngineRequest): string | null {
@@ -373,8 +373,47 @@ export class EngineClient {
     return Promise.race([queued, waiting]).finally(() => clearTimeout(timer));
   }
 
-  private async execute(request: EngineRequest, started: number, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler, responseKey: string | null = null): Promise<EngineResponse> {
-    const before = this.pool.map(worker => worker.timing());
+  /** Independent complete scenarios share the existing Worker pool and the normal request pipeline. */
+  runBatch(requests: readonly EngineRequest[], onResult?: (index: number, response: EngineResponse) => void): Promise<EngineResponse[]> {
+    if (!requests.length) return Promise.resolve([]);
+    const started = clock();
+    const generation = this.generation;
+    const tasks = requests.map(request => ({ ...request, timeLimitMs: null, deadline: deadlineOf(request),
+      requestId: request.requestId ?? crypto.randomUUID(), contextKey: request.contextKey ?? JSON.stringify([this.dataIdentity, request]) }));
+    return this.enqueue(async () => {
+      const responses: EngineResponse[] = new Array(tasks.length);
+      let next = 0;
+      let failed = false;
+      let failure: unknown;
+      const consume = async (worker: EngineWorker) => {
+        try {
+          while (!failed && generation === this.generation && next < tasks.length) {
+            const index = next++;
+            const response = await this.execute(tasks[index]!, started, undefined, undefined, undefined, null, [worker]);
+            responses[index] = response;
+            onResult?.(index, response);
+            if (generation !== this.generation) throw new DOMException("Cancelled", "AbortError");
+          }
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            failure = error;
+            for (const stop of this.activeStops) stop("cancelled");
+            this.downloads.cancel();
+          }
+          throw error;
+        }
+      };
+      await Promise.allSettled(this.pool.slice(0, Math.min(tasks.length, this.pool.length)).map(consume));
+      if (failed) throw failure;
+      if (generation !== this.generation) throw new DOMException("Cancelled", "AbortError");
+      return responses;
+    });
+  }
+
+  private async execute(request: EngineRequest, started: number, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler, responseKey: string | null = null, pool = this.pool): Promise<EngineResponse> {
+    const idlest = () => this.idlest(pool);
+    const before = pool.map(worker => worker.timing());
     let latest = emptyResponse(request);
     if (request.seeds?.length) {
       for (const result of latest.results) result.hits = request.seeds.filter(hit => hit.song?.songId === result.song?.songId && hit.song?.difficulty === result.song?.difficulty).slice(0, request.k);
@@ -398,7 +437,7 @@ export class EngineClient {
       }
       response.overall = response.results.flatMap(result => result.hits).sort(compareHits).slice(0, request.k);
       latest = response;
-      latest.timing = this.pool.reduce((total, worker, index) => {
+      latest.timing = pool.reduce((total, worker, index) => {
         const timing = worker.timing();
         for (const field of ["initializationMs", "networkMs", "computationMs"] as const) total[field] += timing[field] - before[index]![field];
         return total;
@@ -420,12 +459,12 @@ export class EngineClient {
         publish({ ...latest, stopReason: reason }, true);
         stopped = true;
         wakeWork?.();
-        this.downloads.cancel();
-        for (const worker of this.pool) worker.cancel();
+        if (pool === this.pool) this.downloads.cancel();
+        for (const worker of pool) worker.cancel();
         resolve(latest);
       };
     });
-    this.activeStop = stop;
+    this.activeStops.add(stop);
     const deadline = request.deadline!;
     const timer = Number.isFinite(deadline) ? setTimeout(() => stop("budget"), remaining(deadline)) : undefined;
     const accept = (value: EngineSnapshot) => {
@@ -435,15 +474,15 @@ export class EngineClient {
       if (!remaining(deadline)) { stop("budget"); return latest; }
       if (completeResponse(latest)) return latest;
       if (request.goal.kind === "event" && request.goal.rewardPlan?.autoCp) {
-        const resolved = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, resolveRewardPlan: true } });
+        const resolved = await idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, resolveRewardPlan: true } });
         if (stopped) return latest;
         if (!resolved.resolvedRewardPlan) return { ...latest, stopReason: resolved.stopReason ?? "budget" };
         request = { ...request, goal: { ...request.goal, rewardPlan: resolved.resolvedRewardPlan } };
       }
       if ((request.aggregation === "mean" && (request.goal.kind === "score" || request.goal.kind === "event" || request.goal.kind === "gekiso")) || (request.goal.kind === "gekiso" && request.goal.arena?.mode === "shared")) {
         const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-        const count = request.constraints.leader !== null ? 1 : Math.min(this.pool.length, memory <= 4 ? 1 : request.goal.kind === "gekiso" ? 6 : 2);
-        const workers = this.pool.slice(0, count);
+        const count = request.constraints.leader !== null ? 1 : Math.min(pool.length, memory <= 4 ? 1 : request.goal.kind === "gekiso" ? 6 : 2);
+        const workers = pool.slice(0, count);
         const loadedCharts = await workers[0]!.preload(request.goal.songs);
         if (stopped) return latest;
         let sharedSeed: EngineHit | undefined;
@@ -529,12 +568,12 @@ export class EngineClient {
         && request.goal.kind === "event" && (request.goal.gekiso?.luckSamples ?? 0) >= 16 && request.constraints.leader === null;
       const wholeChallenge = request.goal.kind === "event" && !request.goal.gekiso
         && request.goal.route === "challenge" && request.goal.songs.length === 1 && request.k > 1;
-      const parallel = this.pool.length > 1 && (request.members.length >= PARALLEL_MIN_MEMBERS || smallSampledReward) && request.goal.kind !== "plan" && !request.seedOnly
+      const parallel = pool.length > 1 && (request.members.length >= PARALLEL_MIN_MEMBERS || smallSampledReward) && request.goal.kind !== "plan" && !request.seedOnly
         && !wholeChallenge
         && (!wholeReward || smallSampledReward)
         && !(request.goal.kind === "gekiso" && request.goal.songs.length === 1 && (request.constraints.leader !== null || request.goal.opponents));
       if (!parallel) {
-        const response = await this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, opponents ? undefined : accept);
+        const response = await idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, opponents ? undefined : accept);
         if (!stopped) onFinalResult?.({ requestId: request.requestId!, contextKey: request.contextKey!, response: structuredClone(response) });
         return response;
       }
@@ -542,7 +581,7 @@ export class EngineClient {
       if (request.goal.kind === "gekiso" && !request.goal.opponents) {
         const goal = request.goal;
         const deferScores = goal.criterion === "max" && goal.seeds === 0 && request.k > 1;
-        const count = request.constraints.leader ? 1 : this.pool.length;
+        const count = request.constraints.leader ? 1 : pool.length;
         const sampledMax = goal.criterion === "max" && goal.seeds >= 16 && request.k === 1;
         if (sampledMax) this.warm();
         const seedCount = goal.songs.length === 1 && goal.seeds > 1 && goal.criterion !== "mean" ? 2 : 1;
@@ -695,7 +734,7 @@ export class EngineClient {
             }
           }
         };
-        await Promise.all(this.pool.map(run));
+        await Promise.all(pool.map(run));
         if (!stopped && deferScores) {
           for (const state of states) for (const response of state.responses) for (const part of response.results)
             part.hits = part.hits.map(hit => completeScores.get(exactTeam(hit)) ?? hit);
@@ -708,7 +747,7 @@ export class EngineClient {
               await completeHit(engine, job);
             }
           };
-          await Promise.all(this.pool.map(finish));
+          await Promise.all(pool.map(finish));
           if (!stopped) for (const [index, state] of states.entries()) {
             const unfinished = completionCandidates(state.responses.flatMap(response => response.results[0]!.hits), request.k).some(pendingScores);
             const rows = state.responses.map(response => ({ ...response, results: response.results.map(part => ({ ...part,
@@ -720,7 +759,7 @@ export class EngineClient {
         }
         const response = merged();
         if (!aspirationHeld(response, request.k) && !request.noFloor && remaining(deadline))
-          return this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: parts.flatMap(part => part.hits), seeded: true, noFloor: true } }, progress, accept);
+          return idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: parts.flatMap(part => part.hits), seeded: true, noFloor: true } }, progress, accept);
         return response;
       }
       if (songs.length > 1 && songs.every((song): song is SongRef => song !== null)) {
@@ -736,7 +775,7 @@ export class EngineClient {
             const index = next++;
             const song = songs[index]!;
             if (parts[index]!.proven) { progress?.(++done / songs.length, 1); continue; }
-            const share = remaining(deadline) * this.pool.length / (songs.length - index);
+            const share = remaining(deadline) * pool.length / (songs.length - index);
             const part: EngineRequest = {
               ...request,
               goal: { ...request.goal, songs: [song] } as EngineRequest["goal"],
@@ -756,11 +795,11 @@ export class EngineClient {
             progress?.(++done / songs.length, 1);
           }
         };
-        await Promise.all(this.pool.map(runSong));
+        await Promise.all(pool.map(runSong));
         return merged();
       }
       if (request.goal.kind === "gekiso")
-        return this.idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, accept);
+        return idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, accept);
       const rewardScores = new Map<EngineWorker, unknown[]>();
       const runShards = async (request: EngineRequest, publish: (response: EngineResponse) => void, stage = -1): Promise<EngineResponse> => {
         const stageProgress: Pending["progress"] = stage < 0 ? progress
@@ -780,7 +819,7 @@ export class EngineClient {
           if (!rewardBest || compareHits(hit, rewardBest) < 0) rewardBest = hit;
         };
         if (!request.noFloor && !smallSampledReward && stage <= 0) {
-          quickWorker = this.idlest();
+          quickWorker = idlest();
           let quick: EngineResponse;
           const quickResponse = (response: EngineResponse): EngineResponse => request.rewardLexicographic ? {
             ...response, stopReason: undefined,
@@ -810,7 +849,7 @@ export class EngineClient {
           } else {
             quick = await quickWorker.send<EngineResponse>(message, stageProgress, acceptPart);
           }
-          for (const worker of this.pool) if (worker.scoredSeeds.length) rewardScores.set(worker, worker.scoredSeeds);
+          for (const worker of pool) if (worker.scoredSeeds.length) rewardScores.set(worker, worker.scoredSeeds);
           observeReward(quick);
           publish(quick);
           if (completeResponse(quick)) return quick;
@@ -819,7 +858,7 @@ export class EngineClient {
         const valueOf = (hit: EngineHit) => request.rewardPhase?.kind === "other" ? hit.event?.otherMean ?? 0
           : request.rewardPhase?.kind === "score" ? hit.score?.mean ?? 0 : hit.key;
         const sampledRewards = request.goal.kind === "event" && request.goal.gekiso;
-        const workers = this.pool;
+        const workers = pool;
         const count = sampledRewards
           ? (request.constraints.leader ? 1 : workers.length)
           : workers.length * SHARDS_PER_WORKER;
@@ -899,7 +938,7 @@ export class EngineClient {
         await Promise.all(workers.map(runShard));
         const merged = merge();
         if (!aspirationHeld(merged, request.k) && !request.noFloor && remaining(deadline))
-          return this.idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: merged.overall, noFloor: true } }, stageProgress, acceptPart);
+          return idlest().send<EngineResponse>({ type: "run", id: 0, request: { ...request, seeds: merged.overall, noFloor: true } }, stageProgress, acceptPart);
         return merged;
       };
       if (request.rewardLexicographic || !phasedReward(this.data, request)) return runShards(request, publish);
@@ -937,7 +976,7 @@ export class EngineClient {
       throw error;
     } finally {
       clearTimeout(timer);
-      if (this.activeStop === stop) this.activeStop = null;
+      this.activeStops.delete(stop);
     }
   }
   private enqueue<T>(work: () => Promise<T>): Promise<T> {
@@ -961,7 +1000,7 @@ export class EngineClient {
   /** Stops everything in flight; the next call starts fresh Workers. */
   cancel() {
     this.generation++;
-    this.activeStop?.("cancelled");
+    for (const stop of this.activeStops) stop("cancelled");
     this.downloads.cancel();
     for (const worker of this.pool) worker.cancel();
   }
