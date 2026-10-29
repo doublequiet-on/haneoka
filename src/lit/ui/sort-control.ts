@@ -16,7 +16,7 @@ export function sortControl(options: {
   changeSort: (value: string) => void;
   changeOrder: (value: "asc" | "desc") => void;
 }) {
-  return html`<div class="row" data-catalog-sort>
+  return html`<div class="row full" data-catalog-sort>
     <md-outlined-select class="grow" label=${options.label} .value=${options.sort}
       @change=${(event: Event) => options.changeSort((event.currentTarget as HTMLElement & { value: string }).value)}>
       ${options.options.map(option => html`<md-select-option value=${option.value} ?selected=${options.sort === option.value}>
