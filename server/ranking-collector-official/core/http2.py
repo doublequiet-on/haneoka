@@ -1,5 +1,5 @@
 # L3 — GEB
-# Input: Fixed regional unary request, credential header factory and bounded I/O controls.
+# Input: Allowlisted regional API origin, unary request, credential header factory and bounded I/O controls.
 # Output: HTTP/2 status, allowlisted headers and trailers, response body and memory-only CDN metadata.
 # Pos: [Map](../../L2.md); direct Python transport for the standalone collector.
 # Effects/Dependencies: TCP/TLS with optional loopback CONNECT; h2 framing and no persistence.
@@ -19,10 +19,9 @@ from h2.exceptions import H2Error, ProtocolError
 from h2.settings import SettingCodes
 
 from lifecycle import normalize_proxy
-from regions import region_config
+from regions import select_api_origin
 
 HOST = 'api.bang-dream-on.jp'
-ORIGIN = 'https://' + HOST
 MAX_BODY = 16777216
 HEADER_NAMES = {'server', 'date', 'grpc-status', 'grpc-message', 'x-asset-version', 'x-error-code', 'retry-after'}
 TRAILER_NAMES = {'grpc-status', 'grpc-message', 'x-error-code', 'retry-after'}
@@ -186,8 +185,8 @@ def add_headers(response, values, trailer=False, include_cdn=False):
             response['cdn'][name] = value.decode('utf-8', errors='replace')
 
 
-def post(path, body, header_factory, *, proxy='', connect_ip=None, timeout=20, check_control=lambda: None, include_cdn=False, region='jp'):
-    host = region_config(region).host
+def post(path, body, header_factory, *, proxy='', connect_ip=None, timeout=20, check_control=lambda: None, include_cdn=False, region='jp', api_origin=None):
+    host = urlsplit(select_api_origin(region, api_origin)).hostname
     if len(body) > 4096:
         raise ValueError('Request too large')
     proxy = normalize_proxy(proxy)

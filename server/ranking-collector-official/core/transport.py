@@ -1,4 +1,4 @@
-"""L3: server/L2.md -> ranking-collector-official; framed regional read-only RPC transport with account and stop boundaries."""
+"""L3: server/L2.md -> ranking-collector-official; regional read-only RPCs bound to the selected official API origin."""
 import base64
 from datetime import datetime, timezone
 import json
@@ -8,9 +8,9 @@ import re
 import time
 import uuid
 from google.protobuf import descriptor_pb2, descriptor_pool, json_format, message_factory
-from http2 import post, ORIGIN
+from http2 import post
 from lifecycle import read_credentials
-from regions import region_config
+from regions import select_api_origin
 
 VERSION = '/app.masterdata.MasterdataService/Version'
 SERVERS = '/app.playerlogin.PlayerLoginService/GetServerList'
@@ -58,7 +58,7 @@ class Sampler:
     def __init__(self, args):
         self.args = args
         self.region = getattr(args, "region", "jp")
-        self.origin = region_config(self.region).origin
+        self.origin = select_api_origin(self.region, getattr(args, 'api_origin', None))
         self.resource_version = None
         self.pool = pool_from_file(args.descriptors)
         self.run_id = uuid.uuid4().hex
@@ -93,15 +93,18 @@ class Sampler:
         headers = [('te', 'trailers'), ('x-client-version', self.args.client_version),
                    ('x-platform', 'android'), ('x-request-id', str(uuid.uuid4()))]
         if name not in ANONYMOUS:
+            if not self.master_version:
+                raise ValueError('Missing verified master version')
+            if self.region!='jp' and not self.resource_version:
+                raise ValueError('Missing verified resource version')
             identity, _, auth = read_credentials(self.args.credentials, self.region)
             if identity != self.args.credential_identity:
                 raise ValueError('Collector account changed')
-            if not self.master_version:
-                raise ValueError('Missing verified master version')
+            if auth['origin'] != self.origin:
+                raise ValueError('Collector API origin changed')
             headers.extend([('x-player-id', auth['player_id']), ('x-player-credential', auth['credential']),
                             ('x-master-version', self.master_version)])
             if self.region!='jp':
-                if not self.resource_version:raise ValueError('Missing verified resource version')
                 headers.append(('x-resource-version', self.resource_version))
                 if auth.get('bid'):headers.append(('x-player-bid', auth['bid']))
             if auth.get('device_id'):
@@ -121,7 +124,7 @@ class Sampler:
         if self.last_request is not None:
             self.wait(2 - (time.monotonic() - self.last_request))
         body = frame(request.SerializeToString())
-        include_cdn = include_cdn and name == VERSION
+        include_cdn = include_cdn and name == VERSION and self.region == 'jp'
         self.cdn = None
         for attempt in range(1, 4):
             self.check_control()
@@ -132,7 +135,7 @@ class Sampler:
             started = time.monotonic()
             wire = post(name, body, lambda: self.headers(name), proxy=self.args.proxy,
                 connect_ip=getattr(self.args, 'connect_ip', None), timeout=rpc_deadline-started,
-                check_control=self.check_control, include_cdn=include_cdn, region=self.region)
+                check_control=self.check_control, include_cdn=include_cdn, region=self.region, api_origin=self.origin)
             self.cdn = wire['cdn'] if include_cdn else None
             receipt = dict(started_at=started_at, received_at=datetime.now(timezone.utc).isoformat(),
                 origin=self.origin, path=name, client_version=self.args.client_version,
