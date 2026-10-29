@@ -1,59 +1,75 @@
-# 官方目录隔离版本
+# 独立日服榜单采集器
 
-本版本从官方 Version 与官方 CDN 的 MasterEvent、MasterChallengeMusic、MasterParameter 生成活动目录，无 Moenotes 请求或回退。该工具独立运行，不更改既有网站或机器人的数据源。
+采集器从官方 Version 与官方 CDN 的 MasterEvent、MasterChallengeMusic、MasterParameter 生成活动目录，再读取官方单曲榜和总榜，保存 SQLite 历史。HTTP/2、TLS、进程锁和安装入口均由 Python 实现，支持 Windows、Linux 和 macOS，不依赖 PowerShell。工具与网站、生产 Worker 及 Taki 的现有数据源分别运行。
 
-当前状态：动态 CDN 认证、当前官方 Master 获取和目录落库已通过独立实服入口验证。跨活动切换、空档和回退拒绝通过固定表/模拟时间验证；真实跨期与连续榜单采样尚未验收。本目录不作为可发布替代包。
+## 环境与配置
 
-## 本地准备
+推荐使用与仓库管线一致的 Python 3.13，最低支持 Python 3.12；Python TLS 需要支持 ALPN。运行依赖固定在 `requirements.txt`，通过离线安装入口创建独立虚拟环境。
 
-使用独立 Python 3.12 虚拟环境，安装 protobuf==6.33.0、py3rijndael==0.3.3。PowerShell 7 用于官方 Version/榜单传输。
+游戏凭据使用获授权的日服导出文件，包含 `region=jp`、`origin=https://api.bang-dream-on.jp`，以及 `credentials` 中的 `player_id`、`credential` 和可选 `device_id`。Master 私有配置包含：
 
-`collector.py init --output <全新目录> --credentials <游戏凭据路径> --master-config <独立私有配置路径>`
+- `masterRemoteRoot`：`https://static.bang-dream-on.jp/master`；
+- `cdnUsername`：从获授权客户端取得的 CDN 用户名；
+- `masterCrypto`：`salt`、`key`、`iv` 的十六进制值。
 
-然后沿用 `doctor`、`run/start`、`stop/resume`、`status`、`serve`、`backup`。缺配置时拒绝启动。
-私有配置结构：masterRemoteRoot 为已核实的日服官方 master 根地址；cdnUsername 为从已授权日服客户端定位的 CDN 用户名；masterCrypto 包含 salt/key/iv 十六进制值。配置放在工具和运行目录之外，不提交、不打包、不写入回执。现有 Haneoka 私有管线配置不一定能直接使用，需要按以上字段转换。不得用游戏账号 credential 代替 CDN 认证。
+两个配置文件都放在工具及运行目录之外，不提交或打包。游戏账号凭据与 CDN 认证分别使用。可选代理为本机 HTTP 代理，例如 `--proxy http://127.0.0.1:7897`；也接受 `localhost` 和 `[::1]` 的有效端口。
 
-每次目录发现独立匿名获取 Version，从 x-sirius-env 校验官方源，从 x-sirius-cred 取得当前密码，在内存构造认证头；密码只经子进程捕获管道传递，不写回执或配置。401/缺失密码/来源异常令该轮失败，下一轮重新发现，不回退第三方目录。每次获取版本匹配的清单，校验三张表大小/SHA256再解码。表缓存按版本隔离并原子替换；损坏的本地缓存按当前清单重新获取，远端大小或摘要不匹配则拒绝。全部表成功后才替换活动目录，部分下载不产生可用目录。失败保持历史库，当前轮不采集；没有猜测新活动或无限沿用过期目录。
+## 离线安装
 
-JP时间显式按UTC+9转换，挑战表字段是原生拼写 `_stratAt`；空挑战窗口继承活动窗口。开关来自 `_isMusicRankingDisabled` / `_isTotalMusicRankingDisabled`；结算秒数来自 MasterParameter 的 event_ranking_aggregation_time。活跃活动优先于上一活动聚合期；存在多个活跃活动时拒绝猜测。窗口外 event=null。最高已接受活动编号 highestEventId 与目录在同一数据库提交中保存，状态文件落后或空档后重启仍拒绝回退。真实跨期与结束边界还需同版本客户端/实服验收。
+在可联网的准备环境下载固定依赖，构建器会核对每个分发包的摘要。protobuf 使用通用 Python wheel，运行依赖不需要平台专用原生扩展；候选包不携带 Python 运行时。
 
-接口及网站接入方案见 [INTERFACES.md](INTERFACES.md)。网站页面、生产 Worker 和 Taki 尚未切换。
-
-仅验证目录（不读取游戏凭据、不请求榜单）：
-
-```powershell
-python collector.py catalog --output <独立目录> --master-config <外置静态配置> --client-version 1.1.0 --proxy http://127.0.0.1:7890
+```sh
+python -m pip download --no-deps --only-binary=:all: --platform any --dest wheelhouse protobuf==6.33.0 h2==4.4.1 hpack==4.2.0 hyperframe==6.1.0 setuptools==80.9.0 wheel==0.45.1
+python -m pip download --no-deps --no-binary=:all: --dest wheelhouse py3rijndael==0.3.3
+python build.py --wheelhouse wheelhouse --output <新的ZIP路径>
 ```
 
-该入口与采样循环共用 refresh_catalog，写入目录数据库、discovered-event.json 和换期高水位；拒绝已有采集运行目录。进入空档时目标文件写入 event=null，失败保留上次目录但命令报错。实际榜单采样仍通过 init/start 启动，不要与其他采集实例并行使用同一账号。
+解压后进入包目录，用目标 Python 安装。`setup.py` 会重建工具内的 `.venv`，只从包内 wheelhouse 安装固定依赖，再运行不联网的 `doctor`；运行目录及外置配置不受影响。
 
-## 离线候选包与安装
-
-构建只写新ZIP，不启动服务或采样；实服验收结果单独记录。先将固定依赖放入独立wheelhouse：protobuf 6.33.0的Windows x64 wheel、py3rijndael 0.3.3源码包、setuptools 80.9.0与wheel 0.45.1的wheel。下载阶段可联网，build.py会核对四个摘要；setup.ps1仅从包内安装，不联网。
-
-```powershell
-python build.py --wheelhouse <依赖目录> --output <新的ZIP路径>
-# 解压到独立目录后，在该目录运行：
-pwsh -NoProfile -File ./setup.ps1 -Python <Python3.12解释器>
-./.venv/Scripts/python.exe ./collector.py doctor
+```sh
+python setup.py --python <Python3.13解释器>
+# Linux / macOS
+.venv/bin/python collector.py doctor
+# Windows
+.venv\Scripts\python.exe collector.py doctor
 ```
 
-setup创建工具内的.venv，先离线安装固定构建依赖，再从已校验源码包构建解码库。账户和Master配置始终放在工具及运行目录之外。候选包中没有真实数据或私有配置，换机器后需另行配置获授权的账号与Master参数。
+以下命令的 `python` 均指上述虚拟环境解释器。候选包不包含账号、Master 配置、数据库、日志或玩家数据。
+
+## 仅发现官方目录
+
+这个入口不读取游戏凭据，也不请求榜单：
+
+```sh
+python collector.py catalog --output <独立目录> --master-config <外置Master配置> --client-version 1.1.0
+```
+
+匿名 Version 提供当前 Master 版本和动态 CDN 密码；来源固定为官方域名，密码只驻留内存，不写入请求文件、回执或配置。每次发现都获取版本匹配的 Manifest，并按大小及 SHA256 验证三张表后解码。表缓存按版本隔离并原子替换，损坏缓存重新获取。全部表成功后才提交目录，不回退第三方目录；窗口外写入 `event=null`。
+
+JP 时间按 UTC+9 解析，挑战开始字段保留原生拼写 `_stratAt`。单曲和总榜开关来自官方 Master，聚合期来自 `event_ranking_aggregation_time`。多个活跃活动视为冲突；新活动优先于旧活动聚合期。最高已接受活动 ID 与目录同事务保存，状态文件落后、空档或重启都不会接受活动回退。挑战自己的窗口分别标记 `upcoming`、`nowOn`、`aggregation`、`finished`。
+
+`catalog` 拒绝已有采集运行目录，实际采样与该入口不共享同一输出目录。
 
 ## 有界运行与恢复
 
-```powershell
-./.venv/Scripts/python.exe ./collector.py init --output <全新运行目录> --credentials <外置日服凭据> --master-config <外置Master配置> --hours 0.2 --interval 300 --client-version 1.1.0 --proxy http://127.0.0.1:7890
-./.venv/Scripts/python.exe ./collector.py start --output <运行目录>
-./.venv/Scripts/python.exe ./collector.py status --output <运行目录> --verify
-./.venv/Scripts/python.exe ./collector.py stop --output <运行目录>
-./.venv/Scripts/python.exe ./collector.py resume --output <运行目录>
-./.venv/Scripts/python.exe ./collector.py serve --output <运行目录> --port 18779
-./.venv/Scripts/python.exe ./collector.py backup --output <运行目录> --destination <运行目录外的新备份路径>
+```sh
+python collector.py init --output <全新运行目录> --credentials <外置日服凭据> --master-config <外置Master配置> --hours 0.2 --interval 300 --client-version 1.1.0
+python collector.py start --output <运行目录>
+python collector.py status --output <运行目录> --verify
+python collector.py stop --output <运行目录>
+python collector.py resume --output <运行目录>
+python collector.py serve --output <运行目录> --port 18779
+python collector.py backup --output <运行目录> --destination <运行目录外的新备份路径>
 ```
 
-start返回实际PID，后台窗口隐藏。stop等待当前请求结束，并在后续请求、重试和等待期间检查停止文件与截止时间；resume沿用原截止时间，拒绝已complete的运行，代码/协议/运行配置变动须使用新目录。首次请求前持久化账号身份，发送榜单请求前再次核对实际读取凭据的账号摘要。HTTP401/gRPC16及HTTP403/gRPC7暂停相同认证字段；仅修改无关元数据不会解除暂停。外部凭据替换只接受同账号，不自动签发或登录。429/gRPC8遵守Retry-After；目录与榜单之间Master版本漂移时当轮拒绝采样，下一轮重新发现。不要让两个不同运行目录并行使用同一账号。
+`start` 返回实际 PID，Windows 隐藏窗口，POSIX 使用独立会话。`run` 在前台执行，可由现有 Python 服务管理器托管；工具不注册系统服务。`stop` 与截止时间在连接、读取、请求间隔和重试等待中检查；单次 RPC 总预算为 20 秒。`resume` 沿用原截止时间，已完成的运行、采样代码或协议及配置变化需要新目录。进程锁随进程退出释放，状态查询与采集共用相同的锁实现。
 
-官方目录请求HTTP429或Version gRPC8同样遵守Retry-After，并把等待截止写入运行状态；等待期间不发现目录或采样。目录HTTP错误记录安全的阶段与状态码，不记录认证头。events/current返回读取时的ageMs、serverTimeMs和stale，超过10分钟或已越过所保存活动阶段时标为陈旧；保留原目录及其时间，不在GET中获取游戏数据或改写数据库。
+首次网络请求前持久化账号身份，发送时从一次凭据读取构造身份和认证头。HTTP401/gRPC16、HTTP403/gRPC7 暂停相同认证字段；修改无关元数据不会解除暂停，仅接受同账号凭据替换，不执行注册或登录。HTTP429/gRPC8 遵守 Retry-After，并将冷却时间写入状态。Master 版本漂移时不采样，下一轮重新发现。请求及重试也受各榜单的独立窗口限制。
 
-状态查询短暂探测同一个进程锁；启动端最多等待1秒消化查询竞争，仍被占用则拒绝重复采集。安装时使用Windows扩展路径处理深目录；若运行环境限制系统临时目录改名权限，可仅在本次安装终端设置TEMP/TMP为自己可写的临时目录，无需修改全局设置。
+每个成功或失败观测独立保存，空榜单与损坏数据分别处理。备份通过 SQLite 在线备份 API 获取一致快照，校验数据库、外键、观测关系和正文摘要，再通过硬链接原子创建新文件，不覆盖已有目标；备份目标文件系统需支持硬链接。
+
+## 本地读取与验收范围
+
+只读 API 绑定 `127.0.0.1`，接口及后续网站接入方案见 [INTERFACES.md](INTERFACES.md)。读取时按原观测时间计算年龄；GET 不访问游戏或改写历史。数据损坏返回错误，不作为空榜成功。
+
+匿名 Version、目录投影、进程锁、离线安装、备份和接口检查分别记录；完整真实账号连续采样、凭据失效和实服跨活动切换仍需获授权账号验收。源码与离线包不会自动切换网站、生产 Worker 或 Taki。

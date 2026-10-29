@@ -1,14 +1,14 @@
-"""L3: server/L2.md -> ranking-collector-official; standalone Windows operator entry point."""
+"""L3: server/L2.md -> ranking-collector-official; standalone Python operator entry point."""
 import argparse
-from contextlib import closing, contextmanager
+from contextlib import closing
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import re
-import shutil
 import sqlite3
+import ssl
 import subprocess
 import sys
 import time
@@ -17,6 +17,8 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'core'))
+from process_lock import process_lock as lock_file
+from lifecycle import normalize_proxy
 FORMAT = 'haneoka:official-jp-collector/1'
 DESCRIPTOR_SHA256 = 'e8225c67eb066c1cdb2232a4c95f661a460d54dd88420f634ea2c8242de71adf'
 
@@ -26,21 +28,16 @@ def emit(value):
 
 
 def doctor():
-    if os.name != 'nt' or sys.version_info[:2] != (3, 12) or platform.machine() != 'AMD64':
-        raise ValueError('Python 3.12 x64 on Windows required')
-    pwsh = shutil.which('pwsh')
-    if not pwsh:
-        raise ValueError('PowerShell 7 is missing from PATH')
-    version = subprocess.run([pwsh, '-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'],
-                             capture_output=True, text=True, timeout=15, check=True).stdout.strip()
-    if int(version) < 7:
-        raise ValueError('PowerShell 7 required')
+    if sys.version_info<(3,12) or os.name not in ('nt','posix'):
+        raise ValueError('Python 3.12 or newer on Windows, Linux or macOS required')
+    if not ssl.HAS_ALPN:
+        raise ValueError('Python TLS must support ALPN for HTTP/2')
     import google.protobuf
     from importlib.metadata import version as dependency_version
-    if dependency_version('py3rijndael') != '0.3.3':
-        raise ValueError('Install py3rijndael==0.3.3 in the independent environment')
-    if google.protobuf.__version__ != '6.33.0':
-        raise ValueError('Install the pinned protobuf dependency with setup.ps1')
+    dependencies={'protobuf':'6.33.0','py3rijndael':'0.3.3','h2':'4.4.1','hpack':'4.2.0','hyperframe':'6.1.0'}
+    for name,expected in dependencies.items():
+        if dependency_version(name)!=expected:
+            raise ValueError(f'Install {name}=={expected} with setup.py')
     descriptor = ROOT / 'core' / 'total-descriptors.pb'
     if hashlib.sha256(descriptor.read_bytes()).hexdigest() != DESCRIPTOR_SHA256:
         raise ValueError('Bundled descriptor checksum mismatch')
@@ -55,7 +52,8 @@ def doctor():
             path = (ROOT / relative).resolve()
             if not path.is_relative_to(ROOT) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
                 raise ValueError('Bundle checksum mismatch')
-    return dict(status='ready', python=platform.python_version(), powershell=version,
+    return dict(status='ready', python=platform.python_version(), platform=platform.system(),
+                tls=ssl.OPENSSL_VERSION,dependencies=dependencies,
                 protobuf=google.protobuf.__version__, descriptorSha256=DESCRIPTOR_SHA256,
                 networkRequests=0)
 
@@ -71,8 +69,7 @@ def validate_settings(config):
         raise ValueError('hours must be in (0,48]')
     if not isinstance(config['client_version'], str) or not re.fullmatch(r'\d+\.\d+\.\d+', config['client_version']):
         raise ValueError('Invalid client version')
-    if config['proxy'] not in ('', 'http://127.0.0.1:7890'):
-        raise ValueError('Unsupported proxy; use direct or http://127.0.0.1:7890')
+    normalize_proxy(config['proxy'])
     if not isinstance(config['credentials'], str) or not Path(config['credentials']).is_absolute():
         raise ValueError('An absolute external credential path is required')
     if not isinstance(config['master_config'], str) or not Path(config['master_config']).is_absolute():
@@ -88,7 +85,7 @@ def initialize(args):
     if credentials.is_relative_to(output) or credentials.is_relative_to(ROOT):
         raise ValueError('Keep credentials outside the runtime and tool directories')
     config = dict(format=FORMAT, credentials=str(credentials), interval=args.interval,
-                  hours=args.hours, client_version=args.client_version, proxy=args.proxy,
+                  hours=args.hours, client_version=args.client_version, proxy=normalize_proxy(args.proxy),
                   master_config=str(Path(args.master_config).resolve()))
     validate_settings(config)
     # Refusing every existing directory prevents adopting an active legacy soak.
@@ -107,30 +104,12 @@ def runtime(path):
     return output, config
 
 
-@contextmanager
-def lock_file(path):
-    import msvcrt
-    with path.open('a+b') as lock:
-        lock.seek(0)
-        lock.write(b'0')
-        lock.flush()
-        lock.seek(0)
-        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-        try:
-            yield
-        finally:
-            lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-
-
 def running(output):
     try:
         with lock_file(output / 'continuous.lock'):
             return False
-    except OSError as error:
-        if error.errno in (13, 36):
-            return True
-        raise
+    except BlockingIOError:
+        return True
 
 
 def run_collector(output, config, launch_token=None):
@@ -157,11 +136,13 @@ def start(output, config):
         if (output / 'STOP').exists():
             raise ValueError('STOP exists; use resume after checking status')
         launch_token = uuid.uuid4().hex
+        process_options=({'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt'
+                         else {'start_new_session':True})
         with (output / 'stdout.log').open('ab') as out, (output / 'stderr.log').open('ab') as err:
             process = subprocess.Popen([sys.executable, str(ROOT / 'collector.py'), 'run', '--output', str(output),
                 '--launch-token', launch_token],
                 stdin=subprocess.DEVNULL, stdout=out, stderr=err, cwd=ROOT,
-                creationflags=subprocess.CREATE_NO_WINDOW)
+                **process_options)
         until = time.monotonic() + 20
         while time.monotonic() < until:
             if process.poll() is not None:
@@ -210,8 +191,7 @@ def backup(output, destination):
         finally:
             src.close()
         count = verify_database(temporary)
-        # On Windows rename refuses an existing destination, including a concurrent backup.
-        temporary.rename(target)
+        os.link(temporary,target)
     finally:
         temporary.unlink(missing_ok=True)
     with target.open('rb') as stream:
@@ -221,7 +201,7 @@ def backup(output, destination):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Local JP ranking collector (Windows / Python 3.12)')
+    parser = argparse.ArgumentParser(description='Local JP ranking collector (Python 3.12+)')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('doctor', help='Check dependencies and bundled protocol without networking')
     catalog = commands.add_parser('catalog', help='Refresh official catalog in a separate directory, without game credentials or ranking requests')
@@ -257,6 +237,7 @@ def main():
         return
     if args.command == 'catalog':
         doctor()
+        args.proxy=normalize_proxy(args.proxy)
         output=Path(args.output).resolve()
         output.mkdir(parents=True,exist_ok=True)
         if (output/'runtime.json').exists() or (output/'collector-state.json').exists():

@@ -14,11 +14,12 @@ from lifecycle import accept_catalog, targets, credential_generation, credential
 from sample import run as sample
 from official_catalog import CatalogRequestError
 from transport import VersionError
+from process_lock import process_lock
 
 def code_identity(args):
     root=Path(__file__).resolve().parent
     files=[root/name for name in ('continuous.py','lifecycle.py','sample.py','history.py',
-        'official_catalog.py','transport.py','grpc-request.ps1','total-descriptors.pb')]
+        'official_catalog.py','transport.py','http2.py','process_lock.py','total-descriptors.pb')]
     files += [root.parent/'collector.py']
     return {str(path.relative_to(root.parent)):hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
 
@@ -108,20 +109,9 @@ def cycle(args,history,state,discover_fn=None,sample_fn=sample):
     return status,detail
 
 def run(args):
-    import msvcrt
     output=Path(args.output).resolve();output.mkdir(parents=True,exist_ok=True)
     state_file=output/'collector-state.json'
-    with (output/'continuous.lock').open('a+b') as lock:
-        lock.seek(0);lock.write(b'0');lock.flush();lock.seek(0)
-        # A status probe briefly owns this same byte; distinguish it from a running collector.
-        lock_deadline=time.monotonic()+1
-        while True:
-            try:
-                msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
-                break
-            except OSError as error:
-                if error.errno not in (13,36) or time.monotonic()>=lock_deadline:raise
-                time.sleep(.02)
+    with process_lock(output/'continuous.lock',timeout=1):
         history=History(output/'history.sqlite3')
         if state_file.exists():
             state=json.loads(state_file.read_text(encoding='utf-8'))

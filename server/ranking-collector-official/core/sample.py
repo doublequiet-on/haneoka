@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import uuid
 from history import History
 from lifecycle import targets, credential_generation
+from process_lock import process_lock
 
 def run(args):
     import transport
@@ -16,11 +17,7 @@ def run(args):
     output=Path(args.output).resolve();output.mkdir(parents=True,exist_ok=True)
     history=History(output/'history.sqlite3')
     configured_descriptor=Path(__file__).resolve().parent/'total-descriptors.pb'
-    # OS lock is released on process exit, including crashes.
-    import msvcrt
-    with (output/'sampler.lock').open('a+b') as lock:
-        lock.seek(0);lock.write(b'0');lock.flush();lock.seek(0)
-        msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
+    with process_lock(output/'sampler.lock'):
         count=0
         failures=0
         acquired=0

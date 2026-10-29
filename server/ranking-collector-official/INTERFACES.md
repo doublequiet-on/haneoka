@@ -10,6 +10,8 @@
 | 本地历史 | 不可变正文摘要 + 独立观测 + 失败周期 | observedAtMs是接收时间；sourceFetchedAtMs保持null |
 | HTTP读取 | localhost v2 | 只读数据库，GET不请求游戏、不中途登录、不写历史 |
 
+采集端使用 Python 的 TLS 与 HTTP/2 实现，在 Windows、Linux 和 macOS 复用同一协议与数据库；没有 PowerShell 子进程或凭据请求文件。CLI、离线安装与进程锁的使用方式见 [README.md](README.md)。
+
 接口前缀 `/api/v2/game/records/jp`：
 
 | GET 路径 | 返回 |
