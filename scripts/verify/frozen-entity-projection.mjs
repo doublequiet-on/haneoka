@@ -34,6 +34,7 @@ if (process.argv[2] === "child") {
       .map((name) => `export function ${name}(){throw new Error('Unexpected graph or network read: ${name}');}`)
       .join("\n");
   const mocks = {
+    "./card-growth-data": forbidden(["projectCardGrowth"]),
     "@haneoka/vega-plugin-haneoka/transcript": forbidden(["projectHaneokaTranscript"]),
     "./song-performer": forbidden(["resolveSongPerformer"]),
     "../server/item-relations": forbidden(["itemRelations"]),
