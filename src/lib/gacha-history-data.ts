@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 固定目录、规范历史快照和当前语言。
-// Output: 抽卡记录展示、保底期望、兑换进度及星钻计价适配。
+// Output: 抽卡记录展示、卡池公示概率／开放期／UP 卡、保底期望、兑换进度及星钻计价适配。
 // Pos: [Map](L2-2.md)；抽卡历史展示与资料边界。
 // Effects/Dependencies: 调用公开 SDK 纯计算；复用路径和多语言展示规则。
 import type {
@@ -13,7 +13,7 @@ import { localizedText } from "../lit/shared/catalog";
 import { resourcePath } from "./resource-route";
 
 import { historyObject, type HistorySnapshot } from "@haneoka/game-data-exporter/gacha-history";
-import { gachaHistoryExpectation } from "@haneoka/game-data-exporter/gacha-history-analysis";
+import { gachaHistoryExpectation, gachaPoolRates } from "@haneoka/game-data-exporter/gacha-history-analysis";
 import { gachaTargetProgress, type GachaTargetProgress } from "@haneoka/game-data-exporter/gacha-history-points";
 
 export * from "@haneoka/game-data-exporter/gacha-history";
@@ -69,17 +69,63 @@ export function historyPoolViews(
   categoryLabel: (key: string) => string,
   snapshot?: HistorySnapshot,
 ): GachaHistoryPool[] {
+  const server = catalog.server === "jp" ? "jp" : "intl";
+  const mark = historyMark(catalog, server);
   return Object.keys(catalog.pools).map((id) => {
     const row = historyRulePool(catalog, id);
     const image = row.logo || row.image;
+    const time = (value: unknown) => {
+      const ms = (Array.isArray(value) ? value : [value]).find((v) => typeof v === "number" && v > 0);
+      return typeof ms === "number" ? new Date(ms).toISOString() : undefined;
+    };
+    const featured = (Array.isArray(row.featured) ? row.featured : []).flatMap((value) => {
+      const entry = historyObject(value),
+        type = entry.resourceType,
+        cardId = String(entry.resourceId ?? "");
+      if ((type !== 2 && type !== 3) || !cardId || entry.pickup !== true) return [];
+      const card = historyObject((type === 2 ? catalog.cards : catalog.supports)[cardId]);
+      const rarity = card.rarity ?? entry.rarity;
+      const rarityLabel = RARITY_LABELS[String(rarity)] ?? "";
+      const thumbnail = historyObject(card.images).thumbnail ?? card.image ?? entry.image;
+      return [
+        {
+          key: `${type === 2 ? "member" : "support"}:${cardId}`,
+          kind: type === 2 ? ("member" as const) : ("support" as const),
+          name: localizedText(card.prefix ?? card.cardName ?? card.name ?? entry.name, locale) || cardId,
+          rarity: typeof rarity === "number" || typeof rarity === "string" ? rarity : "",
+          imageUrl: typeof thumbnail === "string" && thumbnail ? thumbnail : undefined,
+          href: resourcePath({
+            server,
+            locale: locale as Parameters<typeof resourcePath>[0]["locale"],
+            kind: type === 2 ? "member-cards" : "support-cards",
+            id: cardId,
+          }),
+          attributeImageUrl: mark(`CardType-${ATTRIBUTES[Number(card.cardType ?? entry.cardType)] ?? ""}.png`),
+          rarityImageUrl: mark(`RarityIconCenter_${rarityLabel}.png`),
+        },
+      ];
+    });
     return {
       id,
       name: localizedText(row.title, locale),
       category: categoryLabel(String(row.category ?? "other")),
       imageUrl: typeof image === "string" && image ? image : undefined,
+      bannerUrl: typeof row.image === "string" && row.image ? row.image : undefined,
+      startAt: time(row.startAt),
+      endAt: time(row.endAt),
+      rates: gachaPoolRates(row) ?? undefined,
+      featured,
       exchangeTargets: historyExchangeTargets(catalog, row, locale, snapshot),
     };
   });
+}
+const RARITY_LABELS: Record<string, string> = { 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" };
+const ATTRIBUTES = ["", "Red", "Blue", "Green", "Yellow", "Purple"];
+function historyMark(catalog: HistoryCatalogData | undefined, server: string) {
+  return (name: string) => {
+    const path = catalog?.marks?.[name];
+    return typeof path === "string" && path ? `/runtime/${server}/${path.replace(/^runtime\//u, "")}` : undefined;
+  };
 }
 function historyRulePool(catalog: HistoryCatalogData | undefined, id: string): Record<string, unknown> {
   const brief = historyObject(catalog?.pools[id]);

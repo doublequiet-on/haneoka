@@ -1,4 +1,5 @@
 import type { GachaTargetProgress } from "@haneoka/game-data-exporter/gacha-history-points";
+import type { GachaPoolRates } from "@haneoka/game-data-exporter/gacha-history-analysis";
 
 export interface GachaHistoryAccount {
   key: string;
@@ -12,7 +13,22 @@ export interface GachaHistoryPool {
   name: string;
   category: string;
   imageUrl?: string;
+  bannerUrl?: string;
+  startAt?: string;
+  endAt?: string;
+  rates?: GachaPoolRates;
+  featured?: readonly GachaHistoryFeatured[];
   exchangeTargets?: readonly GachaTargetProgress[];
+}
+export interface GachaHistoryFeatured {
+  key: string;
+  kind: "member" | "support";
+  name: string;
+  rarity: string | number;
+  imageUrl?: string;
+  href?: string;
+  attributeImageUrl?: string;
+  rarityImageUrl?: string;
 }
 export interface GachaHistoryPrize {
   id: string;

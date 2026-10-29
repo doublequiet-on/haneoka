@@ -2,7 +2,7 @@ import type { GachaTargetProgress } from "@haneoka/game-data-exporter/gacha-hist
 import type { GachaHistory } from "./gacha-history";
 import type { GachaHistoryPageData } from "../server/gacha-history-page-data";
 import type { GachaHistoryPrize, GachaHistoryBatch, GachaHistoryPool } from "../lib/gacha-history-view";
-import { historyObject, historyDefaultGemConversion } from "../lib/gacha-history-data";
+import { historyObject, historyDefaultGemConversion, historyPoolViews } from "../lib/gacha-history-data";
 import { localizedText } from "./shared/catalog";
 import { clientText } from "../i18n/client";
 
@@ -40,16 +40,11 @@ export function mountGachaHistoryPreview(view: GachaHistory, page: GachaHistoryP
       });
     }
   }
-  const pools: GachaHistoryPool[] = [1, 2, 3].map((id) => ({
-    id: `preview-pool-${id}`,
-    name: `${t("simulatedData")} · ${t("pool")} ${id}`,
-    category: t("simulatedData"),
-    imageUrl: String(
-      historyObject(Object.values(catalog.pools)[id - 1]).logo ??
-        historyObject(Object.values(catalog.pools)[id - 1]).image ??
-        "",
-    ),
-  }));
+  const pools: GachaHistoryPool[] = historyPoolViews(catalog, view.locale, (key) =>
+    clientText(view.locale, `catalog.recruitments.types.${key}`, key),
+  )
+    .filter((pool) => pool.rates && pool.rates.high < 0.2 && pool.featured?.length)
+    .slice(-3);
   const exchangeTarget = (
     pool: GachaHistoryPool,
     kind: "member" | "support",
@@ -114,29 +109,44 @@ export function mountGachaHistoryPreview(view: GachaHistory, page: GachaHistoryP
     exchangeTarget(pools[2], "member", "53", 200, 80, 120, 120, 2, 0),
   ];
 
+  let seed = 20261029;
+  const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const byRarity = (kind: string, rarity: number) =>
+    cards.filter((card) => card.kind === kind && Number(card.rarity) === rarity);
+  const draw = (pool: GachaHistoryPool, guaranteed: boolean): GachaHistoryPrize => {
+    const rates = pool.rates!;
+    let roll = random();
+    if (roll < rates.pickup && pool.featured?.length) {
+      const featured = pool.featured[Math.floor(random() * pool.featured.length)];
+      const card = cards.find((row) => `${row.kind}:${row.id}` === featured.key);
+      if (card) return { ...card, pickup: true };
+    }
+    roll = random();
+    const kind = random() < 0.55 ? "member" : "support";
+    const rarity = roll < rates.high - rates.pickup ? 4 : roll < 0.3 || guaranteed ? 3 : 2;
+    const choices = byRarity(kind, rarity);
+    return { ...choices[Math.floor(random() * choices.length)], pickup: false, converted: random() < 0.08 };
+  };
   const batches: GachaHistoryBatch[] = [];
-  for (let day = 0; day < 12; day++) {
-    for (let pool = 0; pool < pools.length; pool++) {
-      const prizes = Array.from({ length: 10 }, (_, draw) => {
-        const kind = (draw + day) % 3 === 0 ? "support" : "member";
-        const rarity = draw === 0 && day % (pool + 1) === 0 ? 4 : draw === 9 ? 3 : 2;
-        const matches = cards.filter((card) => card.kind === kind && Number(card.rarity) === rarity);
-        const card = matches[(rarity >= 4 ? day % 3 : day + draw) % matches.length] ?? cards[0];
-        return {
-          ...card,
-          pickup: draw === 0 && pool === 0,
-          converted: day > 3 && draw % 4 === 0,
-        };
-      });
+  for (let day = 0; day < 75; day++) {
+    for (const [index, pool] of pools.entries()) {
+      if (random() < 0.45) continue;
+      const count = random() < 0.75 ? 10 : 1;
+      const prizes = Array.from({ length: count }, (_, i) => draw(pool, count === 10 && i === 9));
       batches.push({
-        id: `preview-${day}-${pool}`,
+        id: `preview-${day}-${index}`,
         accountKey: "ui-preview",
-        poolId: pools[pool].id,
-        pulledAt: new Date(Date.UTC(2026, 9, 5 + day, 9 + pool)).toISOString(),
-        drawCount: 10,
+        poolId: pool.id,
+        pulledAt: new Date(Date.UTC(2026, 7, 1 + day, 9 + index, Math.floor(random() * 60))).toISOString(),
+        drawCount: count,
         prizes,
-        cost: { freeGems: pool === 0 ? 3000 : 0, paidGems: pool === 1 ? 1500 : 0, tickets: pool === 2 ? 10 : 0 },
-        expected: { high: 0.6, memberSsr: 0.3, supportSsr: 0.3, pickup: 0.2 },
+        cost: random() < 0.7 ? { freeGems: count * 250, paidGems: 0 } : { freeGems: 0, paidGems: count * 250 },
+        expected: {
+          high: count * pool.rates!.high,
+          memberSsr: count * pool.rates!.memberHigh,
+          supportSsr: count * pool.rates!.supportHigh,
+          pickup: count * pool.rates!.pickup,
+        },
       });
     }
   }
