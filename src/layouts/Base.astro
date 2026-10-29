@@ -91,6 +91,42 @@ const i18nSeed = serializeI18nSeed(createServerI18nContext(locale, route).seed()
       }
     </script>
     <ClientRouter fallback="none" />
+    <script>
+      const loadAnalytics = () => {
+        const script = document.createElement("script");
+        script.async = true;
+        script.fetchPriority = "low";
+        script.src = "https://www.googletagmanager.com/gtag/js?id=G-3CHDXT84V3";
+        const cleanup = () => {
+          clearTimeout(timeout);
+          script.onload = null;
+          script.onerror = null;
+          script.remove();
+        };
+        const timeout = setTimeout(cleanup, 3000);
+        script.onerror = cleanup;
+        script.onload = () => {
+          cleanup();
+          const analytics = window as Window & {
+            dataLayer?: IArguments[];
+            gtag?: (...args: unknown[]) => void;
+          };
+          analytics.dataLayer ||= [];
+          analytics.gtag = function () {
+            analytics.dataLayer!.push(arguments);
+          };
+          analytics.gtag("js", new Date());
+          analytics.gtag("config", "G-3CHDXT84V3");
+        };
+        document.head.append(script);
+      };
+      const scheduleAnalytics = () => {
+        if ("requestIdleCallback" in window) window.requestIdleCallback(loadAnalytics, { timeout: 2000 });
+        else setTimeout(loadAnalytics, 0);
+      };
+      if (document.readyState === "complete") scheduleAnalytics();
+      else window.addEventListener("load", scheduleAnalytics, { once: true });
+    </script>
     <script is:inline>
       (() => {
         const d = document.documentElement;
