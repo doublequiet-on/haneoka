@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: 社区路由、会话、读取／编辑及上传状态。
-// Output: 社区浏览、编辑与相关操作的 Lit 界面。
+// Output: 社区浏览、编辑与相关操作的 Lit 界面；推荐动态保留 /community/feeds/ 规范地址。
 // Pos: [Map](L2-2.md)；社区交互和状态生命周期的协调枢纽。
 // Effects/Dependencies: 认证 HTTP、上传与持久操作由 API 执行；本文件管理 DOM、异步请求和界面状态。
 import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
@@ -16,7 +16,6 @@ import { communityRecommendationItems, isEntityCommentRecommendation, entityComm
 import { guard } from "lit/directives/guard.js";
 import { LazyImages, nextImageCandidate } from "./ui/lazy-images";
 import { operationProgress } from "./ui/operation-progress";
-import { communityComment } from "./views/community-comment";
 import { readCommunityForumDirectory } from "../lib/community-forum-directory";
 import { asyncRegion } from "./ui/async-region";
 import { readCommunityViewer, CommunityRealmChanged, type CommunityViewer } from "../lib/community-viewer";
@@ -72,7 +71,7 @@ import { communityImageRatio, type CommunityImage } from "../lib/community-media
 import { keyed } from "lit/directives/keyed.js";
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { orderFacetOptions } from "../lib/facet-order";
-import { PaneFocus, paneSection, renderPane } from "./ui/pane";
+import { PaneFocus, renderPane } from "./ui/pane";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import {
   currentReleaseServer,
@@ -907,10 +906,6 @@ export class CommunityWorkspace extends LitElement {
       // the worker hands out at the visitor's locale prefix — anchor on the
       // "community" segment rather than absolute path indexes.
       const targetUrl = navigationDocumentUrl();
-      if (/\/community\/feeds\/?$/.test(targetUrl.pathname)) {
-        targetUrl.pathname = targetUrl.pathname.replace(/\/community\/feeds\/?$/, "/community/");
-        history.replaceState(history.state, "", targetUrl.pathname + targetUrl.search + targetUrl.hash);
-      }
       this.routeUrl = `${targetUrl.pathname}${targetUrl.search}`;
       const parts = targetUrl.pathname.split("/").filter(Boolean);
       const communityAt = parts.indexOf("community");
@@ -3213,7 +3208,7 @@ export class CommunityWorkspace extends LitElement {
     const forum = this.forums.find(
       (entry) => entry.id === this.selectedForumId,
     );
-    return forum ? this.forumHref(forum) : this.path("/community");
+    return forum ? this.forumHref(forum) : this.path("/community/feeds");
   }
   private leaveEditor() {
     const target =
@@ -3807,7 +3802,7 @@ export class CommunityWorkspace extends LitElement {
       (entry) => entry.id === this.postEnvelope().post.forumId,
     );
     void navigateDetailPage(
-      forum ? this.forumHref(forum) : this.path("/community"),
+      forum ? this.forumHref(forum) : this.path("/community/feeds"),
       "replace",
     );
   }
@@ -3844,7 +3839,7 @@ export class CommunityWorkspace extends LitElement {
     const link = document.createElement("a");
     link.className = "icon-button community-back";
     link.dataset.entityBack = "";
-    link.href = this.path("/community");
+    link.href = this.path("/community/feeds");
     link.setAttribute("aria-label", this.label("back", "Back"));
     link.innerHTML =
       '<svg class="material-icon" width="24" height="24" aria-hidden="true"><use href="/icons.svg#arrow_back"></use></svg>';
@@ -4746,17 +4741,15 @@ export class CommunityWorkspace extends LitElement {
   }
   private syncPlaylist() {
     const params = new URLSearchParams(location.search);
-    this.query ? params.set("q", this.query) : params.delete("q");
-    this.playlistSort !== "order"
-      ? params.set("sort", this.playlistSort)
-      : params.delete("sort");
-    this.playlistOrder !== "asc"
-      ? params.set("order", this.playlistOrder)
-      : params.delete("order");
+    if (this.query) params.set("q", this.query);
+    else params.delete("q");
+    if (this.playlistSort !== "order") params.set("sort", this.playlistSort);
+    else params.delete("sort");
+    if (this.playlistOrder !== "asc") params.set("order", this.playlistOrder);
+    else params.delete("order");
     params.delete("view");
-    this.playlistBand
-      ? params.set("band", this.playlistBand)
-      : params.delete("band");
+    if (this.playlistBand) params.set("band", this.playlistBand);
+    else params.delete("band");
     history.replaceState(
       history.state,
       "",
@@ -6404,7 +6397,7 @@ export class CommunityWorkspace extends LitElement {
                       (tag) => html`
                         <a
                           class="chip"
-                          href=${`${this.currentForum ? this.forumHref(this.currentForum) : this.path("/community")}?tag=${encodeURIComponent(String(typeof tag === "object" && tag ? (tag as Value).normalizedName || "" : tag))}`}
+                          href=${`${this.currentForum ? this.forumHref(this.currentForum) : this.path("/community/feeds")}?tag=${encodeURIComponent(String(typeof tag === "object" && tag ? (tag as Value).normalizedName || "" : tag))}`}
                         >
                           #${String(typeof tag === "object" && tag ? (tag as Value).displayName || (tag as Value).normalizedName || "" : tag)}
                         </a>
@@ -6562,7 +6555,7 @@ export class CommunityWorkspace extends LitElement {
                 <div class="list-item list-item--two-line">
                   <a
                     class="list-item__body"
-                    href=${`${this.path("/community")}?tag=${encodeURIComponent(String(tag.normalizedName || ""))}`}
+                    href=${`${this.path("/community/feeds")}?tag=${encodeURIComponent(String(tag.normalizedName || ""))}`}
                   >
                     <span class="list-item__headline"
                       >#${tag.displayName || tag.normalizedName}</span

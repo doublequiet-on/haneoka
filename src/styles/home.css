@@ -1,4 +1,8 @@
 @layer pages {
+  .home-explore {
+    min-height: 0;
+    padding-bottom: var(--md-sys-spacing-5);
+  }
   home-dashboard {
     display: block;
     min-width: 0;

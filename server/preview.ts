@@ -2099,7 +2099,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     for (const locale of [prefixLocale, ...locales]) {
       const entryPath = url.pathname.includes("/catalog/assets/")
         ? `${locale}/catalog/assets/index.html`
-        : forumDetail ? `${locale}/community/forums/index.html` : `${locale}/community/index.html`;
+        : forumDetail ? `${locale}/community/forums/index.html` : `${locale}/community/feeds/index.html`;
       const entry = safeFile(DIST, entryPath);
       if (entry) {
         if (forumDetail) {

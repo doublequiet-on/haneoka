@@ -18,6 +18,7 @@ import {
 import { appRelease } from "./app-release";
 import { publicForumDirectory } from "./public-forum-directory";
 import { homePageData } from "./home-page-data";
+import { destinationHubMedia } from "./destination-hub-data";
 import { loadCalendarData } from "./calendar";
 import { announcementPageData } from "./announcement-page-data";
 import { catalogCollectionData } from "./catalog-collection";
@@ -122,6 +123,8 @@ export async function prepareStaticInputs(): Promise<void> {
       for (const mode of ANON_TOKYO_MODES) tasks.push(() => catalogSystemData("anon-tokyo", server, locale, mode));
       for (const resource of ["stories", "live2d", "spine", "help"] as const)
         tasks.push(() => workspaceCollectionData(resource, server, locale));
+      for (const id of ["catalog", "stories", "tools", "games", "community"] as const)
+        tasks.push(() => destinationHubMedia(id, server, locale));
       await prepareAll(tasks);
     }
   }

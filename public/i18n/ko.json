@@ -266,7 +266,19 @@
     "gbpArchive": "GBP 자료",
     "projectSekai": "프로젝트 세카이",
     "chatCustomizations": "채팅 꾸미기",
-    "arena": "격주 아레나"
+    "arena": "격주 아레나",
+    "mosaic": {
+      "recommended": "커뮤니티 추천",
+      "latest": "최신 게시물",
+      "forums": "게시판",
+      "tags": "태그",
+      "mine": "내 커뮤니티",
+      "following": "팔로우",
+      "bookmarks": "북마크",
+      "notifications": "알림",
+      "activity": "내 댓글",
+      "leader": "리더"
+    }
   },
   "settings": {
     "labels": {

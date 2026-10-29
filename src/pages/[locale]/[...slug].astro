@@ -17,6 +17,8 @@ export function getStaticPaths() {
           "/account/reset-password",
           "/account/app",
           "/settings",
+          "/tools",
+          "/games",
         ].includes(entry.route) &&
         !entry.route.startsWith("/community") &&
         !resourceCollectionHref(entry.route, "intl", locale),

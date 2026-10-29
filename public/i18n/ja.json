@@ -266,7 +266,19 @@
     "gbpArchive": "ガルパ資料",
     "projectSekai": "プロジェクトセカイ",
     "chatCustomizations": "チャットカスタマイズ",
-    "arena": "撃奏アリーナ"
+    "arena": "撃奏アリーナ",
+    "mosaic": {
+      "recommended": "おすすめの投稿",
+      "latest": "最新の投稿",
+      "forums": "掲示板",
+      "tags": "タグ",
+      "mine": "マイコミュニティ",
+      "following": "フォロー",
+      "bookmarks": "ブックマーク",
+      "notifications": "通知",
+      "activity": "自分のコメント",
+      "leader": "リーダー"
+    }
   },
   "settings": {
     "labels": {

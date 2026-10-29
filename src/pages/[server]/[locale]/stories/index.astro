@@ -1,0 +1,15 @@
+---
+import { staticBuildPaths } from "../../../../server/static-build";
+import HubDocument from "../../../../components/HubDocument.astro";
+import { LOCALES, type Locale } from "../../../../i18n/locales";
+import type { ReleaseServer } from "../../../../lib/release-server";
+import { staticCatalogPageServers } from "../../../../lib/entity-graph";
+import { isStoryMode, storyCollectionPath } from "../../../../lib/resource-route";
+export async function getStaticPaths() {
+  return staticBuildPaths("src/pages/[server]/[locale]/stories/index.astro", (await staticCatalogPageServers()).flatMap(server => LOCALES.map(locale => ({ params: { server, locale } }))));
+}
+const { server, locale } = Astro.params as { server: ReleaseServer; locale: Locale };
+const mode = Astro.url.searchParams.get("mode");
+if (isStoryMode(mode)) return Astro.redirect(storyCollectionPath({ server, locale, mode }), 308);
+---
+<HubDocument id="stories" locale={locale} server={server} />

@@ -3537,7 +3537,7 @@ async function serveStaticAsset(request: Request, env: Env): Promise<Response> {
         return new Response(body, { status: forums.status, statusText: forums.statusText, headers });
       }
     }
-    const entry = await tryEntry("/community/");
+    const entry = await tryEntry("/community/feeds/");
     if (entry) return entry;
   }
   if (/^\/(?:ja|en|zh-TW|zh-CN|ko)\/admin\/forums(?:\/[^/]+)?\/?$/u.test(url.pathname)) {

@@ -266,7 +266,19 @@
     "gbpArchive": "GBP 資料",
     "projectSekai": "世界計畫",
     "chatCustomizations": "聊天裝扮",
-    "arena": "激奏競技場"
+    "arena": "激奏競技場",
+    "mosaic": {
+      "recommended": "社群推薦",
+      "latest": "最新動態",
+      "forums": "討論看板",
+      "tags": "話題標籤",
+      "mine": "我的社群",
+      "following": "追蹤動態",
+      "bookmarks": "社群收藏",
+      "notifications": "社群通知",
+      "activity": "我的留言",
+      "leader": "隊長"
+    }
   },
   "settings": {
     "labels": {

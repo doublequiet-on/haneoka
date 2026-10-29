@@ -48,7 +48,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
     const community = /^\/(ja|en|zh-TW|zh-CN|ko)\/community\/(posts\/[^/]+(?:\/edit)?|users\/[^/]+|forums\/[^/]+)\/?$/u.exec(context.url.pathname);
     if (community) {
-      const target = new URL(`/${community[1]}/community/${community[2]!.startsWith("forums/") ? "forums/" : ""}`, context.url);
+      const target = new URL(`/${community[1]}/community/${community[2]!.startsWith("forums/") ? "forums/" : "feeds/"}`, context.url);
       target.search = context.url.search;
       return context.rewrite(target);
     }

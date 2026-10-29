@@ -266,7 +266,19 @@
     "gbpArchive": "GBP 资料",
     "projectSekai": "世界计划",
     "chatCustomizations": "聊天装扮",
-    "arena": "激奏竞技场"
+    "arena": "激奏竞技场",
+    "mosaic": {
+      "recommended": "社区推荐",
+      "latest": "最新动态",
+      "forums": "讨论板块",
+      "tags": "话题标签",
+      "mine": "我的社区",
+      "following": "关注动态",
+      "bookmarks": "社区收藏",
+      "notifications": "社区通知",
+      "activity": "我的评论",
+      "leader": "队长"
+    }
   },
   "settings": {
     "labels": {

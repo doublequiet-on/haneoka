@@ -266,7 +266,19 @@
     "gbpArchive": "GBP archive",
     "projectSekai": "Project Sekai",
     "chatCustomizations": "Chat customizations",
-    "arena": "Gekiso Arena"
+    "arena": "Gekiso Arena",
+    "mosaic": {
+      "recommended": "Community picks",
+      "latest": "Latest posts",
+      "forums": "Forums",
+      "tags": "Topics",
+      "mine": "My community",
+      "following": "Following",
+      "bookmarks": "Bookmarks",
+      "notifications": "Notifications",
+      "activity": "My comments",
+      "leader": "Leader"
+    }
   },
   "settings": {
     "labels": {

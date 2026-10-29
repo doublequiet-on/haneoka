@@ -1,7 +1,7 @@
 ---
 import { localePath, type Locale } from "../../i18n/locales";
 import { t } from "../../i18n/messages";
-import CatalogIndexPage from "./CatalogIndexPage.astro";
+import DestinationHub from "../DestinationHub.astro";
 import Icon from "../Icon.astro";
 import I18nText from "../I18nText.astro";
 import type { ReleaseServer } from "../../lib/release-server";
@@ -56,7 +56,9 @@ const home = await renderHome(server, locale);
 <script>
   import "../../lit/home-dashboard";
 </script>
-<CatalogIndexPage locale={locale} server={server} embedded />
+<div class="page home-explore">
+  <DestinationHub id="home" locale={locale} server={server} />
+</div>
 <footer class="home-footer">
   <p>haneoka · <I18nText keyName="home.dashboard.fanArchive" fallback="Unofficial archive and community" locale={locale} /></p>
   <nav aria-label={t(locale, "home.dashboard.legalNavigation", "Policies and project information")}>

@@ -1,0 +1,51 @@
+---
+import Icon from "./Icon.astro";
+import I18nText from "./I18nText.astro";
+import HubArtwork from "./HubArtwork.astro";
+import { homeHubTiles, hubTiles, hubEntry, type HubId } from "../config/destination-hubs";
+import { t } from "../i18n/messages";
+import { localePath, type Locale } from "../i18n/locales";
+import { resourceCollectionHref } from "../lib/resource-route";
+import type { ReleaseServer } from "../lib/release-server";
+import { destinationHubMedia } from "../server/destination-hub-data";
+import "../styles/destination-hub.css";
+const { id, locale, server = "intl" } = Astro.props as { id: HubId | "home"; locale: Locale; server?: ReleaseServer };
+const ids: HubId[] = id === "home" ? ["catalog", "stories", "tools", "games", "community"] : [id];
+const media = Object.assign({}, ...await Promise.all(ids.map(id => destinationHubMedia(id, server, locale))));
+const tiles = id === "home" ? homeHubTiles() : hubTiles(id);
+const href = (route: string) => resourceCollectionHref(route, server, locale) ?? localePath(route, locale);
+---
+<div class:list={["destination-hub", `destination-hub--${id}`]}>
+  <div class="destination-hub__mosaic">
+    {tiles.map((tile) => {
+      const entry = hubEntry(tile.route);
+      const visual = tile.visual === "icon" && media[tile.route]?.images.length ? "stamps" : tile.visual;
+      const art = <HubArtwork visual={visual} media={media[tile.route]} icon={entry.icon} limit={tile.limit} locale={locale} />;
+      const className = `destination-hub__tile destination-hub__tile--${visual} destination-hub__tile--c${tile.columns} destination-hub__tile--r${tile.rows}`;
+      return tile.related ? <div class={`${className} destination-hub__tile--compound`}>
+        {art}
+        <div class="destination-hub__related">
+          {[tile.route, ...tile.related].map(route => { const item = hubEntry(route); return <a class="button button--tonal state-layer" href={href(route)} data-hub-route={route}><Icon name={item.icon} size={22} /><I18nText keyName={item.label} locale={locale} /></a>; })}
+        </div>
+      </div> : <a class={`${className} state-layer`} href={href(tile.route)} data-hub-route={tile.route} aria-label={t(locale, entry.label)}>
+        {art}
+        <div class="destination-hub__tile-label"><h2><I18nText keyName={entry.label} locale={locale} /></h2><span class="destination-hub__open"><Icon name="arrow_forward" size={22} /></span></div>
+      </a>;
+    })}
+  </div>
+</div>
+<script>
+  import { readReleaseServer } from "../lib/release-server";
+  import { resourceCollectionHref } from "../lib/resource-route";
+  import { localeFromPath, localePath } from "../i18n/locales";
+  const updateHubLinks = () => {
+    const server = readReleaseServer();
+    const locale = localeFromPath(location.pathname) || "en";
+    for (const link of document.querySelectorAll<HTMLAnchorElement>("[data-hub-route]")) {
+      const route = link.dataset.hubRoute!;
+      link.href = resourceCollectionHref(route, server, locale) ?? localePath(route, locale);
+    }
+  };
+  updateHubLinks();
+  document.addEventListener("astro:page-load", updateHubLinks);
+</script>
