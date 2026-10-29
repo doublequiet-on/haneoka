@@ -1,0 +1,15 @@
+*
+!Dockerfile
+!requirements.txt
+!build-requirements.txt
+!cloud.py
+!core/
+core/*
+!core/cloud_job.py
+!core/lifecycle.py
+!core/official_catalog.py
+!core/regions.py
+!core/transport.py
+!core/http2.py
+!core/total-descriptors.pb
+!core/intl-descriptors.pb

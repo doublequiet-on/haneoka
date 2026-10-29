@@ -41,6 +41,7 @@ export interface SongRankingRowDto {
   favoriteMemberAwakeCount?: number | null;
   favoriteMemberRank?: number | null;
   score: number | null;
+  scoreExact?: string;
   deckId: number | null;
   deckName: string | null;
   totalPower: number | null;
@@ -50,6 +51,9 @@ export interface SongRankingRowDto {
 
 export interface GameRankingDto {
   region: GameRecordsRegion;
+  provider?: "official" | "moenotes";
+  snapshotId?: string;
+  observedAtMs?: number | null;
   fetchedAtMs: number | null;
   serverTimeMs: number | null;
   stale: boolean;
@@ -77,11 +81,15 @@ export interface TrackedEventDto {
   status: string;
   pointRankingEnabled: boolean;
   pointRankingStatus: string;
+  totalRankingEnabled?: boolean;
+  totalRankingStatus?: string;
   challenges: EventChallengeDto[];
 }
 
 export interface EventTrackerDto {
   region: GameRecordsRegion;
+  provider?: "official" | "moenotes";
+  serverTimeMs?: number | null;
   event: TrackedEventDto | null;
   fetchedAtMs: number | null;
   stale: boolean;

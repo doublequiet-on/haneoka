@@ -155,9 +155,7 @@ export class EventTracker extends LitElement {
     this.clock = window.setInterval(() => {
       if (document.visibilityState === "visible") this.now = Date.now();
     }, 1000);
-    this.poll = window.setInterval(() => {
-      if (document.visibilityState === "visible") void this.refresh();
-    }, 60_000);
+    addEventListener("online", () => { if (document.visibilityState === "visible") void this.refresh(); }, { signal: this.lifetime.signal });
     void this.load();
   }
   disconnectedCallback() {
@@ -165,7 +163,7 @@ export class EventTracker extends LitElement {
     this.lazyImages.disconnect();
     this.lifetime?.abort();
     window.clearInterval(this.clock);
-    window.clearInterval(this.poll);
+    window.clearTimeout(this.poll);
     clearAppBarActions(this.owner);
     super.disconnectedCallback();
   }
@@ -175,12 +173,19 @@ export class EventTracker extends LitElement {
   private sourceServer(): "jp" | "intl" {
     return this.region === "jp" ? "jp" : "intl";
   }
+  private schedulePoll() {
+    window.clearTimeout(this.poll);
+    if (!this.isConnected) return;
+    this.poll = window.setTimeout(() => {
+      if (document.visibilityState === "visible") void this.refresh();
+      else this.schedulePoll();
+    }, this.data?.provider === "official" ? 30_000 : 60_000);
+  }
   private async load() {
     const page = readPageData<TrackerPageData>(this);
     if (!this.pageAdopted && page?.snapshots?.[this.region]) {
       this.pageAdopted = true;
       this.preparePage(page, this.locale, this.server, this.region);
-      return;
     }
     const region = this.region;
     const signal = this.requests.begin();
@@ -199,7 +204,10 @@ export class EventTracker extends LitElement {
       if (!this.isConnected || this.region !== region || !this.requests.current(signal)) return;
       this.phase = "error";
     } finally {
-      if (this.requests.current(signal)) this.refreshing = false;
+      if (this.requests.current(signal)) {
+        this.refreshing = false;
+        this.schedulePoll();
+      }
     }
   }
   private async loadCatalog(id: string, challenges: EventChallengeDto[], signal: AbortSignal) {
@@ -274,6 +282,7 @@ export class EventTracker extends LitElement {
     if (this.refreshing) return;
     const region = this.region;
     await this.load();
+    await this.updateComplete;
     if (this.isConnected && this.region === region)
       this.querySelectorAll<SongRanking>("song-ranking").forEach((ranking) => ranking.refreshRanking());
   }
@@ -345,6 +354,8 @@ export class EventTracker extends LitElement {
     const readable = challenge?.enabled && ["collecting", "finalizing", "archived"].includes(challenge.status);
     const pointsReadable =
       event.pointRankingEnabled && !["pending", "missed", "disabled", "unknown"].includes(event.pointRankingStatus);
+    const totalReadable = event.totalRankingEnabled &&
+      ["collecting", "finalizing", "archived"].includes(event.totalRankingStatus || "");
     const marks = this.musicTypeMarks[this.sourceServer()] || new Map<string, string>();
     // A CBT edition has no public event page; its art stays a picture here.
     const eventHref = isPublicReleaseServer(this.infoServer)
@@ -484,7 +495,24 @@ export class EventTracker extends LitElement {
                 })
           }
         </section>
-        <section class="detail-section">
+        ${event.totalRankingEnabled ? html`
+          <section class="detail-section">
+            ${renderDetailSectionHeading(this.label("totalRanking", "Total song ranking"), "works")}
+            ${totalReadable ? html`
+              <song-ranking
+                embedded
+                summary
+                .locale=${this.locale}
+                .server=${this.sourceServer()}
+                .region=${this.region}
+                .rankingTitle=${this.label("totalRanking", "Total song ranking")}
+                .rankingEndpoint=${`/api/v1/game/records/${this.region}/events/${event.id}/total/latest`}
+                .cardCatalogData=${this.cards}
+              ></song-ranking>
+            ` : emptyState({ title: this.label("pending", "Ranking data is being collected."), icon: "hourglass_top" })}
+          </section>
+        ` : nothing}
+        ${this.data.provider !== "official" || event.pointRankingEnabled ? html`<section class="detail-section">
           ${renderDetailSectionHeading(this.label("pointRanking", "Event point ranking"), "works")}
           ${
             pointsReadable
@@ -508,7 +536,7 @@ export class EventTracker extends LitElement {
                   icon: "leaderboard",
                 })
           }
-        </section>
+        </section>` : nothing}
       </div>
     `;
   }

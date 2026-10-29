@@ -83,16 +83,17 @@ function containerInputIdentity(container, revision) {
   if (config.error) throw new Error("Invalid container source configuration");
   const pinned = config.config.containers?.find((entry) => entry.class_name === container.class_name);
   if (!pinned?.image?.startsWith(".")) throw new Error("Container source must have a pinned Dockerfile");
-  if (path.resolve(root, pinned.image_build_context || path.dirname(pinned.image)) !== root)
-    throw new Error("Container context needs a full publication");
+  const context = path.relative(root, path.resolve(root, pinned.image_build_context || path.dirname(pinned.image)));
+  if (context === ".." || context.startsWith(`..${path.sep}`) || path.isAbsolute(context))
+    throw new Error("Container context must be inside the repository");
   const dockerfile = path.relative(root, path.resolve(root, pinned.image));
   const text = git("show", `${revision}:${dockerfile}`);
-  const inputPaths = [dockerfile, ".dockerignore"];
+  const inputPaths = [dockerfile, path.join(context, ".dockerignore"), `${dockerfile}.dockerignore`];
   for (const match of text.matchAll(/^\s*(?:COPY|ADD)\s+(.+)$/gmu)) {
     const sources = match[1].trim().split(/\s+/u).slice(0, -1);
     if (!sources.length || sources.some((source) => !/^[a-zA-Z0-9._/-]+$/u.test(source) || source.includes("..")))
       throw new Error("Container context needs a full publication");
-    inputPaths.push(...sources);
+    inputPaths.push(...sources.map((source) => path.join(context, source)));
   }
   return digest(
     JSON.stringify({ configuration: pinned, tree: git("ls-tree", "-r", "-z", revision, "--", ...inputPaths) }),

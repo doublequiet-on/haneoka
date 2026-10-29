@@ -28,14 +28,24 @@
 
 当前状态stale阈值为10分钟；状态接口的最后成功时间是全局最新值，**不能代替某一榜单自己的observedAtMs/stale**。collectorStatus是最后持久状态，不是操作系统存活证明；停止更新时仍须按age判断。全部接口Cache-Control:no-store；Host只接受当前端口的127.0.0.1或localhost，存在Origin时也只接受本机HTTP来源，其余返回403。404表示尚无该成功观测，400表示查询参数错误，存储损坏或读取失败返回500。数据损坏不能将空榜视为成功。
 
-## 网站接入方案（尚未实施或部署）
+## 云端任务与网站接入
 
-1. 用户打开页面或切换活动立即读取当前活动及所选榜单。页面可见时每15秒轮询；隐藏时暂停，重新可见/网络恢复时立即刷新。请求串行，失败退避，避免重叠请求；切换活动取消旧请求并核对eventId/challengeId，旧响应不得覆盖新页面。
+云端模式在独立 Cloudflare Container 中运行 `cloud.py`，入口为带服务令牌的 `POST /collect`。共享任务合同见 `src/lib/official-ranking.ts`：`haneoka:official-ranking-job/1` 提供固定区服、runId、凭据代际、客户端版本、私有配置、截止时间与单次回调令牌。每轮最长约120秒，`GET /health` 仅供就绪检查。
+
+云端不写本地 SQLite 历史。`haneoka:official-ranking-update/1` 回调依次提交 `catalog`、`attempt`、`observation`、`complete`；每个 `attempt` 在发送认证请求前等待持久确认，每个观测在继续下一请求前等待持久确认。回调失败中断任务，HTTP/gRPC 认证拒绝和限流立即停止后续请求。Worker 依据 snapshotId 幂等保存观测，以原 received_at 生成 observedAtMs，官方玩家结构保留 snake_case 及 int64 字符串，归一化由网站适配层负责。
+
+区域 Durable Object 持久保存调度、当前凭据代际、在途检查点与暂停/冷却；D1 保存历史索引，私有 R2 保存不可变正文。容器临时目录及完成任务缓存只用于本轮执行，不是恢复或读接口的依据。Worker 重新读取同一观测不会修改时间或生成新游标。
+
+云端沿用上表 v2 路径，公开格式使用网站 DTO：`events/current` 返回 `EventTrackerDto`，榜单 `latest` 返回 `EventRankingDto`，包含 `provider=official`、`snapshotId`、`observedAtMs`、`serverTimeMs` 和归一化 `rows`；`history?after=` 返回独立数字游标、成功观测的 `ranking` 或失败元数据。原始 `players` 和协议扩展字段只保存在私有 R2，不直接公开。localhost API 继续返回原始 `haneoka:ranking-observation/2`，两者不共享正文合同。云端 `status` 附逐榜最后尝试、最后成功、连续失败和开放缺口，不能用全局成功代替逐榜健康。
+
+网站 v1 根据区服来源开关适配，单曲保持 `/events/{id}/challenges/{challenge}/ranking`，官方总榜使用 `/events/{id}/total/latest`。旧 `/events/{id}/latest` 始终表示 PT，旧 SHA 历史继续独立读取。
+
+1. 用户打开页面或切换活动立即读取当前活动及所选榜单。官方来源在页面可见时每30秒轮询，原来源每60秒；隐藏时暂停，重新可见/网络恢复时立即刷新。请求串行；切换活动取消旧请求并核对eventId/challengeId，旧响应不得覆盖新页面。
 2. 用snapshotId判断是否有新观测，用observedAtMs显示数据时间，用serverTimeMs计算年龄而不是相信用户设备时钟。HTTP成功但snapshotId未变时，不能刷新“数据更新时间”。接口失败保留最后成功数据及其原时间，显示过期状态。
 3. 当前多榜分别采集，并非同一时刻快照；页面不得把五榜拼接成“官方同时刻”。总榜必须读取官方total结果，不能自行相加四曲Top100。
-4. 单次成功提交对读取可见后，15秒轮询会在下一次轮询拿到；300秒采样下的正常数据滞后目标约为300秒+本轮请求耗时+15秒。网络失败、游戏自身聚合延迟与浏览器暂停没有有限时延保证，必须标记陈旧。要更低延迟，需另行验证采样频率和限流，不能让每个访客直连游戏。
-5. localhost接口只供本机验证。公网网站不能读取操作者电脑的127.0.0.1。未来需要独立常驻采集服务及HTTPS只读API，或将快照推送到获授权的数据入口。用户没有Haneoka服务器管理权限，不假设可修改其反代/数据库；先用独立API域名，需要网站维护者批准CORS/CSP和页面接入。游戏凭据与CDN配置永不进入浏览器。
-6. 新版本上线时应保持v1与v2分开：原Haneoka网页v1仍使用Moenotes，新本地v2不是自动替代。Taki旧入口也未切换。迁移需明确客户端、数据来源、游标、历史保留、缓存及回滚，不能只改URL。
+4. 单次成功提交对读取可见后，30秒轮询会在下一次轮询拿到；300秒采样下的正常数据滞后约为300秒+本轮请求耗时+30秒。失败保留原数据及其过期状态，采样频率需遵守上游限流，访客不直连游戏。
+5. localhost接口只供本机验证。云端通过同域 Worker 提供已采集数据，游戏凭据与CDN配置只留在受控采集服务，不进入浏览器。采集和网站读取开关分别按区服设置，配置方式见README的云端模式。
+6. v1与v2保持各自合同及历史游标：网站适配器按区服切换，旧Moenotes历史保留来源，不改标为官方自采；官方四曲总榜使用独立total路径。Taki旧入口独立维护。切回原来源不删除已采集的官方历史。
 
 ## 验收界限
 

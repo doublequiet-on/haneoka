@@ -155,6 +155,7 @@
     text-align: end;
     min-width: 0;
     font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
   }
   .song-ranking__score strong {
     font: var(--md-sys-typescale-title-medium-weight)
@@ -363,12 +364,12 @@
   }
   @container (max-width:760px) {
     .song-ranking__row {
-      grid-template-columns: 24px 68px 32px minmax(0, 1fr) 80px;
+      grid-template-columns: 24px 68px 32px minmax(0, 1fr) 96px;
       gap: 8px;
       padding: 10px 12px;
     }
     .song-ranking__row.song-ranking__row--points {
-      grid-template-columns: 24px 68px 32px minmax(0, 1fr) 80px;
+      grid-template-columns: 24px 68px 32px minmax(0, 1fr) 96px;
     }
     .song-ranking__avatar {
       width: 32px;
@@ -394,12 +395,12 @@
 @layer pages {
   @container (max-width:360px) {
     .song-ranking__row {
-      grid-template-columns: 16px 48px 28px minmax(0, 1fr) 70px;
+      grid-template-columns: 16px 48px 28px minmax(0, 1fr) 96px;
       gap: 4px;
       padding-inline: 8px;
     }
     .song-ranking__row.song-ranking__row--points {
-      grid-template-columns: 16px 48px 28px minmax(0, 1fr) 70px;
+      grid-template-columns: 16px 48px 28px minmax(0, 1fr) 96px;
     }
     .song-ranking__avatar {
       width: 28px;

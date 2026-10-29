@@ -25,6 +25,9 @@ import { handleCommunityMediaQueue, reconcileCommunityMedia } from "./community-
 import { version } from "@sonolus/core";
 import { sonolusShareRedirectTarget } from "./sonolus-share";
 export { CommunityMediaContainer } from "./community-media-container";
+export { OfficialRankingCollector } from "./official-ranking-collector";
+import { OFFICIAL_RANKING_REGIONS, officialRegionEnabled } from "./official-ranking-collector";
+import { handleOfficialRankingApi, officialRankingStatus } from "./official-ranking-api";
 import { handleAdminRequest } from "./admin";
 import { applySiteSettings, readSiteSettings, testContentAllowed, isPublicResourceServer, restrictedResourceRequest, privateResourceResponse } from "./site-settings";
 import { serveStaticDocument, staticDocumentRedirect, staticPublicationContext } from "./static-documents";
@@ -3782,6 +3785,20 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
 async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  const officialCallback = /^\/api\/internal\/official-rankings\/(jp|tw|en|kr)\/([a-f0-9]{32})$/u.exec(url.pathname);
+  if (officialCallback) {
+    if (request.method !== "POST" || url.search) return new Response(null, { status: 405, headers: { "Cache-Control": "no-store", Allow: "POST" } });
+    const region = officialCallback[1] as "jp" | "tw" | "en" | "kr";
+    return env.OFFICIAL_RANKING_COLLECTOR.getByName(region).callback(request, region, officialCallback[2]!);
+  }
+  const officialStatus = /^\/api\/v2\/game\/records\/(jp|tw|en|kr)\/status$/u.exec(url.pathname);
+  if (officialStatus && (request.method === "GET" || request.method === "HEAD")) {
+    const region = officialStatus[1] as "jp" | "tw" | "en" | "kr";
+    const status = await officialRankingStatus(env, region, await env.OFFICIAL_RANKING_COLLECTOR.getByName(region).status(region));
+    return new Response(request.method === "HEAD" ? null : JSON.stringify(status), { headers: {
+      "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Access-Control-Allow-Origin": "*",
+    } });
+  }
   const legacyChart = legacyCommunityChartRedirectTarget(url.pathname, url.search);
   if (legacyChart && (request.method === "GET" || request.method === "HEAD"))
     return new Response(null, { status: 308, headers: { Location: legacyChart, "Cache-Control": "public, max-age=86400" } });
@@ -3964,6 +3981,8 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
   if (publicGame) return publicGame;
   const gamePlatform = await handleGamePlatform(request, env);
   if (gamePlatform) return gamePlatform;
+  const officialRecords = await handleOfficialRankingApi(request, url, env);
+  if (officialRecords) return officialRecords;
   const gameRecords = await handleGameRecordsApi(ctx, request, url, env);
   if (gameRecords) return gameRecords;
   const bestdori = await handleGarupaBestdoriApi(ctx, request, url, env.BESTDORI_UPSTREAM_BASE);
@@ -4134,6 +4153,7 @@ const worker: ExportedHandler<Env> = {
             request.method !== "OPTIONS" &&
             response.status < 400 &&
             !/\/(?:image\.png|images\.zip)$/u.test(new URL(request.url).pathname) &&
+            !new URL(request.url).pathname.startsWith("/api/internal/official-rankings/") &&
             new URL(request.url).pathname.startsWith("/api/")
           )
             ctx.waitUntil(markCommunityMutation(request.url));
@@ -4146,6 +4166,15 @@ const worker: ExportedHandler<Env> = {
   },
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!env.DB) return;
+    if (controller.cron === MEDIA_RECONCILIATION_CRON) {
+      ctx.waitUntil(Promise.all(OFFICIAL_RANKING_REGIONS.map(async (region) => {
+        if (officialRegionEnabled(env.OFFICIAL_RANKING_ENABLED_REGIONS, region)) {
+          await env.OFFICIAL_RANKING_COLLECTOR.getByName(region).ensureScheduled(region);
+        }
+      })).then(() => undefined).catch((error: unknown) => {
+        console.warn(JSON.stringify({ event: "official_ranking_watchdog_failed", error: error instanceof Error ? error.name : "Error" }));
+      }));
+    }
     const scheduledTask: readonly [string, () => Promise<void>] | null =
       controller.cron === EVENT_RANKING_HISTORY_CRON
         ? [

@@ -30,6 +30,8 @@ type Phase = "idle" | "loading" | "ready" | "error";
 type RankingEntry = SongRankingRowDto;
 interface RankingCache {
   rows: RankingEntry[];
+  snapshotId?: string;
+  provider?: "official" | "moenotes";
   storedAt: number;
   reportedAt: number;
   stale: boolean;
@@ -46,6 +48,7 @@ export class SongRanking extends GameRecordsCardsElement {
     rankingEndpoint: { type: String, attribute: "ranking-endpoint" },
     embedded: { type: Boolean },
     points: { type: Boolean },
+    summary: { type: Boolean },
     rankingTitle: { type: String, attribute: "ranking-title" },
     cardCatalogData: { attribute: false },
     region: { state: true },
@@ -61,6 +64,7 @@ export class SongRanking extends GameRecordsCardsElement {
   declare rankingEndpoint: string;
   declare embedded: boolean;
   declare points: boolean;
+  declare summary: boolean;
   declare rankingTitle: string;
   declare cardCatalogData: Partial<Record<"jp" | "intl", RankingCardCatalog>> | undefined;
   declare region: Region;
@@ -85,6 +89,7 @@ export class SongRanking extends GameRecordsCardsElement {
     this.rankingEndpoint = "";
     this.embedded = false;
     this.points = false;
+    this.summary = false;
     this.rankingTitle = "";
     this.region = "tw";
     this.phase = "idle";
@@ -194,9 +199,11 @@ export class SongRanking extends GameRecordsCardsElement {
       });
       if (!this.currentRanking(signal, region, endpoint)) return;
       const entry = {
-        rows: value.rows.slice(0, 100),
+        rows: value.snapshotId && value.snapshotId === cached?.snapshotId ? cached.rows : value.rows.slice(0, 100),
+        snapshotId: value.snapshotId,
+        provider: value.provider,
         storedAt: Date.now(),
-        reportedAt: value.fetchedAtMs ?? 0,
+        reportedAt: value.observedAtMs ?? value.fetchedAtMs ?? 0,
         stale: value.stale,
       };
       this.cache.set(endpoint, entry);
@@ -276,6 +283,7 @@ export class SongRanking extends GameRecordsCardsElement {
       .filter(Boolean)
       .join(" · ");
     const level = this.levelFromExp(this.sourceCatalog()?.playerLevels, entry.rankExp);
+    const score = entry.scoreExact ? BigInt(entry.scoreExact).toLocaleString(this.locale) : this.formatScore(entry.score);
     const identity = html`
       <strong>${name}</strong>
       <small class="song-ranking__player-stats">
@@ -297,7 +305,7 @@ export class SongRanking extends GameRecordsCardsElement {
     `;
     return html`
       <li class="song-ranking__entry">
-        <div class=${`song-ranking__row${this.points ? " song-ranking__row--points" : ""}`}>
+        <div class=${`song-ranking__row${this.points || this.summary ? " song-ranking__row--points" : ""}`}>
           <span class="song-ranking__rank" aria-label=${`${this.label("rank", "Rank")} ${entry.rank}`}>
             ${entry.rank}
           </span>
@@ -350,9 +358,9 @@ export class SongRanking extends GameRecordsCardsElement {
           }
           <span
             class="song-ranking__score"
-            aria-label=${`${this.points ? this.label("points", "Points") : this.label("score", "Score")} ${this.formatScore(entry.score)}`}
+            aria-label=${`${this.points ? this.label("points", "Points") : this.label("score", "Score")} ${score}`}
           >
-            <strong>${this.formatScore(entry.score)}</strong>
+            <strong>${score}</strong>
             ${
               entry.tied
                 ? html`
@@ -362,7 +370,7 @@ export class SongRanking extends GameRecordsCardsElement {
             }
           </span>
           ${
-            this.points
+            this.points || this.summary
               ? nothing
               : html`
                   <span class="song-ranking__deck-preview" aria-label=${this.label("cards", "Cards")}>
@@ -402,7 +410,7 @@ export class SongRanking extends GameRecordsCardsElement {
         ${rows.map(
           () => html`
             <li class="song-ranking__entry" aria-hidden="true">
-              <div class=${`song-ranking__row${this.points ? " song-ranking__row--points" : ""}`}>
+              <div class=${`song-ranking__row${this.points || this.summary ? " song-ranking__row--points" : ""}`}>
                 <span class="song-ranking__rank"><span class="skeleton-line">00</span></span>
                 <span class="song-ranking__namecard song-ranking__namecard--empty"></span>
                 <span class="song-ranking__avatar"><span class="song-ranking__initial"></span></span>
@@ -412,7 +420,7 @@ export class SongRanking extends GameRecordsCardsElement {
                 </span>
                 <span class="song-ranking__score"><strong><span class="skeleton-line">00,000,000</span></strong></span>
                 ${
-                  this.points
+                  this.points || this.summary
                     ? nothing
                     : html`
                         <span class="song-ranking__deck-preview">
@@ -460,14 +468,16 @@ export class SongRanking extends GameRecordsCardsElement {
             cached && cached.reportedAt > 0
               ? html`
                   <p class="song-ranking__fetched" role="status">
-                    ${this.stale ? this.label("stale", "Showing cached results") : this.label("updated", "Updated")}${this.formatTime(this.region) ? ` · ${this.formatTime(this.region)}` : ""}
+                    ${this.stale ? this.label("stale", "Showing cached results") : cached.provider === "official" ? this.label("observed", "Collected") : this.label("updated", "Updated")}${this.formatTime(this.region) ? ` ${this.formatTime(this.region)}` : ""}
                   </p>
                 `
               : this.phase === "loading" && !this.rows.length
                 ? html`<p class="song-ranking__fetched" aria-hidden="true"><span class="skeleton-line">${this.label("updated", "Updated")} · 00/00/0000, 00:00:00</span></p>`
                 : nothing
           }
-          ${this.embedded ? nothing : moenotesBrand()}
+          ${cached?.provider === "official"
+            ? html`<span class="song-ranking__fetched">${this.label("officialSource", "Official game rankings")}</span>`
+            : this.embedded ? nothing : moenotesBrand()}
         </div>
         ${
           this.phase === "error" && !this.rows.length
@@ -483,18 +493,6 @@ export class SongRanking extends GameRecordsCardsElement {
                     icon: "leaderboard",
                   })
                 : html`
-                    ${
-                      this.phase === "error"
-                        ? html`
-                            <div class="song-ranking__notice song-ranking__notice--error" role="alert">
-                              <span>${failureText}</span>
-                              <button class="button button--text" type="button" @click=${() => this.refresh()}>
-                                ${this.label("retry", "Retry")}
-                              </button>
-                            </div>
-                          `
-                        : nothing
-                    }
                     <ol
                       class="song-ranking__list"
                       aria-label=${this.rankingTitle || this.label("title", "Song ranking")}

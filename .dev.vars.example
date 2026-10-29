@@ -27,3 +27,10 @@ TURNSTILE_ALLOWED_HOSTNAMES=localhost,127.0.0.1
 MOENOTES_OPEN_API_TOKEN=
 TOOLS_SERVICE_URL=
 TOOLS_SERVICE_TOKEN=
+
+# Per-region official collector configuration; populate as Worker secrets.
+# JSON: {"clientVersion":"1.1.0","credentials":{...},"masterConfig":{...}}
+OFFICIAL_RANKING_JP_CONFIG=
+OFFICIAL_RANKING_TW_CONFIG=
+OFFICIAL_RANKING_EN_CONFIG=
+OFFICIAL_RANKING_KR_CONFIG=

@@ -68,6 +68,12 @@
   ],
   "excluded_policy": "External repositories, preserved vendor code and generated Worker binding types are owned by their source or generator; do not add GEB headers.",
   "core_files": [
+    "server/ranking-collector-official/cloud.py",
+    "server/ranking-collector-official/core/cloud_job.py",
+    "src/lib/official-ranking.ts",
+    "worker/official-ranking-api.ts",
+    "worker/official-ranking-collector.ts",
+    "worker/official-ranking-store.ts",
     "src/lib/card-growth.ts",
     "src/lib/card-growth-data.ts",
     "src/lib/growth-comparison.ts",

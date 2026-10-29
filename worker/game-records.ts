@@ -10,6 +10,7 @@ const MAX_CARD_IMAGE_BYTES = 8 * 1024 * 1024;
 const CARD_DOWNLOAD_TIMEOUT_MS = 12_000;
 
 import { cachedEventHistory, latestEventHistory, readEventHistory, saveEventHistory } from "./game-event-history";
+import { officialRankingReadEnabled } from "./official-ranking-api";
 
 import { eventSnapshotRows, type EventHistoryInput } from "../src/lib/game-event-history";
 
@@ -29,6 +30,7 @@ type CacheableJson = { body: string };
 export interface GameRecordsBindings {
   MOENOTES_PROFILE_API_TOKEN?: string;
   DB?: D1Database;
+  OFFICIAL_RANKING_READ_REGIONS?: string;
 }
 type FailureKind = "invalid_request" | "not_found" | "pending" | "timeout" | "upstream" | "stale_version";
 
@@ -476,7 +478,7 @@ export async function collectEventRankingHistory(
 ): Promise<void> {
   const db = env.DB;
   if (!db) return;
-  const pending = [...catalogs];
+  const pending = catalogs.filter((catalog) => !officialRankingReadEnabled(env, catalog.region));
   async function drain() {
     for (let catalog; (catalog = pending.shift());) {
       const { region } = catalog;

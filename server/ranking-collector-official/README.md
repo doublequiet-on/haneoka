@@ -1,6 +1,39 @@
 # 独立四服榜单采集器
 
-采集器支持 `jp`、`tw`、`en`、`kr`，每个运行目录固定一个分区，从官方 Version 与官方 CDN 的 MasterEvent、MasterChallengeMusic、MasterParameter 生成活动目录，再读取官方单曲榜和总榜，保存 SQLite 历史。HTTP/2、TLS、进程锁和安装入口均由 Python 实现，支持 Windows、Linux 和 macOS，不依赖 PowerShell。工具与网站、生产 Worker 及 Taki 的现有数据源分别运行。
+采集器支持 `jp`、`tw`、`en`、`kr`，从官方 Version 与官方 CDN 的 MasterEvent、MasterChallengeMusic、MasterParameter 生成活动目录，再读取官方单曲榜和总榜。本地模式使用固定分区运行目录与 SQLite 历史；云端模式由区域 Durable Object 调度独立 Cloudflare Container，并通过 Worker 保存云端历史。HTTP/2、TLS、进程锁和安装入口均由 Python 实现，支持 Windows、Linux 和 macOS，不依赖 PowerShell。Taki 数据源独立维护。
+
+## Cloudflare 云端模式
+
+云端入口是 `cloud.py`，镜像定义为本目录的 `Dockerfile`，构建上下文也为本目录。镜像只复制代码、协议描述和固定依赖，使用非 root 用户运行；运行时不需要 Linux 常驻主机或本机读取 API。默认不启用任何区服，生产切换由两个独立配置控制：
+
+- `OFFICIAL_RANKING_ENABLED_REGIONS`：实际采集区服，逗号分隔，例如 `jp,tw`。
+- `OFFICIAL_RANKING_READ_REGIONS`：网站读取官方自采的区服，逗号分隔。先完成采集验收，再逐服启用读取；移除区服可切回原网站来源，保留自采历史。
+
+每服设置一个 Worker secret：`OFFICIAL_RANKING_JP_CONFIG`、`OFFICIAL_RANKING_TW_CONFIG`、`OFFICIAL_RANKING_EN_CONFIG`、`OFFICIAL_RANKING_KR_CONFIG`。secret 的 JSON 结构为：
+
+```json
+{
+  "clientVersion": "1.1.0",
+  "credentials": { "region": "jp", "origin": "https://api.bang-dream-on.jp", "credentials": {} },
+  "masterConfig": {}
+}
+```
+
+`credentials` 使用本地模式的完整凭据文档；`masterConfig` 使用下文的同服 Master 配置。两者的真实值仅通过 secret 管理入口提供，不写入 `vars`、镜像或仓库。繁中 `credentials.region` 使用 `hk`，网站及调度仍使用 `tw`。缺少配置的区服不发出游戏请求。
+
+单次任务最多约两分钟，每榜请求前先持久确认 `attempt` 检查点，响应后提交独立观测；Worker 确认落库后才请求下一榜。HTTP 401/403、gRPC 7/16 持久暂停当前凭据代际；HTTP 429、gRPC 8 保存冷却期限。回调网络失败使用同一载荷最多重试三次，仍未确认则中止本轮，不重发游戏请求。容器在已确认请求检查点、尚未确认观测时中断，会保留 `auth_uncertain` 暂停状态，更新真实凭据代际后恢复；重启不能清除暂停。
+
+容器通过区域 Durable Object 的随机服务令牌接收 `/collect`，每次任务使用另一个随机令牌回调 `/api/internal/official-rankings/{region}/{runId}`。`OFFICIAL_CALLBACK_ORIGIN` 由 Worker 配置，生产值为 `https://haneoka.org`；回调拒绝重定向、其他主机及路径。`/health` 只返回就绪状态，不返回配置。私有配置和协议回执写入本轮权限受限的临时目录，任务退出后删除。
+
+读取接口为同域 `/api/v2/game/records/{region}`，目录、最新榜单、历史和状态路径见 [INTERFACES.md](INTERFACES.md)。GET 只读已保存的数据，不触发游戏请求，也不刷新观测时间。容器重启后的进度及历史来自 Durable Object、D1 和私有 R2，不依赖容器文件系统。
+
+容器可在安装了 Docker 的环境构建：
+
+```sh
+docker build -t haneoka-official-ranking:local server/ranking-collector-official
+```
+
+该命令从仓库根目录运行，只构建镜像，不配置凭据或启用生产采集。
 
 ## 环境与配置
 
