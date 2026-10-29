@@ -39,13 +39,13 @@ def install(python):
     environment=ROOT/'.venv'
     if environment.is_symlink() or environment.is_junction():
         raise ValueError('Refuse a linked virtual environment')
-    if Path(sys.prefix).resolve()==environment.resolve():
+    if environment.exists() and environment.samefile(sys.prefix):
         raise ValueError('Run setup with Python outside the tool virtual environment')
     probe=subprocess.run([python,'-c',"import json,sys;print(json.dumps(dict(version=list(sys.version_info[:3]),prefix=sys.prefix)))"],
                          check=True,capture_output=True,text=True)
     selected=json.loads(probe.stdout)
     if tuple(selected['version'])<(3,12):raise ValueError('Python 3.12 or newer required')
-    if Path(selected['prefix']).resolve()==environment.resolve():
+    if environment.exists() and environment.samefile(selected['prefix']):
         raise ValueError('Select Python outside the tool virtual environment')
     subprocess.run([python,'-m','venv','--clear',str(environment)],check=True)
     interpreter=executable(ROOT/'.venv'/('Scripts/python.exe' if os.name=='nt' else 'bin/python'))
