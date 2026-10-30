@@ -342,10 +342,12 @@ export class OfficialRankingCollector extends Container<Env> {
         if (!known) return { kind: "unavailable", retryAfter: null };
         if (thresholds.some((value) => value !== 0 && !known.includes(value))) return { kind: "invalid_request", retryAfter: null };
       }
+      const queue = (state.arenaInterests ?? []).filter((entry) => now - entry.requestedAtMs < ARENA_INTEREST_TTL_MS);
+      if (starts.length && starts.every((start) => queue.some((entry) => entry.seasonId === seasonId
+        && entry.bandId === bandId && entry.startRank === start))) return { kind: "pending", retryAfter: 30 };
       const metadata = starts.length ? await readOfficialArenaMetadata(this.env, region, seasonId, bandId) : null;
       if (starts.some((start) => start > 1 && (metadata?.maxRank == null || start > metadata.maxRank)))
         return { kind: "unavailable", retryAfter: null };
-      const queue = (state.arenaInterests ?? []).filter((entry) => now - entry.requestedAtMs < ARENA_INTEREST_TTL_MS);
       const missing = [...new Set(starts)].filter((start) => !queue.some((entry) => entry.seasonId === seasonId && entry.bandId === bandId && entry.startRank === start));
       if (queue.length + missing.length > 24) return { kind: "queue_full", retryAfter: null };
       for (const startRank of missing) queue.push({ seasonId, bandId, startRank, endRank: startRank + 99, requestedAtMs: now });
