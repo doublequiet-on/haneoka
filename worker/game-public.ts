@@ -8,6 +8,7 @@ export const PUBLIC_GAME_PATHS = [
   { path: "/api/v1/events/views/current", source: "events/current" },
   { path: "/api/v1/events/{eventId}/snapshots", source: "events/{eventId}" },
   { path: "/api/v1/events/{eventId}/snapshots/latest", source: "events/{eventId}/latest" },
+  { path: "/api/v1/events/{eventId}/challenge-total-ranking", source: "events/{eventId}/challenge-total-ranking" },
   { path: "/api/v1/events/{eventId}/challenges", source: "events/{eventId}/challenges" },
   { path: "/api/v1/events/{eventId}/challenges/{challengeId}/ranking", source: "events/{eventId}/challenges/{challengeId}/ranking" },
   { path: "/api/v1/announcements/{announcementId}/revisions", source: "announcements/{announcementId}/revisions" },
@@ -31,7 +32,7 @@ export async function handlePublicGameApi(request: Request): Promise<Response | 
   const captures = entry.pattern.exec(url.pathname)!;
   const sourcePath = entry.source.replace(/\{[^}]+\}/gu, () => captures[index++]!);
   const headers = new Headers({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Accept, If-None-Match",
-    "Access-Control-Expose-Headers": "ETag, Retry-After, X-Fetched-At, X-Server-Time, X-Stale, X-Refreshing, X-Revision, X-Listed, X-Final-Quality, X-Collect-Status, X-Request-Id",
+    "Access-Control-Expose-Headers": "ETag, Retry-After, X-Fetched-At, X-Server-Time, X-Stale, X-Refreshing, X-Revision, X-Listed, X-Final-Quality, X-Collect-Status, X-Position-Source, X-Request-Id",
     "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
   const fail = (status: number, code: string) => {
     const requestId = crypto.randomUUID();
@@ -50,7 +51,7 @@ export async function handlePublicGameApi(request: Request): Promise<Response | 
     const upstream = await fetch(target, { redirect: "manual", signal: AbortSignal.any([request.signal, AbortSignal.timeout(15000)]),
       headers: { Accept: request.headers.get("Accept") || "application/json", ...(request.headers.has("If-None-Match") ? { "If-None-Match": request.headers.get("If-None-Match")! } : {}) } });
     if (upstream.status >= 300 && upstream.status < 400 && upstream.status !== 304) { await upstream.body?.cancel(); return fail(502, "data_unavailable"); }
-    for (const name of ["Content-Type", "ETag", "Retry-After", "X-Fetched-At", "X-Server-Time", "X-Stale", "X-Refreshing", "X-Revision", "X-Listed", "X-Final-Quality", "X-Collect-Status"]) {
+    for (const name of ["Content-Type", "ETag", "Retry-After", "X-Fetched-At", "X-Server-Time", "X-Stale", "X-Refreshing", "X-Revision", "X-Listed", "X-Final-Quality", "X-Collect-Status", "X-Position-Source"]) {
       const value = upstream.headers.get(name); if (value) headers.set(name, value);
     }
     if (!upstream.ok && upstream.status !== 304) { await upstream.body?.cancel(); if (canFallback && ([401, 403, 404].includes(upstream.status) || upstream.status >= 500)) return null; return fail(upstream.status, upstream.status === 404 ? "not_found" : upstream.status === 400 ? "invalid_request" : upstream.status === 429 ? "rate_limit_exceeded" : "data_unavailable"); }

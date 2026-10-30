@@ -17,7 +17,7 @@ export function validPlayerProfileId(region: GameRecordsRegion, value: string): 
 export function playerProfileRankingEndpoint(value: string | null, region: GameRecordsRegion): string | null {
   return value &&
     new RegExp(
-      `^/api/v1/game/records/${region}/(?:songs/[1-9][0-9]*/ranking|events/[1-9][0-9]*/(?:latest|challenges/[1-9][0-9]*/ranking))$`,
+      `^/api/v1/game/records/${region}/(?:songs/[1-9][0-9]*/ranking|events/[1-9][0-9]*/(?:latest|total/latest|challenges/[1-9][0-9]*/ranking))$`,
       "u",
     ).test(value)
     ? value
