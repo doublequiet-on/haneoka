@@ -7,8 +7,8 @@ import { Container } from "@cloudflare/containers";
 import type { GameRecordsRegion } from "../src/lib/game-records";
 import { OFFICIAL_API_ORIGINS as REGION_ORIGINS, parseOfficialCollectorConfiguration, selectOfficialCollectorAccount,
   type OfficialCollectorAccount, type OfficialCollectorAccountHealth, type OfficialCollectorPool,
-  type OfficialArenaObservation, type OfficialCatalog, type OfficialCollectorFailure, type OfficialCollectorJob, type OfficialCollectorUpdate, type OfficialObservation } from "../src/lib/official-ranking";
-import { officialDigest, saveOfficialArenaObservation, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
+  type OfficialArenaObservation, type OfficialArenaPopulationObservation, type OfficialArenaProgress, type OfficialCatalog, type OfficialCollectorFailure, type OfficialCollectorJob, type OfficialCollectorUpdate, type OfficialObservation } from "../src/lib/official-ranking";
+import { officialDigest, readOfficialArenaMetadata, saveOfficialArenaObservation, saveOfficialArenaPopulation, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
 
 export const OFFICIAL_RANKING_REGIONS = ["jp", "tw", "en", "kr"] as const;
 export type OfficialCollectorConfigurationBindings = Partial<Pick<Env,
@@ -16,6 +16,9 @@ export type OfficialCollectorConfigurationBindings = Partial<Pick<Env,
 >> & { OFFICIAL_RANKING_ENABLED_REGIONS?: string };
 const INTERVAL_MS = 300_000;
 const JOB_MS = 120_000;
+const ARENA_DEMAND_INTERVAL_MS = 60_000;
+const ARENA_INTEREST_TTL_MS = 3_600_000;
+type ArenaInterest = NonNullable<OfficialCollectorJob["arenaWindows"]>[number] & { requestedAtMs: number };
 const MAX_UPDATE_BYTES = 8 * 1024 * 1024;
 const CALLBACK_ORIGIN = "https://haneoka.org";
 
@@ -49,6 +52,11 @@ interface CollectorState {
   legacyPermissionBlock?: string | null;
   lastFailure?: OfficialCollectorFailure | null;
   run: CollectorRun | null;
+  arenaProgress?: Record<string, OfficialArenaProgress>;
+  arenaCatalog?: OfficialCatalog["arena"];
+  arenaInterests?: ArenaInterest[];
+  arenaPopulationAt?: Record<string, number>;
+  arenaWarmupRuns?: number;
 }
 
 export function officialRegionEnabled(value: string | undefined, region: GameRecordsRegion): boolean {
@@ -87,7 +95,9 @@ function permissionRejected(value: { httpStatus?: number | null; grpcStatus?: st
 function validateFailure(value: unknown): asserts value is OfficialCollectorFailure {
   const failure = object(value);
   if (!["container", "catalog", "catalog_version", "catalog_server_list", "catalog_manifest", "catalog_event", "catalog_challenges", "catalog_parameters",
-    "catalog_callback", "version", "board", "attempt_callback", "observation_callback", "complete_callback"].includes(String(failure.stage))
+    "catalog_callback", "version", "board", "attempt_callback", "observation_callback", "complete_callback",
+    "arena_board", "arena_observation_callback", "arena_population_callback", "arena_progress_callback",
+    "catalog_arena_season", "catalog_arena_league", "catalog_arena_rank"].includes(String(failure.stage))
     || !["Error", "TimeoutError", "SSLError", "SSLCertVerificationError", "OSError", "URLError", "gaierror", "ValueError", "RuntimeError", "VersionError",
       "CatalogRequestError", "CallbackError", "ImportError", "ModuleNotFoundError", "FileNotFoundError", "PermissionError", "JSONDecodeError",
       "ConnectionError", "ConnectionRefusedError", "ConnectionResetError", "ProtocolError", "H2Error", "http_error", "container_fetch_failed"].includes(String(failure.code))
@@ -197,7 +207,7 @@ function validateArenaObservation(value: unknown, region: GameRecordsRegion): as
   const start = observation.startRank, end = observation.endRank;
   if (observation.region !== region || typeof observation.snapshotId !== "string" || !/^[a-f0-9]{32}$/u.test(observation.snapshotId)
     || !decimal(observation.seasonId) || !decimal(observation.bandId) || !millis(observation.observedAtMs)
-    || observation.observedAtMs > Date.now() + 60_000 || typeof start !== "number" || !Number.isSafeInteger(start) || start < 1
+    || observation.observedAtMs > Date.now() + 60_000 || typeof start !== "number" || !Number.isSafeInteger(start) || start < 1 || (start - 1) % 100 !== 0
     || typeof end !== "number" || !Number.isSafeInteger(end) || end < start || end - start >= 100
     || !(observation.maxRank == null || typeof observation.maxRank === "number" && Number.isSafeInteger(observation.maxRank) && observation.maxRank >= 0)) {
     throw new Error("invalid_observation");
@@ -212,6 +222,52 @@ function validateArenaObservation(value: unknown, region: GameRecordsRegion): as
     if (!(typeof player.point === "string" && /^[0-9]+$/u.test(player.point) || typeof player.point === "number" && Number.isSafeInteger(player.point) && player.point >= 0)) {
       throw new Error("invalid_observation_point");
     }
+  }
+}
+
+function validateArenaProgress(value: unknown): asserts value is OfficialArenaProgress {
+  const progress = object(value);
+  if (!decimal(progress.seasonId) || !decimal(progress.bandId) || typeof progress.maxRank !== "number"
+    || !Number.isSafeInteger(progress.maxRank) || progress.maxRank < 0 || !Array.isArray(progress.thresholds)
+    || !progress.thresholds.length || progress.thresholds.length > 128 || !Array.isArray(progress.counts)
+    || progress.counts.length !== progress.thresholds.length || typeof progress.cursor !== "number"
+    || !Number.isInteger(progress.cursor) || progress.cursor < 0 || progress.cursor > progress.thresholds.length) {
+    throw new Error("invalid_arena_progress");
+  }
+  let threshold = -1;
+  for (let index = 0; index < progress.thresholds.length; index++) {
+    const nextThreshold: unknown = progress.thresholds[index], nextCount: unknown = progress.counts[index];
+    if (typeof nextThreshold !== "number" || !Number.isSafeInteger(nextThreshold) || nextThreshold <= threshold
+      || nextCount !== null && (typeof nextCount !== "number" || !Number.isSafeInteger(nextCount) || nextCount < 0 || nextCount > progress.maxRank)) {
+      throw new Error("invalid_arena_progress");
+    }
+    threshold = nextThreshold;
+  }
+  if (progress.pending !== undefined) {
+    const pending = object(progress.pending);
+    if (typeof pending.index !== "number" || !Number.isInteger(pending.index) || pending.index < 0 || pending.index >= progress.thresholds.length
+      || typeof pending.low !== "number" || !Number.isSafeInteger(pending.low) || pending.low < 0
+      || typeof pending.high !== "number" || !Number.isSafeInteger(pending.high) || pending.high < pending.low || pending.high > progress.maxRank) {
+      throw new Error("invalid_arena_progress");
+    }
+  }
+}
+
+function validateArenaPopulation(value: unknown, region: GameRecordsRegion): asserts value is OfficialArenaPopulationObservation {
+  const observation = object(value);
+  if (observation.region !== region || typeof observation.snapshotId !== "string" || !/^[a-f0-9]{32}$/u.test(observation.snapshotId)
+    || !decimal(observation.seasonId) || !decimal(observation.bandId) || !millis(observation.observedAtMs)
+    || observation.observedAtMs > Date.now() + 60_000 || typeof observation.maxRank !== "number"
+    || !Number.isSafeInteger(observation.maxRank) || observation.maxRank < 0 || !Array.isArray(observation.atLeast)
+    || !observation.atLeast.length || observation.atLeast.length > 128) throw new Error("invalid_arena_population");
+  let previousThreshold = -1, previousCount = observation.maxRank;
+  for (const value of observation.atLeast) {
+    const row = object(value);
+    if (typeof row.threshold !== "number" || !Number.isSafeInteger(row.threshold) || row.threshold <= previousThreshold
+      || typeof row.count !== "number" || !Number.isSafeInteger(row.count) || row.count < 0 || row.count > previousCount
+      || row.threshold === 0 && row.count !== observation.maxRank) throw new Error("invalid_arena_population");
+    previousThreshold = row.threshold;
+    previousCount = row.count;
   }
 }
 
@@ -241,6 +297,46 @@ export class OfficialRankingCollector extends Container<Env> {
   override enableInternet = true;
   override pingEndpoint = "container/health";
   private mutations: Promise<void> = Promise.resolve();
+
+  private expediteArena(state: CollectorState) {
+    if (state.permissionPause || state.legacyPermissionBlock || state.blockedGeneration || state.status !== "ok" && state.status !== "not_started") return;
+    const next = Math.max(Date.now() + 1_000, (state.lastRunAtMs ?? 0) + ARENA_DEMAND_INTERVAL_MS);
+    state.nextAtMs = state.nextAtMs ? Math.min(state.nextAtMs, next) : next;
+  }
+
+  async requestArenaWindows(region: GameRecordsRegion, seasonId: string, bandId: string,
+    starts: number[]): Promise<{ kind: string; retryAfter: number | null }> {
+    return this.serialized(async () => {
+      if (!decimal(seasonId) || !decimal(bandId) || !Array.isArray(starts) || starts.length > 20
+        || starts.some((start) => !Number.isSafeInteger(start) || start < 1 || (start - 1) % 100 !== 0)) {
+        return { kind: "invalid_request", retryAfter: null };
+      }
+      const state = await this.stateFor(region), now = Date.now();
+      const unavailable = await officialCollectorAvailability(this.env, region);
+      if (unavailable) return { kind: unavailable, retryAfter: null };
+      if (state.permissionPause || state.legacyPermissionBlock || state.blockedGeneration) return { kind: "auth_paused", retryAfter: null };
+      if (["rate_limited", "failed", "auth_paused", "auth_uncertain", "no_available_account"].includes(state.status))
+        return { kind: state.status, retryAfter: null };
+      const active = state.run && !state.run.complete && now <= state.run.deadlineMs + 15_000;
+      if (state.run && !state.run.complete && !active) return { kind: "unavailable", retryAfter: null };
+      const pool = await configFor(this.env, region);
+      if (!active && (!pool || !this.accountFor(state, pool))) return { kind: "no_available_account", retryAfter: null };
+      const arena = state.arenaCatalog === undefined ? state.run?.catalog?.arena : state.arenaCatalog;
+      if (!arena || seasonId !== arena.seasonId || !arena.bandIds.includes(bandId)
+        || now < arena.startAtMs || now >= arena.rankingEndAtMs) return { kind: "inactive", retryAfter: null };
+      const metadata = starts.length ? await readOfficialArenaMetadata(this.env, region, seasonId, bandId) : null;
+      if (starts.some((start) => start > 1 && (metadata?.maxRank == null || start > metadata.maxRank)))
+        return { kind: "unavailable", retryAfter: null };
+      const queue = (state.arenaInterests ?? []).filter((entry) => now - entry.requestedAtMs < ARENA_INTEREST_TTL_MS);
+      const missing = [...new Set(starts)].filter((start) => !queue.some((entry) => entry.seasonId === seasonId && entry.bandId === bandId && entry.startRank === start));
+      if (queue.length + missing.length > 24) return { kind: "queue_full", retryAfter: null };
+      for (const startRank of missing) queue.push({ seasonId, bandId, startRank, endRank: startRank + 99, requestedAtMs: now });
+      state.arenaInterests = queue;
+      if (!active) this.expediteArena(state);
+      await this.persist(state);
+      return { kind: "pending", retryAfter: 30 };
+    });
+  }
 
   private serialized<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.mutations.then(operation);
@@ -430,6 +526,10 @@ export class OfficialRankingCollector extends Container<Env> {
       this.envVars = { OFFICIAL_COLLECTOR_TOKEN: serviceToken, OFFICIAL_CALLBACK_ORIGIN: CALLBACK_ORIGIN };
       await this.persist(state);
       return { contract: "haneoka:official-ranking-job/1", region, runId, credentialGeneration: config.generation,
+        capabilities: ["arena-ranking-v1", "arena-population-v1", "arena-progress-v1", "arena-demand-v1"],
+        arenaProgress: Object.values(state.arenaProgress ?? {}).sort((a, b) => (a.updatedAtMs ?? 0) - (b.updatedAtMs ?? 0)),
+        arenaWindows: (state.arenaInterests ?? []).filter((entry) => now - entry.requestedAtMs < ARENA_INTEREST_TTL_MS)
+          .slice(0, 20).map(({ seasonId, bandId, startRank, endRank }) => ({ seasonId, bandId, startRank, endRank })),
         clientVersion: config.clientVersion, credentials: config.credentials, masterConfig: config.masterConfig,
         callbackUrl: `${CALLBACK_ORIGIN}/api/internal/official-rankings/${region}/${runId}`, callbackToken: token, deadlineMs: now + JOB_MS };
     });
@@ -486,6 +586,8 @@ export class OfficialRankingCollector extends Container<Env> {
       else if (update.type === "attempt") checkpoint = `attempt:${update.snapshotId}`;
       else if (update.type === "observation") checkpoint = `observation:${update.observation?.snapshotId}`;
       else if (update.type === "arena-observation") checkpoint = `arena:${update.observation?.snapshotId}`;
+      else if (update.type === "arena-population") checkpoint = `arena-population:${update.observation?.snapshotId}`;
+      else if (update.type === "arena-progress") checkpoint = `arena-progress:${update.checkpointId}`;
       else return json({ error: "invalid_update" }, 400);
       const updateHash = await officialDigest(canonical(update));
       if (run.checkpoints[checkpoint]) {
@@ -504,6 +606,16 @@ export class OfficialRankingCollector extends Container<Env> {
           if (run.pendingAttempt) return json({ error: "attempt_pending" }, 409);
           await saveOfficialCatalog(this.env, update.catalog);
           run.catalog = update.catalog;
+          const arena = update.catalog.arena;
+          if (state.arenaCatalog?.seasonId !== arena?.seasonId) state.arenaWarmupRuns = 0;
+          state.arenaCatalog = arena ?? null;
+          state.arenaProgress = Object.fromEntries(Object.entries(state.arenaProgress ?? {})
+            .filter(([, progress]) => arena?.seasonId === progress.seasonId && arena.bandIds.includes(progress.bandId)));
+          state.arenaInterests = (state.arenaInterests ?? []).filter((entry) => arena?.seasonId === entry.seasonId
+            && arena.bandIds.includes(entry.bandId) && Date.now() < arena.rankingEndAtMs
+            && Date.now() - entry.requestedAtMs < ARENA_INTEREST_TTL_MS);
+          const activeBands = new Set(arena?.bandIds.map((id) => `${arena.seasonId}:${id}`));
+          state.arenaPopulationAt = Object.fromEntries(Object.entries(state.arenaPopulationAt ?? {}).filter(([key]) => activeBands.has(key)));
           run.checkpoints[checkpoint] = updateHash;
           await this.ctx.storage.put("collectorState", state);
         } else if (update.type === "attempt") {
@@ -557,6 +669,13 @@ export class OfficialRankingCollector extends Container<Env> {
           }
           await this.ctx.storage.put("collectorState", state);
           await saveOfficialArenaObservation(this.env, update.observation);
+          if (!update.observation.error) {
+            const observation = update.observation;
+            state.arenaInterests = (state.arenaInterests ?? []).filter((entry) => entry.seasonId !== observation.seasonId
+              || entry.bandId !== observation.bandId || entry.startRank !== observation.startRank
+              || observation.endRank < Math.min(entry.endRank, observation.maxRank ?? entry.endRank)
+              || observation.players!.length < Math.max(0, Math.min(entry.endRank, observation.maxRank ?? entry.endRank) - entry.startRank + 1));
+          }
           run.pendingAttempt = null;
           run.checkpoints[checkpoint] = updateHash;
           if (!update.observation.error) {
@@ -564,6 +683,31 @@ export class OfficialRankingCollector extends Container<Env> {
             const health = this.runHealth(state);
             if (health) health.lastSuccessAtMs = Math.max(health.lastSuccessAtMs ?? 0, update.observation.observedAtMs);
           }
+          await this.ctx.storage.put("collectorState", state);
+        } else if (update.type === "arena-progress") {
+          validateArenaProgress(update.progress);
+          const arena = run.catalog?.arena, progress = update.progress;
+          if (!/^[a-f0-9]{32}$/u.test(update.checkpointId) || run.pendingAttempt || !arena
+            || progress.seasonId !== arena.seasonId || !arena.bandIds.includes(progress.bandId)) return json({ error: "board_mismatch" }, 409);
+          state.arenaProgress ??= {};
+          state.arenaProgress[`${progress.seasonId}:${progress.bandId}`] = {
+            seasonId: progress.seasonId, bandId: progress.bandId, thresholds: progress.thresholds,
+            maxRank: progress.maxRank, counts: progress.counts, cursor: progress.cursor,
+            ...(progress.pending ? { pending: { index: progress.pending.index, low: progress.pending.low, high: progress.pending.high } } : {}), updatedAtMs: Date.now(),
+          };
+          run.checkpoints[checkpoint] = updateHash;
+          await this.ctx.storage.put("collectorState", state);
+        } else if (update.type === "arena-population") {
+          validateArenaPopulation(update.observation, region);
+          const arena = run.catalog?.arena;
+          if (run.pendingAttempt || state.blockedGeneration || !arena || update.observation.seasonId !== arena.seasonId
+            || !arena.bandIds.includes(update.observation.bandId) || update.observation.observedAtMs < run.startedAtMs) {
+            return json({ error: "board_mismatch" }, 409);
+          }
+          await saveOfficialArenaPopulation(this.env, update.observation);
+          state.arenaPopulationAt ??= {};
+          state.arenaPopulationAt[`${update.observation.seasonId}:${update.observation.bandId}`] = update.observation.observedAtMs;
+          run.checkpoints[checkpoint] = updateHash;
           await this.ctx.storage.put("collectorState", state);
         } else if (update.type === "complete") {
           if (run.pendingAttempt || !["ok", "failed", "auth_paused", "rate_limited"].includes(update.status)) return json({ error: "attempt_pending" }, 409);
@@ -577,6 +721,12 @@ export class OfficialRankingCollector extends Container<Env> {
           if (update.status === "auth_paused") this.pauseRun(state, "auth_paused", update.failure ? permissionRejected(update.failure) : false);
           if (update.status === "rate_limited") state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.retryAfterSeconds));
           if (update.status === "failed") state.nextAtMs = Math.max(state.nextAtMs, Date.now() + Math.min(3_600_000, INTERVAL_MS * 2 ** Math.min(4, state.failures - 1)));
+          const arena = state.arenaCatalog;
+          const cold = arena && Date.now() < arena.rankingEndAtMs && arena.bandIds.some((id) => !state.arenaPopulationAt?.[`${arena.seasonId}:${id}`]);
+          if (update.status === "ok" && cold && (state.arenaWarmupRuns ?? 0) < 20) {
+            state.arenaWarmupRuns = (state.arenaWarmupRuns ?? 0) + 1;
+            this.expediteArena(state);
+          } else if (update.status === "ok" && state.arenaInterests?.length) this.expediteArena(state);
           const health = this.runHealth(state);
           if (health) {
             health.leaseUntilMs = 0;

@@ -98,6 +98,10 @@ export interface ArenaPopulationDto {
   bandId: string;
   provider: "official" | "moenotes";
   observedAtMs: number;
+  snapshotId?: string;
+  fetchedAtMs?: number;
+  serverTimeMs?: number;
+  stale?: boolean;
   maxRank: number | null;
   tiers: Array<{ threshold: number; count: number }>;
 }

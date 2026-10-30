@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Official catalog identities, game protobuf observations and collector checkpoints.
-// Output: Shared wire contracts including Arena boards and origin-bound account-pool configuration parsing.
+// Output: Shared wire contracts including Arena windows, complete populations, resumable hints and origin-bound account-pool parsing.
 // Pos: [Map](L2-2.md); official ranking wire types alongside game-records DTOs.
 // Effects/Dependencies: Web Crypto digests; parses private configuration without logging or network access.
 import type { GameRecordsRegion } from "./game-records";
@@ -156,6 +156,30 @@ export interface OfficialArenaObservation {
   retryAfterSeconds?: number;
 }
 
+/** Completed threshold counts from the collector's actual league-window probes. */
+export interface OfficialArenaPopulationObservation {
+  snapshotId: string;
+  region: GameRecordsRegion;
+  seasonId: string;
+  bandId: string;
+  observedAtMs: number;
+  maxRank: number;
+  atLeast: Array<{ threshold: number; count: number }>;
+  provenance?: Record<string, unknown>;
+}
+
+/** Resumable search hints; published population counts require fresh boundary probes. */
+export interface OfficialArenaProgress {
+  seasonId: string;
+  bandId: string;
+  thresholds: number[];
+  maxRank: number;
+  counts: Array<number | null>;
+  cursor: number;
+  pending?: { index: number; low: number; high: number };
+  updatedAtMs?: number;
+}
+
 export interface OfficialObservation {
   snapshotId: string;
   region: GameRecordsRegion;
@@ -173,6 +197,9 @@ export interface OfficialObservation {
 
 export interface OfficialCollectorJob {
   contract: "haneoka:official-ranking-job/1";
+  capabilities?: string[];
+  arenaProgress?: OfficialArenaProgress[];
+  arenaWindows?: Array<{ seasonId: string; bandId: string; startRank: number; endRank: number }>;
   region: GameRecordsRegion;
   runId: string;
   credentialGeneration: string;
@@ -201,5 +228,7 @@ export type OfficialCollectorUpdate = {
   | { type: "attempt"; snapshotId: string }
   | { type: "observation"; observation: OfficialObservation }
   | { type: "arena-observation"; observation: OfficialArenaObservation }
+  | { type: "arena-population"; observation: OfficialArenaPopulationObservation }
+  | { type: "arena-progress"; checkpointId: string; progress: OfficialArenaProgress }
   | { type: "complete"; status: "ok" | "failed" | "auth_paused" | "rate_limited"; retryAfterSeconds?: number; failure?: OfficialCollectorFailure }
 );
