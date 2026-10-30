@@ -317,7 +317,8 @@
       "timeFormat": "時刻の形式",
       "timeHour": "時",
       "timeSeconds": "秒",
-      "timeZoneName": "タイムゾーン表記"
+      "timeZoneName": "タイムゾーン表記",
+      "dateTime": "日付と時刻"
     }
   },
   "home": {

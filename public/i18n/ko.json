@@ -317,7 +317,8 @@
       "timeFormat": "시간 형식",
       "timeHour": "시",
       "timeSeconds": "초",
-      "timeZoneName": "시간대 표기"
+      "timeZoneName": "시간대 표기",
+      "dateTime": "날짜 및 시간"
     }
   },
   "home": {

@@ -317,7 +317,8 @@
       "timeFormat": "Time format",
       "timeHour": "Hour",
       "timeSeconds": "Seconds",
-      "timeZoneName": "Time zone label"
+      "timeZoneName": "Time zone label",
+      "dateTime": "Date and time"
     }
   },
   "home": {

@@ -317,7 +317,8 @@
       "timeFormat": "時間格式",
       "timeHour": "小時",
       "timeSeconds": "秒",
-      "timeZoneName": "時區標註"
+      "timeZoneName": "時區標註",
+      "dateTime": "日期與時間"
     }
   },
   "home": {

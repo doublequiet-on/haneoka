@@ -7,6 +7,7 @@ import SettingsOption from "./SettingsOption.astro";
 import type { Locale } from "../i18n/locales";
 import { t } from "../i18n/messages";
 import { DATE_CHOICES, formatDate, formatTime, type DateChoiceKey, type DatePreferences } from "../lib/date-format";
+import "../styles/components/accordion.css";
 import "../styles/settings.css";
 import cnFlag from "circle-flags/flags/cn.svg?url";
 import enUsFlag from "circle-flags/flags/language/en-us.svg?url";
@@ -172,8 +173,36 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
   <AppShell locale={locale} route="/settings" title={title} titleKey="navigation.settings">
     <section class="page">
       <div class="settings-content">
-        {[groups.slice(0, 3), dateGroups, groups.slice(3 + dateGroups.length, 4 + dateGroups.length), groups.slice(4 + dateGroups.length)].map((card) => (
-          <div class="settings-card">
+        {[groups.slice(0, 3), groups.slice(3 + dateGroups.length, 4 + dateGroups.length), groups.slice(4 + dateGroups.length), dateGroups].map((card) => (
+          <div class:list={["settings-card", { "md-accordion settings-dates": card === dateGroups }]}>
+            {card === dateGroups && (
+              <div class="md-accordion__heading" role="heading" aria-level="2">
+                <button
+                  class="button md-accordion__trigger"
+                  type="button"
+                  id="settings-dates-trigger"
+                  aria-expanded="false"
+                  aria-controls="settings-dates-panel"
+                  data-settings-dates
+                >
+                  <span class="md-accordion__leading" aria-hidden="true"><Icon name="schedule" /></span>
+                  <span class="md-accordion__identity">
+                    <span class="md-accordion__label">
+                      <I18nText keyName="settings.labels.dateTime" fallback="Date and time" locale={locale} />
+                    </span>
+                    <span class="md-accordion__supporting" data-date-preview>{preview}</span>
+                  </span>
+                  <span class="md-accordion__chevron" aria-hidden="true"><Icon name="expand_more" /></span>
+                </button>
+              </div>
+            )}
+            <div
+              class={card === dateGroups ? "md-accordion__panel" : "settings-card__body"}
+              id={card === dateGroups ? "settings-dates-panel" : undefined}
+              role={card === dateGroups ? "region" : undefined}
+              aria-labelledby={card === dateGroups ? "settings-dates-trigger" : undefined}
+              hidden={card === dateGroups}
+            >
             {card === dateGroups && (
               <section class="settings-group" aria-labelledby="date-zone-title">
                 <div class="settings-row">
@@ -185,7 +214,7 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
                       <h2 id="date-zone-title">
                         <I18nText keyName="settings.labels.timeZone" fallback="Time zone" locale={locale} />
                       </h2>
-                      <p class="settings-current" data-date-preview aria-live="polite">{preview}</p>
+                      <p class="settings-current" data-date-zone-current aria-live="polite"></p>
                     </div>
                   </header>
                   <md-outlined-select
@@ -279,6 +308,7 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
                 )}
               </section>
             ))}
+            </div>
           </div>
         ))}
       </div>
@@ -347,14 +377,31 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
     };
     (Object.keys(DATE_CHOICES) as DateChoiceKey[]).forEach((key) => select(`date-${key}`, dates[key]));
     showDatePreview();
-    const zone = settings.querySelector<HTMLElement & { value: string }>("[data-date-zone]");
+    const datesTrigger = settings.querySelector<HTMLButtonElement>("[data-settings-dates]");
+    datesTrigger?.addEventListener(
+      "click",
+      () => {
+        const open = datesTrigger.getAttribute("aria-expanded") !== "true";
+        datesTrigger.closest(".md-accordion")?.setAttribute("data-toggled", "");
+        datesTrigger.setAttribute("aria-expanded", String(open));
+        document.getElementById("settings-dates-panel")!.hidden = !open;
+      },
+      { signal },
+    );
+    const zone = settings.querySelector<HTMLElement & { value: string; displayText: string }>("[data-date-zone]");
+    const zoneCurrent = settings.querySelector<HTMLElement>("[data-date-zone-current]");
+    const showZone = () => {
+      if (zone && zoneCurrent) zoneCurrent.textContent = zone.displayText || "";
+    };
     if (zone) {
       zone.value = dates.zone;
+      void customElements.whenDefined("md-outlined-select").then(() => requestAnimationFrame(showZone));
       zone.addEventListener(
         "change",
         () => {
           if (isTimeZone(zone.value)) setDatePreferences({ zone: zone.value });
           showDatePreview();
+          showZone();
         },
         { signal },
       );

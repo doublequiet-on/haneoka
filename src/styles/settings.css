@@ -11,6 +11,23 @@
     border-radius: var(--md-sys-shape-corner-extra-large);
     background: var(--md-sys-color-surface-container-low);
   }
+  .settings-card__body {
+    display: contents;
+  }
+  .settings-dates {
+    padding: 0;
+  }
+  .settings-dates .md-accordion__trigger.button {
+    min-block-size: 72px;
+    padding: 16px 24px;
+    border-radius: var(--md-sys-shape-corner-extra-large);
+  }
+  .settings-dates .md-accordion__panel {
+    padding: 0 24px 8px;
+  }
+  .settings-dates .md-accordion__panel > .settings-group:first-child {
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
   .settings-group + .settings-group {
     border-top: 1px solid var(--md-sys-color-outline-variant);
   }
@@ -259,6 +276,12 @@
     }
     .settings-options--seed {
       gap: 4px;
+    }
+    .settings-dates .md-accordion__trigger.button {
+      padding-inline: 16px;
+    }
+    .settings-dates .md-accordion__panel {
+      padding-inline: 16px;
     }
     .settings-option.settings-option--sample {
       width: auto;
