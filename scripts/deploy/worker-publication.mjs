@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // L3 — GEB
-// Input: 源码身份、Worker artifact、静态 publication 和 CLI 命令。
+// Input: 源码身份、Worker artifact、静态 publication、封存容器上下文和 CLI 命令。
 // Output: 可校验部署产物、配置和 publication 操作结果。
 // Pos: [Map](../L2.md)；部署工作流的 artifact 与发布控制桥。
-// Effects/Dependencies: 文件、摘要和子进程；副作用随子命令变化，发布路线可调用 Wrangler 写远端。
+// Effects/Dependencies: 固定来源、文件／容器输入摘要和子进程；保留已验证 assets，可显式重建封存容器，发布路线调用 Wrangler 写远端。
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -20,12 +20,15 @@ const { values, positionals } = parseArgs({
   options: {
     "source-root": { type: "string" },
     "worker-only": { type: "boolean" },
+    "build-containers": { type: "boolean" },
     "dry-run": { type: "boolean" },
   },
 });
 const mode = positionals[0];
 if (!["prepare", "verify", "publish"].includes(mode) || positionals.length !== 1)
-  throw new Error("Use prepare [--worker-only], verify, or publish [--dry-run]");
+  throw new Error("Use prepare [--worker-only [--build-containers]], verify, or publish [--dry-run]");
+if (values["build-containers"] && (mode !== "prepare" || !values["worker-only"]))
+  throw new Error("Container rebuild requires prepare --worker-only");
 const root = path.resolve(values["source-root"] || process.cwd());
 const toolingRoot = fileURLToPath(new URL("../../", import.meta.url));
 const output = path.join(root, ".output/deployment");
@@ -78,7 +81,7 @@ function fileRecord(relative) {
   const body = fs.readFileSync(path.join(root, relative));
   return { path: relative, bytes: body.length, sha256: digest(body) };
 }
-function containerInputIdentity(container, revision) {
+function containerSourceInput(container, revision) {
   const config = typescript.parseConfigFileTextToJson("wrangler.jsonc", git("show", `${revision}:wrangler.jsonc`));
   if (config.error) throw new Error("Invalid container source configuration");
   const pinned = config.config.containers?.find((entry) => entry.class_name === container.class_name);
@@ -95,22 +98,77 @@ function containerInputIdentity(container, revision) {
       throw new Error("Container context needs a full publication");
     inputPaths.push(...sources.map((source) => path.join(context, source)));
   }
-  return digest(
-    JSON.stringify({ configuration: pinned, tree: git("ls-tree", "-r", "-z", revision, "--", ...inputPaths) }),
-  );
+  return { configuration: pinned, context, dockerfile,
+    tree: git("ls-tree", "-r", "-z", revision, "--", ...inputPaths) };
+}
+function containerInputIdentity(container, revision) {
+  const { configuration, tree } = containerSourceInput(container, revision);
+  return digest(JSON.stringify({ configuration, tree }));
+}
+function sealedContainerPaths(container) {
+  const source = containerSourceInput(container, sourceSha);
+  const dockerfile = path.relative(source.context || ".", source.dockerfile);
+  if (dockerfile === ".." || dockerfile.startsWith(`..${path.sep}`) || path.isAbsolute(dockerfile))
+    throw new Error("Container Dockerfile must be inside its build context");
+  const context = path.join(output, "containers", container.class_name, "context");
+  return { source, context, dockerfile: path.join(context, dockerfile) };
+}
+function containerContextFiles() {
+  return (original.containers || []).flatMap((container) => {
+    const { source, context } = sealedContainerPaths(container);
+    return source.tree.split("\0").filter(Boolean).map((line) => {
+      const [metadata, relative] = line.split("\t");
+      const [mode, type, blob] = metadata.split(" ");
+      if (type !== "blob" || !["100644", "100755"].includes(mode))
+        throw new Error("Container inputs must be regular tracked files");
+      const relativeContext = path.relative(source.context || ".", relative);
+      if (relativeContext === ".." || relativeContext.startsWith(`..${path.sep}`) || path.isAbsolute(relativeContext))
+        throw new Error("Container input is outside its build context");
+      return { relative, file: path.join(context, relativeContext), blob, mode: mode === "100755" ? 0o755 : 0o644 };
+    });
+  });
+}
+function sealContainerContexts() {
+  return containerContextFiles().map(({ relative, file, mode }) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, execFileSync("git", ["-C", root, "show", `${sourceSha}:${relative}`]));
+    fs.chmodSync(file, mode);
+    return { ...fileRecord(path.relative(root, file)), mode };
+  });
+}
+function verifyContainerContexts() {
+  const expected = containerContextFiles();
+  assert.deepEqual(filesAt(path.join(output, "containers")), expected.map(({ file }) => path.relative(root, file)).sort(),
+    "Sealed container context differs from candidate inputs");
+  for (const { file, blob, mode } of expected) {
+    const stat = fs.lstatSync(file);
+    assert.ok(stat.isFile(), "Sealed container input must be a regular file");
+    assert.equal(stat.mode & 0o777, mode, "Sealed container input mode differs");
+    assert.equal(git("hash-object", "--no-filters", file), blob, "Sealed container input content differs");
+  }
+}
+function retainedAssets(value) {
+  return { publicationSha256: value.publicationSha256, staticIdentity: value.staticIdentity,
+    frontendSha: value.frontendSha, assetsConfigSha256: value.assetsConfigSha256 };
 }
 function containerInputIdentities(revision) {
   return Object.fromEntries(
     (original.containers || []).map((container) => [container.class_name, containerInputIdentity(container, revision)]),
   );
 }
-function configFor({ compiled = false, keepAssets = false, containerImages }) {
+function configFor({ compiled = false, keepAssets = false, containerImages, buildContainers = false }) {
   const config = structuredClone(original);
   config.$schema = path.join(root, "node_modules/wrangler/config-schema.json");
   config.main = path.join(root, compiled ? ".output/deployment/worker/index.js" : original.main);
   for (const binding of config.d1_databases || [])
     if (binding.migrations_dir) binding.migrations_dir = path.resolve(root, binding.migrations_dir);
   for (const container of config.containers || []) {
+    if (buildContainers) {
+      const sealed = sealedContainerPaths(container);
+      container.image = sealed.dockerfile;
+      container.image_build_context = sealed.context;
+      continue;
+    }
     if (containerImages) {
       container.image = containerImages[container.class_name];
       if (!container.image) throw new Error("Active container image is missing");
@@ -142,6 +200,7 @@ function writeConfig(name, config) {
 function verifyFiles(records) {
   for (const record of records) {
     const actual = fileRecord(record.path);
+    if (record.mode !== undefined) actual.mode = fs.statSync(path.join(root, record.path)).mode & 0o777;
     assert.deepEqual(actual, record, `Publication file differs: ${record.path}`);
   }
 }
@@ -152,15 +211,24 @@ function readManifest() {
   verifyFiles(manifest.files);
   const expected = manifest.files
     .filter(
-      (record) => record.path.startsWith(".output/deployment/worker/") || record.path.startsWith(".output/public/"),
+      (record) => record.path.startsWith(".output/deployment/worker/") || record.path.startsWith(".output/public/") ||
+        (manifest.buildContainers && record.path.startsWith(".output/deployment/containers/")),
     )
     .map((record) => record.path)
     .sort();
   const actual = [
     ...filesAt(path.join(output, "worker")),
     ...(!manifest.workerOnly ? filesAt(path.join(root, ".output/public")) : []),
+    ...(manifest.buildContainers ? filesAt(path.join(output, "containers")) : []),
   ].sort();
   assert.deepEqual(actual, expected, "Publication contains unverified extra files");
+  if (manifest.buildContainers) {
+    assert.equal(manifest.workerOnly, true, "Container rebuild must retain verified static assets");
+    assert.ok(manifest.retainedAssets && manifest.containerInputs, "Container publication identities are missing");
+    assert.equal(typeof manifest.retainedAssets.publicationSha256, "string");
+    assert.match(manifest.retainedAssets.publicationSha256, /^[a-f0-9]{64}$/u);
+    verifyContainerContexts();
+  }
   if (manifest.containerInputs)
     assert.deepEqual(
       containerInputIdentities(sourceSha),
@@ -175,10 +243,10 @@ function readManifest() {
   }
   return manifest;
 }
-async function liveAssets(ownMessage) {
+async function liveAssets(ownMessage, options) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      return await readLiveAssets(ownMessage);
+      return await readLiveAssets(ownMessage, options);
     } catch (error) {
       if (attempt === 3) throw error;
       console.warn(`Production asset inspection attempt ${attempt}/3 failed; retrying`);
@@ -186,7 +254,7 @@ async function liveAssets(ownMessage) {
     }
   }
 }
-async function readLiveAssets(ownMessage) {
+async function readLiveAssets(ownMessage, { allowContainerChanges = false } = {}) {
   const deployments = JSON.parse(
     run(["deployments", "list", "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
   );
@@ -279,22 +347,21 @@ async function readLiveAssets(ownMessage) {
   const applications = JSON.parse(
     run(["containers", "list", "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
   );
-  const containerImages = {},
-    containerInputs = {};
+  const containerImages = {}, containerInputs = {};
+  const containerSourceSha = allowContainerChanges ? null : workerSourceIdentity(active, version).activeWorkerSha;
   for (const container of original.containers || []) {
-    const inputs = containerInputIdentity(container, sourceSha);
-    assert.equal(
-      containerInputIdentity(container, frontendSha),
-      inputs,
-      "Container inputs changed; use a full publication",
-    );
+    if (!allowContainerChanges) {
+      const inputs = containerInputIdentity(container, containerSourceSha);
+      assert.equal(containerInputIdentity(container, sourceSha), inputs,
+        "Container inputs changed; rebuild containers or use a full publication");
+      containerInputs[container.class_name] = inputs;
+    }
     const application = applications.find(
       (entry) => entry.name === `${original.name}-${container.class_name.toLowerCase()}`,
     );
     if (!application || !/\.cloudflare\.com\/.+@sha256:[a-f0-9]{64}$/u.test(application.image))
       throw new Error("Active container image digest is missing");
     containerImages[container.class_name] = application.image;
-    containerInputs[container.class_name] = inputs;
   }
   if (latest.id !== activeId) {
     const uploaded = JSON.parse(
@@ -319,18 +386,7 @@ async function readLiveAssets(ownMessage) {
     assetsConfigSha256: digest(JSON.stringify(assets)),
   };
 }
-async function assertPublishContext() {
-  if (process.env.GITHUB_ACTIONS !== "true" || process.env.HANEOKA_PUBLICATION_LOCK !== "cloudflare-production-publish")
-    throw new Error("Publish from the shared production publication job");
-  const deployments = JSON.parse(
-    run(["deployments", "list", "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
-  );
-  const active = deployments.toSorted((a, b) => Date.parse(b.created_on) - Date.parse(a.created_on))[0];
-  if (active?.versions?.length !== 1 || active.versions[0].percentage !== 100)
-    throw new Error("Production must have one 100% active Worker version");
-  const version = JSON.parse(
-    run(["versions", "view", active.versions[0].version_id, "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
-  );
+function workerSourceIdentity(active, version) {
   const messageSource = (value) => /^Worker ([a-f0-9]{40}); static [a-f0-9]{64}$/u.exec(value.annotations?.["workers/message"] || "")?.[1];
   const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object"
     ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
@@ -357,8 +413,21 @@ async function assertPublishContext() {
     if (matches.size !== 1) throw new Error("Active Worker content has no unique published source identity");
     [activeWorkerSha, identityMatchedVersionId] = matches.entries().next().value;
   }
-  const context = publicationSourceContext({ root, toolingRoot, sourceSha, activeWorkerSha,
-    activeWorkerVersionId: active.versions[0].version_id, identityMatchedVersionId });
+  return { activeWorkerSha, activeWorkerVersionId: active.versions[0].version_id, identityMatchedVersionId };
+}
+async function assertPublishContext() {
+  if (process.env.GITHUB_ACTIONS !== "true" || process.env.HANEOKA_PUBLICATION_LOCK !== "cloudflare-production-publish")
+    throw new Error("Publish from the shared production publication job");
+  const deployments = JSON.parse(
+    run(["deployments", "list", "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
+  );
+  const active = deployments.toSorted((a, b) => Date.parse(b.created_on) - Date.parse(a.created_on))[0];
+  if (active?.versions?.length !== 1 || active.versions[0].percentage !== 100)
+    throw new Error("Production must have one 100% active Worker version");
+  const version = JSON.parse(
+    run(["versions", "view", active.versions[0].version_id, "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
+  );
+  const context = publicationSourceContext({ root, toolingRoot, sourceSha, ...workerSourceIdentity(active, version) });
   const repository = process.env.GITHUB_REPOSITORY;
   const currentRun = process.env.GITHUB_RUN_ID;
   if (!repository || !currentRun) throw new Error("GitHub publication identity is missing");
@@ -384,8 +453,9 @@ async function assertPublishContext() {
 
 if (mode === "prepare") {
   const source = sourceIdentity();
-  const retained = values["worker-only"] ? await liveAssets() : null;
-  let containerInputs = retained?.containerInputs;
+  const buildContainers = !!values["build-containers"];
+  const retained = values["worker-only"] ? await liveAssets(undefined, { allowContainerChanges: buildContainers }) : null;
+  let containerInputs = buildContainers ? containerInputIdentities(sourceSha) : retained?.containerInputs;
   if (!values["worker-only"]) {
     try {
       containerInputs = containerInputIdentities(sourceSha);
@@ -394,13 +464,14 @@ if (mode === "prepare") {
     }
   }
   fs.rmSync(output, { recursive: true, force: true });
+  const containerFiles = buildContainers ? sealContainerContexts() : [];
   const configFile = writeConfig(
     "compile.wrangler.json",
-    configFor({ keepAssets: true, containerImages: retained?.containerImages }),
+    configFor({ keepAssets: true, containerImages: buildContainers ? undefined : retained?.containerImages, buildContainers }),
   );
   run(["deploy", "--config", configFile, "--dry-run", "--outdir", path.join(output, "worker")]);
   if (!fs.existsSync(path.join(output, "worker/index.js"))) throw new Error("Compiled Worker entry is missing");
-  const files = filesAt(path.join(output, "worker")).map(fileRecord);
+  const files = [...filesAt(path.join(output, "worker")).map(fileRecord), ...containerFiles];
   let frontend;
   if (!values["worker-only"]) {
     const publicationFile = path.join(root, ".output/static-documents/publication.json");
@@ -423,6 +494,8 @@ if (mode === "prepare") {
         schema: "haneoka-worker-publication-v1",
         source,
         workerOnly: !!values["worker-only"],
+        buildContainers: buildContainers || undefined,
+        retainedAssets: buildContainers ? retainedAssets(retained) : undefined,
         containerImages: retained?.containerImages,
         containerInputs,
         files,
@@ -446,13 +519,17 @@ if (mode === "prepare") {
   console.log(JSON.stringify({ verified: true, sourceSha, files: manifest.files.length }));
 } else {
   const manifest = readManifest();
-  const prior = manifest.workerOnly ? await liveAssets() : null;
+  const inspection = { allowContainerChanges: !!manifest.buildContainers };
+  const prior = manifest.workerOnly ? await liveAssets(undefined, inspection) : null;
+  if (manifest.buildContainers) assert.deepEqual(retainedAssets(prior), manifest.retainedAssets,
+    "Retained static assets changed since the publication was sealed");
   const configFile = writeConfig(
     "publish.wrangler.json",
     configFor({
       compiled: true,
       keepAssets: manifest.workerOnly,
-      containerImages: prior?.containerImages,
+      containerImages: manifest.buildContainers ? undefined : prior?.containerImages,
+      buildContainers: !!manifest.buildContainers,
     }),
   );
   const before = JSON.stringify({
@@ -518,16 +595,16 @@ if (mode === "prepare") {
         console.log(`Building container images from the complete context: ${error.message}`);
       }
     }
-    if (manifest.workerOnly) assert.deepEqual(await liveAssets(), prior, "Active assets changed before publication");
+    if (manifest.workerOnly) assert.deepEqual(await liveAssets(undefined, inspection), prior, "Active assets changed before publication");
     const message = `Worker ${sourceSha}; static ${prior?.publicationSha256 || manifest.frontend.publicationSha256}`;
     for (let attempt = 1; attempt <= 3; attempt++) {
       publicationContext = await assertPublishContext();
       fs.writeFileSync(path.join(output, "publication-context.json"), JSON.stringify(publicationContext, null, 2));
       if (attempt > 1 && manifest.workerOnly) {
-        const current = await liveAssets(message);
+        const current = await liveAssets(message, inspection);
         assert.equal(current.publicationSha256, prior.publicationSha256);
         assert.equal(current.assetsConfigSha256, prior.assetsConfigSha256);
-        assert.deepEqual(current.containerImages, prior.containerImages);
+        if (!manifest.buildContainers) assert.deepEqual(current.containerImages, prior.containerImages);
         if (current.versionId !== prior.versionId && current.workerMessage !== message)
           throw new Error("Another Worker became active during publication");
       }
@@ -540,7 +617,7 @@ if (mode === "prepare") {
         await new Promise((resolve) => setTimeout(resolve, attempt * 5_000));
       }
     }
-    const after = await liveAssets();
+    const after = await liveAssets(undefined, inspection);
     assert.equal(after.workerMessage, message, "Another Worker became active after publication");
     assert.equal(
       after.publicationSha256,
@@ -569,6 +646,7 @@ if (mode === "prepare") {
         publisherSha: publicationContext.publisherSha,
         qualifiedMainSha: publicationContext.mainSha,
         recoveredFromRunId: publicationContext.recoveredFromRunId,
+        ...(manifest.buildContainers ? { containerInputs: manifest.containerInputs, containerImages: after.containerImages } : {}),
         observedAt: new Date().toISOString(),
       });
       const file = path.join(output, "successful-static-deployment.json");

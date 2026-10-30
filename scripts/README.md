@@ -587,3 +587,25 @@ newer explicit pins when `latest` trails a selected beta release. Compiler
 updates with exact local patches require patch migration before manifests change.
 The server response version comes from the adapter's core package; compiled
 engine and presentation assets are published separately by `sonolus.yml`.
+
+## Worker and container publication
+
+The production deployment workflow accepts `worker_only: true` to publish a
+verified Worker while keeping the current static publication and container
+images. Set `build_containers: true` with `worker_only` to rebuild the configured
+containers from the same candidate source while keeping those static assets.
+This service publication does not run the complete frontend build.
+
+```sh
+gh workflow run deploy-cloudflare.yml --ref main \
+  -f worker_only=true -f build_containers=true -f apply_d1_migrations=true
+```
+
+The container artifact includes the tracked Dockerfile, applicable ignore files
+and COPY inputs with their modes and hashes. Publication verifies those files
+against the candidate commit, retains the sealed static identity, and uses the
+shared production publication lock and monotonic Worker source check. A static
+publication change during preparation requires a fresh service build. Partial
+container changes from an interrupted attempt may be rebuilt on retry; static
+assets remain fixed. `publication_run_id` continues to select complete frontend
+artifacts and cannot be combined with the service-only options.

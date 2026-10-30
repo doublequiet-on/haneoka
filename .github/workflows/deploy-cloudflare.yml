@@ -31,6 +31,10 @@ on:
         description: Publish only the Worker, database and cron using the current verified static assets
         type: boolean
         default: false
+      build_containers:
+        description: Rebuild sealed container inputs with worker_only while retaining verified static assets
+        type: boolean
+        default: false
       publication_run_id:
         description: Reuse a sealed complete publication from this completed deployment run
         type: string
@@ -38,7 +42,7 @@ on:
 jobs:
   recovery:
     name: Resolve sealed publication
-    if: ${{ inputs.publication_run_id != '' }}
+    if: ${{ inputs.publication_run_id != '' || (inputs.build_containers && !inputs.worker_only) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,12 +62,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUBLICATION_RUN_ID: ${{ inputs.publication_run_id }}
           WORKER_ONLY: ${{ inputs.worker_only }}
+          BUILD_CONTAINERS: ${{ inputs.build_containers }}
         run: |
+          [[ "$BUILD_CONTAINERS" != "true" || "$WORKER_ONLY" == "true" ]] || { echo "Container rebuild requires worker_only" >&2; exit 1; }
           [[ "$WORKER_ONLY" != "true" ]] || { echo "Select a complete publication without worker_only" >&2; exit 1; }
           node scripts/deploy/publication-source.mjs resolve --run-id "$PUBLICATION_RUN_ID"
   frontend:
     name: Build verified complete frontend
-    if: ${{ !inputs.worker_only && inputs.publication_run_id == '' }}
+    if: ${{ !inputs.worker_only && !inputs.build_containers && inputs.publication_run_id == '' }}
     uses: ./.github/workflows/static-frontend.yml
     permissions:
       contents: read
@@ -120,8 +126,13 @@ jobs:
       - name: Check Worker types
         run: pnpm typecheck:worker
       - name: Prepare verified Worker publication
-        run: node scripts/deploy/worker-publication.mjs prepare --worker-only
+        shell: bash
+        run: |
+          args=(prepare --worker-only)
+          if [[ "$BUILD_CONTAINERS" == "true" ]]; then args+=(--build-containers); fi
+          node scripts/deploy/worker-publication.mjs "${args[@]}"
         env:
+          BUILD_CONTAINERS: ${{ inputs.build_containers }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Archive verified publication
