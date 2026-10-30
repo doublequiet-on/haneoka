@@ -322,7 +322,19 @@ async function readLiveAssets(ownMessage) {
 async function assertPublishContext() {
   if (process.env.GITHUB_ACTIONS !== "true" || process.env.HANEOKA_PUBLICATION_LOCK !== "cloudflare-production-publish")
     throw new Error("Publish from the shared production publication job");
-  const context = publicationSourceContext({ root, toolingRoot, sourceSha });
+  const deployments = JSON.parse(
+    run(["deployments", "list", "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
+  );
+  const active = deployments.toSorted((a, b) => Date.parse(b.created_on) - Date.parse(a.created_on))[0];
+  if (active?.versions?.length !== 1 || active.versions[0].percentage !== 100)
+    throw new Error("Production must have one 100% active Worker version");
+  const version = JSON.parse(
+    run(["versions", "view", active.versions[0].version_id, "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
+  );
+  const activeWorkerSha = /^Worker ([a-f0-9]{40}); static [a-f0-9]{64}$/u.exec(version.annotations?.["workers/message"] || "")?.[1];
+  if (!activeWorkerSha) throw new Error("Active Worker source identity is missing");
+  const context = publicationSourceContext({ root, toolingRoot, sourceSha, activeWorkerSha,
+    activeWorkerVersionId: active.versions[0].version_id });
   const repository = process.env.GITHUB_REPOSITORY;
   const currentRun = process.env.GITHUB_RUN_ID;
   if (!repository || !currentRun) throw new Error("GitHub publication identity is missing");
@@ -485,10 +497,8 @@ if (mode === "prepare") {
     if (manifest.workerOnly) assert.deepEqual(await liveAssets(), prior, "Active assets changed before publication");
     const message = `Worker ${sourceSha}; static ${prior?.publicationSha256 || manifest.frontend.publicationSha256}`;
     for (let attempt = 1; attempt <= 3; attempt++) {
-      if (attempt > 1) {
-        publicationContext = await assertPublishContext();
-        fs.writeFileSync(path.join(output, "publication-context.json"), JSON.stringify(publicationContext, null, 2));
-      }
+      publicationContext = await assertPublishContext();
+      fs.writeFileSync(path.join(output, "publication-context.json"), JSON.stringify(publicationContext, null, 2));
       if (attempt > 1 && manifest.workerOnly) {
         const current = await liveAssets(message);
         assert.equal(current.publicationSha256, prior.publicationSha256);

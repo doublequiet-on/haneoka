@@ -3,7 +3,7 @@
 // Input: sealed publication、source commit 与当前 main。
 // Output: 来源资格、恢复 artifact 身份和发布上下文。
 // Pos: [Map](../L2.md)；部署来源与后续提交的资格边界。
-// Effects/Dependencies: 调用 Git／GitHub 只读 API；独立资源／Sonolus 产物及非 public 导航变化可保留资格，其他未发布输入拒绝。
+// Effects/Dependencies: 调用 Git／GitHub 只读 API；验证已部署源码、封存源码和 main 的单调祖先关系。
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -38,7 +38,7 @@ function ignoredSonolusPayloadPath(file) {
   return file.startsWith("packages/sonolus/scripts/") || file === ".dependencies/sonolus-our-notes";
 }
 
-export function sourceEligibility(root, sourceSha, mainSha, { allowPublicationTooling = false } = {}) {
+export function sourceEligibility(root, sourceSha, mainSha, { allowPublicationTooling = false, activeWorkerSha = null } = {}) {
   if (![sourceSha, mainSha].every((sha) => /^[a-f0-9]{40}$/u.test(sha)))
     throw new Error("Publication source commit is invalid");
   try {
@@ -46,20 +46,27 @@ export function sourceEligibility(root, sourceSha, mainSha, { allowPublicationTo
   } catch {
     throw new Error("Publication source is not an ancestor of main");
   }
+  if (activeWorkerSha !== null) {
+    if (!/^[a-f0-9]{40}$/u.test(activeWorkerSha)) throw new Error("Active Worker source commit is invalid");
+    try { git(root, "merge-base", "--is-ancestor", activeWorkerSha, sourceSha); }
+    catch { throw new Error("Publication would replace a newer or unrelated active Worker"); }
+  }
   const commits = git(root, "rev-list", `${sourceSha}..${mainSha}`).split("\n").filter(Boolean);
-  const ignoredPaths = new Set(), toolingPaths = new Set();
+  const ignoredPaths = new Set(), toolingPaths = new Set(), pendingPaths = new Set();
   for (const commit of commits) {
     const files = git(root, "diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-m", commit)
       .split("\n").filter(Boolean);
     for (const file of files) {
       if (ignoredResourcePath(file) || ignoredNavigationPath(file) || ignoredSonolusPayloadPath(file)) ignoredPaths.add(file);
       else if (allowPublicationTooling && publicationTooling.has(file)) toolingPaths.add(file);
+      else if (activeWorkerSha !== null) pendingPaths.add(file);
       else throw new Error(`Main has an unpublished deployment input: ${file}`);
     }
   }
   return {
     sourceSha, mainSha, subsequentCommitCount: commits.length,
-    ignoredPaths: [...ignoredPaths].sort(), publicationToolingPaths: [...toolingPaths].sort(),
+    activeWorkerSha, ignoredPaths: [...ignoredPaths].sort(), publicationToolingPaths: [...toolingPaths].sort(),
+    pendingDeploymentPaths: [...pendingPaths].sort(),
   };
 }
 
@@ -82,7 +89,7 @@ export function resolveSealedPublication(repository, runId) {
   return { sourceSha: run.head_sha, runId, artifactName, artifactId: artifacts[0].id };
 }
 
-export function publicationSourceContext({ root, toolingRoot, sourceSha }) {
+export function publicationSourceContext({ root, toolingRoot, sourceSha, activeWorkerSha, activeWorkerVersionId }) {
   const repository = process.env.GITHUB_REPOSITORY, runId = process.env.GITHUB_RUN_ID;
   if (!repository || !runId) throw new Error("GitHub publication identity is missing");
   const recoveryRunId = process.env.HANEOKA_PUBLICATION_ARTIFACT_RUN_ID || "";
@@ -100,9 +107,11 @@ export function publicationSourceContext({ root, toolingRoot, sourceSha }) {
   }).split(/\s/u)[0];
   try { git(root, "cat-file", "-e", `${mainSha}^{commit}`); }
   catch { git(root, "fetch", "--no-tags", "origin", mainSha); }
+  try { git(root, "cat-file", "-e", `${activeWorkerSha}^{commit}`); }
+  catch { git(root, "fetch", "--no-tags", "origin", activeWorkerSha); }
   return {
-    ...sourceEligibility(root, sourceSha, mainSha, { allowPublicationTooling: Boolean(recoveryRunId) }),
-    publisherSha, recoveredFromRunId: recoveryRunId || null,
+    ...sourceEligibility(root, sourceSha, mainSha, { allowPublicationTooling: Boolean(recoveryRunId), activeWorkerSha }),
+    activeWorkerVersionId, publisherSha, recoveredFromRunId: recoveryRunId || null,
   };
 }
 
