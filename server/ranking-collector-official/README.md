@@ -1,6 +1,6 @@
 # 独立四服榜单采集器
 
-采集器支持 `jp`、`tw`、`en`、`kr`，从官方 Version 与官方 CDN 的 MasterEvent、MasterChallengeMusic、MasterParameter 生成活动目录，再读取官方单曲榜和总榜。本地模式使用固定分区运行目录与 SQLite 历史；云端模式由区域 Durable Object 调度独立 Cloudflare Container，并通过 Worker 保存云端历史。HTTP/2、TLS、进程锁和安装入口均由 Python 实现，支持 Windows、Linux 和 macOS，不依赖 PowerShell。Taki 数据源独立维护。
+采集器支持 `jp`、`tw`、`en`、`kr`，从官方 Version 与官方 CDN 的 Master 生成目录，读取官方单曲榜、总榜及能力开启后的竞技场榜单／段位人数。本地模式使用固定分区运行目录与 SQLite 历史；云端模式由区域 Durable Object 调度独立 Cloudflare Container，并通过 Worker 保存云端历史。HTTP/2、TLS、进程锁和安装入口均由 Python 实现，支持 Windows、Linux 和 macOS，不依赖 PowerShell。Taki 数据源独立维护。
 
 ## Cloudflare 云端模式
 
@@ -53,6 +53,37 @@ docker build -t haneoka-official-ranking:local server/ranking-collector-official
 ```
 
 该命令从仓库根目录运行，只构建镜像，不配置凭据或启用生产采集。
+
+## 竞技场采集
+
+竞技场与活动复用本轮号池选中的同一身份、Version/Master 配对及请求间隔。Job 的
+`capabilities` 分别协商以下能力：
+
+- `arena-ranking-v1`：额外校验 MasterArenaSeason、MasterArenaLeague、MasterArenaRank，
+  生成赛季及各乐队已开放的 `thresholdsByBand`，采集每个联赛的第1–100位置。
+- `arena-demand-v1`：优先补 `arenaWindows` 中最多20个有界兴趣窗口，约40秒预算；
+  每窗为 `1+100*k` 起始的100个位置，成功观测落库后移出兴趣队列。
+- `arena-population-v1`：按当期 MasterArenaRank 的 `_lp` 统计每个开放细分段位的人数。
+- `arena-progress-v1`：在多轮间保存每联赛搜索候选与人数闭区间，完整发布前以本轮真实
+  响应重新核对阈值边界。缺人口时 Worker 有界预热，稳态按最旧联赛更新。
+
+无竞技场能力的旧 Job 严格沿用原三张活动表和活动回调，支持镜像与 Worker 滚动更新。
+新目录在活动空窗仍独立包含竞技场；无当前赛季时显式返回 `arena:null`。赛季、乐队或
+开放阈值变化时，Worker 清理不兼容的进度和人口完成标记。
+
+官方只读 RPC 为 `app.arena.ArenaService/ArenaRanking`。请求包含 season、可选 band 和
+起止位置；响应为 `ranking` 与 `max_rank`。名单保留原始 `profile/deck/rank/point`，
+人数按位置计数。全部探测窗口均经过 `attempt` 和 `arena-observation` 持久确认；
+解析失败也提交错误观测，解除本次 pending 后停止相应采样。
+
+单轮总截止时间仍为120秒；优先需求、五个联赛首窗和活动榜单后，余量用于人口搜索。
+完整候选已齐时会预留边界复验时间，避免持续需求饿死人口发布。未完成保存进度，
+保留旧人口及其观测时间；仅完整、单调且不超过真实 `max_rank` 的统计才发布。
+真实空榜的一次响应可确认全部阈值为0。人口时间取本轮实际探测中最早的接收时间，
+旧候选不会刷新时间。
+
+网页 GET 读取快照，缺失窗口可登记有界兴趣，游戏 RPC 仅在后台任务中执行。
+人口读取直接消费完整快照，不由访客逐次二分或补查其他来源。
 
 ## 已有账号池
 

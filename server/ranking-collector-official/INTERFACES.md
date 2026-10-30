@@ -32,6 +32,26 @@
 
 云端模式在独立 Cloudflare Container 中运行 `cloud.py`，入口为带服务令牌的 `POST /collect`。共享任务合同见 `src/lib/official-ranking.ts`：`haneoka:official-ranking-job/1` 提供固定区服、runId、凭据代际、客户端版本、私有配置、截止时间与单次回调令牌。每轮最长约120秒，`GET /health` 仅供就绪检查。
 
+Job 的可选 `capabilities` 协商 `arena-ranking-v1`、`arena-population-v1`、
+`arena-progress-v1`、`arena-demand-v1`。旧任务缺这些能力时，Python 不加载竞技场表，
+也不发送新增竞技场回调。竞技场目录含 `seasonId/startAtMs/endAtMs/rankingEndAtMs/bandIds`
+及 `thresholdsByBand`；活动为 null 仍独立采竞技场，当前无赛季为显式 `arena:null`。
+
+`arenaWindows` 最多20项 `{seasonId,bandId,startRank,endRank}`，按100位置对齐。
+`arena-observation` 含窗口、真实 `maxRank` 及原始 `players`；所有名单的默认 `point=0`
+均显式补出。排名显示字段不参与人数累计。
+
+`arena-population` 含 `{snapshotId,region,seasonId,bandId,observedAtMs,maxRank,atLeast,provenance}`，
+`atLeast=[{threshold,count}]` 阈值递增、人数非增且不超过 maxRank；阈值0人数等于 maxRank。
+只在全部边界经本轮实际响应复验后发送，时间为本轮最早探测接收时间。
+
+`arena-progress` 使用独立 `checkpointId`，重试保持同一 ID，内容为
+`{seasonId,bandId,thresholds,maxRank,counts,cursor,pending?}`。`counts` 未知项为 null；
+`cursor` 是下一个待求／验证阈值索引，全部完成时为数组长度。
+`pending={index,low,high}` 的边界为人数闭区间 `0<=low<=high<=maxRank`，不用显示名次或页号。
+Worker 保存 `updatedAtMs`，在后续 Job 的 `arenaProgress` 数组回传；候选仅用于选点，
+不能直接当作新人口。人口及进度属于已确认窗口的派生回调，不额外申请游戏请求 attempt。
+
 云端不写本地 SQLite 历史。`haneoka:official-ranking-update/1` 回调依次提交 `catalog`、`attempt`、`observation`、`complete`；每个 `attempt` 在发送认证请求前等待持久确认，每个观测在继续下一请求前等待持久确认。回调失败中断任务，HTTP/gRPC 认证拒绝和限流立即停止后续请求。Worker 依据 snapshotId 幂等保存观测，以原 received_at 生成 observedAtMs，官方玩家结构保留 snake_case 及 int64 字符串，归一化由网站适配层负责。
 
 `complete.failure` 与公开 `status.lastFailure` 使用 `{stage, code, httpStatus?, grpcStatus?}`；无失败时省略回调字段，公开字段为 null。阶段与错误类别采用固定白名单，HTTP/gRPC 仅保留数字状态，不保存异常原文、请求头、配置或玩家数据。容器启动或 HTTP 请求失败由 Worker 记录为 `container` 阶段。
