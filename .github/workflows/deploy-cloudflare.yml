@@ -35,6 +35,10 @@ on:
         description: Rebuild sealed container inputs with worker_only while retaining verified static assets
         type: boolean
         default: false
+      frontend_run_id:
+        description: Promote the complete frontend from this verified run with the current worker_only source
+        type: string
+        default: ""
       publication_run_id:
         description: Reuse a sealed complete publication from this completed deployment run
         type: string
@@ -42,7 +46,7 @@ on:
 jobs:
   recovery:
     name: Resolve sealed publication
-    if: ${{ inputs.publication_run_id != '' || (inputs.build_containers && !inputs.worker_only) }}
+    if: ${{ inputs.publication_run_id != '' || inputs.frontend_run_id != '' || (inputs.build_containers && !inputs.worker_only) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,26 +65,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLICATION_RUN_ID: ${{ inputs.publication_run_id }}
+          FRONTEND_RUN_ID: ${{ inputs.frontend_run_id }}
           WORKER_ONLY: ${{ inputs.worker_only }}
           BUILD_CONTAINERS: ${{ inputs.build_containers }}
         run: |
           [[ "$BUILD_CONTAINERS" != "true" || "$WORKER_ONLY" == "true" ]] || { echo "Container rebuild requires worker_only" >&2; exit 1; }
-          [[ "$WORKER_ONLY" != "true" ]] || { echo "Select a complete publication without worker_only" >&2; exit 1; }
-          node scripts/deploy/publication-source.mjs resolve --run-id "$PUBLICATION_RUN_ID"
+          [[ -z "$PUBLICATION_RUN_ID" || -z "$FRONTEND_RUN_ID" ]] || { echo "Select one publication source" >&2; exit 1; }
+          if [[ -n "$FRONTEND_RUN_ID" ]]; then
+            [[ "$WORKER_ONLY" == "true" ]] || { echo "Frontend promotion requires worker_only" >&2; exit 1; }
+            node scripts/deploy/publication-source.mjs resolve --run-id "$FRONTEND_RUN_ID"
+          else
+            [[ "$WORKER_ONLY" != "true" ]] || { echo "Select a complete publication without worker_only" >&2; exit 1; }
+            node scripts/deploy/publication-source.mjs resolve --run-id "$PUBLICATION_RUN_ID"
+          fi
   frontend:
     name: Build verified complete frontend
-    if: ${{ !inputs.worker_only && !inputs.build_containers && inputs.publication_run_id == '' }}
+    if: ${{ !inputs.worker_only && !inputs.build_containers && inputs.publication_run_id == '' && inputs.frontend_run_id == '' }}
     uses: ./.github/workflows/static-frontend.yml
     permissions:
       contents: read
     secrets: inherit
   build:
-    name: Build verified Worker-only artifact
-    if: ${{ inputs.worker_only && inputs.publication_run_id == '' }}
+    name: Build verified service artifact
+    needs: recovery
+    if: ${{ always() && !cancelled() && inputs.worker_only && inputs.publication_run_id == '' && (inputs.frontend_run_id == '' || needs.recovery.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
       contents: read
+      actions: read
     env:
       STATIC_PAGE_GROUPS: core
       STATIC_RESOURCE_SERVERS: intl,jp
@@ -125,20 +138,54 @@ jobs:
           python3 -m unittest discover -s scripts/garupa_master/tests -t .
       - name: Check Worker types
         run: pnpm typecheck:worker
+      - name: Check out selected frontend source
+        if: ${{ inputs.frontend_run_id != '' }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.recovery.outputs.source_sha }}
+          path: .output/frontend-source
+          fetch-depth: 0
+      - name: Check out selected frontend external locks
+        if: ${{ inputs.frontend_run_id != '' }}
+        working-directory: .output/frontend-source
+        run: node scripts/external-repositories.mjs checkout
+      - name: Restore selected complete frontend artifact
+        if: ${{ inputs.frontend_run_id != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.recovery.outputs.artifact_name }}
+          run-id: ${{ needs.recovery.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+          path: .output/frontend-artifact
+      - name: Extract selected complete frontend publication
+        if: ${{ inputs.frontend_run_id != '' }}
+        run: |
+          if [[ -f .output/frontend-artifact/worker-publication.tar.zst ]]; then
+            tar --zstd -xf .output/frontend-artifact/worker-publication.tar.zst -C .output/frontend-source
+          else
+            tar -xf .output/frontend-artifact/worker-publication.tar -C .output/frontend-source
+          fi
       - name: Prepare verified Worker publication
         shell: bash
         run: |
           args=(prepare --worker-only)
           if [[ "$BUILD_CONTAINERS" == "true" ]]; then args+=(--build-containers); fi
+          if [[ -n "$HANEOKA_FRONTEND_ARTIFACT_RUN_ID" ]]; then args+=(--frontend-source .output/frontend-source); fi
           node scripts/deploy/worker-publication.mjs "${args[@]}"
         env:
           BUILD_CONTAINERS: ${{ inputs.build_containers }}
+          HANEOKA_FRONTEND_ARTIFACT_RUN_ID: ${{ inputs.frontend_run_id }}
+          GH_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Archive verified publication
         shell: bash
+        env:
+          FRONTEND_RUN_ID: ${{ inputs.frontend_run_id }}
         run: |
-          tar --use-compress-program="zstd -T2 -3" -cf .output/worker-publication.tar.zst .output/deployment
+          files=(.output/deployment)
+          if [[ -n "$FRONTEND_RUN_ID" ]]; then files+=(.output/public .output/static-documents/publication.json .output/static-documents/references.json); fi
+          tar --use-compress-program="zstd -T2 -3" -cf .output/worker-publication.tar.zst "${files[@]}"
       - name: Save verified publication artifact
         uses: actions/upload-artifact@v7
         with:
@@ -162,12 +209,13 @@ jobs:
       cancel-in-progress: false
     env:
       HANEOKA_PUBLICATION_ARTIFACT_RUN_ID: ${{ inputs.publication_run_id }}
+      HANEOKA_FRONTEND_ARTIFACT_RUN_ID: ${{ inputs.frontend_run_id }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ needs.recovery.outputs.source_sha || github.sha }}
+          ref: ${{ inputs.publication_run_id != '' && needs.recovery.outputs.source_sha || github.sha }}
       - name: Check out current publication tooling
         if: ${{ inputs.publication_run_id != '' }}
         uses: actions/checkout@v7
@@ -199,8 +247,8 @@ jobs:
       - name: Restore verified publication artifact
         uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.recovery.outputs.artifact_name || format('worker-publication-{0}-{1}', github.sha, github.run_id) }}
-          run-id: ${{ needs.recovery.outputs.artifact_run_id || github.run_id }}
+          name: ${{ inputs.publication_run_id != '' && needs.recovery.outputs.artifact_name || format('worker-publication-{0}-{1}', github.sha, github.run_id) }}
+          run-id: ${{ inputs.publication_run_id != '' && needs.recovery.outputs.artifact_run_id || github.run_id }}
           github-token: ${{ github.token }}
           path: .output/restore
       - name: Restore publication files

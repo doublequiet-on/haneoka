@@ -609,3 +609,21 @@ publication change during preparation requires a fresh service build. Partial
 container changes from an interrupted attempt may be rebuilt on retry; static
 assets remain fixed. `publication_run_id` continues to select complete frontend
 artifacts and cannot be combined with the service-only options.
+
+To publish a previously verified complete frontend with the current Worker,
+select its original deployment run with `frontend_run_id`:
+
+```sh
+gh workflow run deploy-cloudflare.yml --ref main \
+  -f worker_only=true -f frontend_run_id=VERIFIED_RUN_ID
+```
+
+The build verifies the complete original artifact against its own source
+checkout and external locks, then seals its frontend files with the current
+Worker. It records both source identities. Under the production lock, the served
+frontend must be an ancestor of the selected frontend, and the selected frontend
+must be an ancestor of the candidate Worker; the Worker retains its independent
+monotonic check. This avoids rebuilding static pages for subsequent backend
+changes. Set `build_containers=true` in the same request when Docker inputs also
+changed. Header policy must match the current candidate. `frontend_run_id` and
+`publication_run_id` cannot be combined.

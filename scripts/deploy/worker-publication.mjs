@@ -13,7 +13,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { publicationSourceContext } from "./publication-source.mjs";
+import { publicationSourceContext, resolveSealedPublication } from "./publication-source.mjs";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -21,6 +21,7 @@ const { values, positionals } = parseArgs({
     "source-root": { type: "string" },
     "worker-only": { type: "boolean" },
     "build-containers": { type: "boolean" },
+    "frontend-source": { type: "string" },
     "dry-run": { type: "boolean" },
   },
 });
@@ -29,6 +30,8 @@ if (!["prepare", "verify", "publish"].includes(mode) || positionals.length !== 1
   throw new Error("Use prepare [--worker-only [--build-containers]], verify, or publish [--dry-run]");
 if (values["build-containers"] && (mode !== "prepare" || !values["worker-only"]))
   throw new Error("Container rebuild requires prepare --worker-only");
+if (values["frontend-source"] && (mode !== "prepare" || !values["worker-only"]))
+  throw new Error("Frontend promotion requires prepare --worker-only");
 const root = path.resolve(values["source-root"] || process.cwd());
 const toolingRoot = fileURLToPath(new URL("../../", import.meta.url));
 const output = path.join(root, ".output/deployment");
@@ -131,7 +134,7 @@ function containerContextFiles() {
 function sealContainerContexts() {
   return containerContextFiles().map(({ relative, file, mode }) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, execFileSync("git", ["-C", root, "show", `${sourceSha}:${relative}`]));
+    fs.writeFileSync(file, execFileSync("git", ["-C", root, "show", `${sourceSha}:${relative}`], { maxBuffer: 64 * 1024 * 1024 }));
     fs.chmodSync(file, mode);
     return { ...fileRecord(path.relative(root, file)), mode };
   });
@@ -150,6 +153,51 @@ function verifyContainerContexts() {
 function retainedAssets(value) {
   return { publicationSha256: value.publicationSha256, staticIdentity: value.staticIdentity,
     frontendSha: value.frontendSha, assetsConfigSha256: value.assetsConfigSha256 };
+}
+function frontendFiles(files) {
+  return files.filter((record) => record.path.startsWith(".output/public/") ||
+    [".output/static-documents/publication.json", ".output/static-documents/references.json"].includes(record.path));
+}
+function assertAncestor(ancestor, descendant, message) {
+  try { git("merge-base", "--is-ancestor", ancestor, descendant); }
+  catch { throw new Error(message); }
+}
+function assertFrontendProgress(manifest, current) {
+  if (!manifest.frontendSource) return;
+  const selected = manifest.frontendSource.sourceSha;
+  assertAncestor(current.frontendSha, selected, "Frontend publication would roll back the served frontend");
+  assertAncestor(selected, sourceSha, "Frontend source is not an ancestor of the candidate Worker");
+}
+function frontendSelection() {
+  const directory = path.resolve(values["frontend-source"]);
+  assert.notEqual(directory, root, "Select a separate complete frontend source checkout");
+  const runId = process.env.HANEOKA_FRONTEND_ARTIFACT_RUN_ID;
+  const recovered = resolveSealedPublication(process.env.GITHUB_REPOSITORY, runId);
+  execFileSync(process.execPath, [fileURLToPath(import.meta.url), "verify", "--source-root", directory], {
+    cwd: root, env: process.env, stdio: "inherit",
+  });
+  const body = fs.readFileSync(path.join(directory, ".output/deployment/manifest.json"));
+  const manifest = JSON.parse(body);
+  assert.equal(manifest.workerOnly, false, "Select a complete frontend publication");
+  assert.ok(!manifest.frontendSource && manifest.frontend, "Select an original complete frontend artifact");
+  assert.equal(manifest.source.sourceSha, recovered.sourceSha, "Frontend artifact run source differs");
+  assertAncestor(recovered.sourceSha, sourceSha, "Frontend source is not an ancestor of the candidate Worker");
+  assert.equal(fs.readFileSync(path.join(directory, ".output/public/_headers"), "utf8"),
+    fs.readFileSync(path.join(root, "public/_headers"), "utf8"), "Frontend header policy differs from candidate");
+  return { directory, manifest, body, runId };
+}
+function copyFrontend(selection) {
+  fs.rmSync(path.join(root, ".output/public"), { recursive: true, force: true });
+  const files = frontendFiles(selection.manifest.files);
+  for (const record of files) {
+    const target = path.join(root, record.path);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(selection.directory, record.path), target);
+  }
+  const copiedManifest = path.join(output, "frontend-source-manifest.json");
+  fs.mkdirSync(output, { recursive: true });
+  fs.writeFileSync(copiedManifest, selection.body);
+  return [...files, fileRecord(path.relative(root, copiedManifest))];
 }
 function containerInputIdentities(revision) {
   return Object.fromEntries(
@@ -222,11 +270,28 @@ function readManifest() {
     ...(manifest.buildContainers ? filesAt(path.join(output, "containers")) : []),
   ].sort();
   assert.deepEqual(actual, expected, "Publication contains unverified extra files");
+  if (manifest.frontendSource) {
+    assert.equal(manifest.workerOnly, false, "Frontend promotion must publish the selected assets");
+    assert.match(manifest.frontendSource.sourceSha, /^[a-f0-9]{40}$/u);
+    assert.match(manifest.frontendRunId, /^[1-9][0-9]*$/u);
+    const selectedFile = ".output/deployment/frontend-source-manifest.json";
+    assert.deepEqual(manifest.files.find((record) => record.path === selectedFile), fileRecord(selectedFile),
+      "Frontend source manifest is not sealed");
+    const selected = JSON.parse(fs.readFileSync(path.join(root, selectedFile), "utf8"));
+    assert.equal(selected.workerOnly, false, "Frontend source artifact is incomplete");
+    assert.ok(!selected.frontendSource, "Frontend source must be an original complete artifact");
+    assert.deepEqual(manifest.frontendSource, selected.source, "Selected frontend source identity differs");
+    assert.deepEqual(manifest.frontend, selected.frontend, "Selected frontend publication identity differs");
+    assert.deepEqual(frontendFiles(manifest.files), frontendFiles(selected.files), "Selected frontend file set differs");
+    assertAncestor(manifest.frontendSource.sourceSha, sourceSha, "Frontend source is not an ancestor of candidate");
+  }
   if (manifest.buildContainers) {
-    assert.equal(manifest.workerOnly, true, "Container rebuild must retain verified static assets");
-    assert.ok(manifest.retainedAssets && manifest.containerInputs, "Container publication identities are missing");
-    assert.equal(typeof manifest.retainedAssets.publicationSha256, "string");
-    assert.match(manifest.retainedAssets.publicationSha256, /^[a-f0-9]{64}$/u);
+    assert.ok(manifest.workerOnly || manifest.frontendSource, "Container service publication mode is missing");
+    assert.ok(manifest.containerInputs, "Container publication inputs are missing");
+    if (manifest.workerOnly) {
+      assert.ok(manifest.retainedAssets, "Retained static identity is missing");
+      assert.match(manifest.retainedAssets.publicationSha256, /^[a-f0-9]{64}$/u);
+    }
     verifyContainerContexts();
   }
   if (manifest.containerInputs)
@@ -454,7 +519,10 @@ async function assertPublishContext() {
 if (mode === "prepare") {
   const source = sourceIdentity();
   const buildContainers = !!values["build-containers"];
+  const selectedFrontend = values["frontend-source"] ? frontendSelection() : null;
+  const workerOnly = !!values["worker-only"] && !selectedFrontend;
   const retained = values["worker-only"] ? await liveAssets(undefined, { allowContainerChanges: buildContainers }) : null;
+  if (selectedFrontend) assertFrontendProgress({ frontendSource: selectedFrontend.manifest.source }, retained);
   let containerInputs = buildContainers ? containerInputIdentities(sourceSha) : retained?.containerInputs;
   if (!values["worker-only"]) {
     try {
@@ -465,14 +533,15 @@ if (mode === "prepare") {
   }
   fs.rmSync(output, { recursive: true, force: true });
   const containerFiles = buildContainers ? sealContainerContexts() : [];
+  const selectedFiles = selectedFrontend ? copyFrontend(selectedFrontend) : [];
   const configFile = writeConfig(
     "compile.wrangler.json",
     configFor({ keepAssets: true, containerImages: buildContainers ? undefined : retained?.containerImages, buildContainers }),
   );
   run(["deploy", "--config", configFile, "--dry-run", "--outdir", path.join(output, "worker")]);
   if (!fs.existsSync(path.join(output, "worker/index.js"))) throw new Error("Compiled Worker entry is missing");
-  const files = [...filesAt(path.join(output, "worker")).map(fileRecord), ...containerFiles];
-  let frontend;
+  const files = [...filesAt(path.join(output, "worker")).map(fileRecord), ...containerFiles, ...selectedFiles];
+  let frontend = selectedFrontend?.manifest.frontend;
   if (!values["worker-only"]) {
     const publicationFile = path.join(root, ".output/static-documents/publication.json");
     const publication = JSON.parse(fs.readFileSync(publicationFile, "utf8"));
@@ -493,9 +562,11 @@ if (mode === "prepare") {
       {
         schema: "haneoka-worker-publication-v1",
         source,
-        workerOnly: !!values["worker-only"],
+        workerOnly,
         buildContainers: buildContainers || undefined,
-        retainedAssets: buildContainers ? retainedAssets(retained) : undefined,
+        retainedAssets: buildContainers && workerOnly ? retainedAssets(retained) : undefined,
+        frontendSource: selectedFrontend?.manifest.source,
+        frontendRunId: selectedFrontend?.runId,
         containerImages: retained?.containerImages,
         containerInputs,
         files,
@@ -510,7 +581,8 @@ if (mode === "prepare") {
     JSON.stringify({
       prepared: true,
       sourceSha,
-      workerOnly: !!values["worker-only"],
+      workerOnly,
+      frontendSourceSha: selectedFrontend?.manifest.source.sourceSha,
       files: files.length,
     }),
   );
@@ -520,8 +592,14 @@ if (mode === "prepare") {
 } else {
   const manifest = readManifest();
   const inspection = { allowContainerChanges: !!manifest.buildContainers };
-  const prior = manifest.workerOnly ? await liveAssets(undefined, inspection) : null;
-  if (manifest.buildContainers) assert.deepEqual(retainedAssets(prior), manifest.retainedAssets,
+  const prior = manifest.workerOnly || manifest.frontendSource ? await liveAssets(undefined, inspection) : null;
+  if (manifest.frontendSource) {
+    assert.equal(process.env.HANEOKA_FRONTEND_ARTIFACT_RUN_ID, manifest.frontendRunId, "Frontend run identity differs");
+    assert.equal(resolveSealedPublication(process.env.GITHUB_REPOSITORY, manifest.frontendRunId).sourceSha,
+      manifest.frontendSource.sourceSha, "Frontend artifact source differs from verified run");
+    assertFrontendProgress(manifest, prior);
+  }
+  if (manifest.buildContainers && manifest.workerOnly) assert.deepEqual(retainedAssets(prior), manifest.retainedAssets,
     "Retained static assets changed since the publication was sealed");
   const configFile = writeConfig(
     "publish.wrangler.json",
@@ -582,7 +660,7 @@ if (mode === "prepare") {
     if (process.env.HANEOKA_PUBLICATION_ARTIFACT_RUN_ID && manifest.workerOnly)
       throw new Error("Recovery requires a verified complete frontend publication");
     fs.writeFileSync(path.join(output, "publication-context.json"), JSON.stringify(publicationContext, null, 2));
-    if (!manifest.workerOnly && manifest.containerInputs) {
+    if (!manifest.workerOnly && !manifest.buildContainers && manifest.containerInputs) {
       try {
         const active = await readLiveAssets();
         assert.deepEqual(active.containerInputs, manifest.containerInputs, "Active container inputs differ");
@@ -596,14 +674,17 @@ if (mode === "prepare") {
       }
     }
     if (manifest.workerOnly) assert.deepEqual(await liveAssets(undefined, inspection), prior, "Active assets changed before publication");
-    const message = `Worker ${sourceSha}; static ${prior?.publicationSha256 || manifest.frontend.publicationSha256}`;
+    const publicationSha256 = manifest.workerOnly ? prior.publicationSha256 : manifest.frontend.publicationSha256;
+    const message = `Worker ${sourceSha}; static ${publicationSha256}`;
     for (let attempt = 1; attempt <= 3; attempt++) {
       publicationContext = await assertPublishContext();
       fs.writeFileSync(path.join(output, "publication-context.json"), JSON.stringify(publicationContext, null, 2));
-      if (attempt > 1 && manifest.workerOnly) {
-        const current = await liveAssets(message, inspection);
-        assert.equal(current.publicationSha256, prior.publicationSha256);
-        assert.equal(current.assetsConfigSha256, prior.assetsConfigSha256);
+      if (manifest.frontendSource || attempt > 1 && manifest.workerOnly) {
+        const current = await liveAssets(attempt > 1 ? message : undefined, inspection);
+        if (manifest.workerOnly) {
+          assert.equal(current.publicationSha256, prior.publicationSha256);
+          assert.equal(current.assetsConfigSha256, prior.assetsConfigSha256);
+        } else assertFrontendProgress(manifest, current);
         if (!manifest.buildContainers) assert.deepEqual(current.containerImages, prior.containerImages);
         if (current.versionId !== prior.versionId && current.workerMessage !== message)
           throw new Error("Another Worker became active during publication");
@@ -621,9 +702,11 @@ if (mode === "prepare") {
     assert.equal(after.workerMessage, message, "Another Worker became active after publication");
     assert.equal(
       after.publicationSha256,
-      prior?.publicationSha256 || manifest.frontend.publicationSha256,
+      publicationSha256,
       "Active static publication differs from the verified artifact",
     );
+    if (manifest.frontendSource) assert.equal(after.frontendSha, manifest.frontendSource.sourceSha,
+      "Served frontend source differs from selected artifact");
     if (manifest.workerOnly) {
       assert.equal(
         after.publicationSha256,
@@ -646,6 +729,7 @@ if (mode === "prepare") {
         publisherSha: publicationContext.publisherSha,
         qualifiedMainSha: publicationContext.mainSha,
         recoveredFromRunId: publicationContext.recoveredFromRunId,
+        ...(manifest.frontendSource ? { frontendSourceSha: manifest.frontendSource.sourceSha, frontendRunId: manifest.frontendRunId } : {}),
         ...(manifest.buildContainers ? { containerInputs: manifest.containerInputs, containerImages: after.containerImages } : {}),
         observedAt: new Date().toISOString(),
       });
