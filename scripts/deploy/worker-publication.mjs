@@ -536,7 +536,7 @@ if (mode === "prepare") {
   const selectedFiles = selectedFrontend ? copyFrontend(selectedFrontend) : [];
   const configFile = writeConfig(
     "compile.wrangler.json",
-    configFor({ keepAssets: true, containerImages: buildContainers ? undefined : retained?.containerImages, buildContainers }),
+    configFor({ keepAssets: true, containerImages: retained?.containerImages }),
   );
   run(["deploy", "--config", configFile, "--dry-run", "--outdir", path.join(output, "worker")]);
   if (!fs.existsSync(path.join(output, "worker/index.js"))) throw new Error("Compiled Worker entry is missing");
