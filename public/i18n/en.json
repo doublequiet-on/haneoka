@@ -186,7 +186,9 @@
     },
     "search": {
       "placeholder": "Search the archive and community",
-      "hint": "Find songs, characters, story dialogue, guides and community posts."
+      "hint": "Find songs, characters, story dialogue, guides and community posts.",
+      "recent": "Recent",
+      "browse": "Browse"
     }
   },
   "navigation": {
@@ -431,7 +433,8 @@
       "info": "Info",
       "conditions": "Conditions",
       "effects": "Effects",
-      "scoreRanks": "Score Ranks"
+      "scoreRanks": "Score Ranks",
+      "description": "Description"
     },
     "songs": {
       "fields": {
@@ -1514,6 +1517,9 @@
         "find": "Find",
         "notFound": "Not in the top {count}"
       }
+    },
+    "comics": {
+      "numbered": "Comic {number}"
     }
   },
   "story": {
@@ -4572,7 +4578,7 @@
       "forumChooseWritable": "Choose a forum where you can post.",
       "forumPostCount": "{count} topics",
       "forumEmpty": "No forums available",
-      "forumReadOnly": "You can read this forum. Posting is restricted.",
+      "forumReadOnly": "Read only",
       "tagMatch": "Tag matching",
       "tagMatchAll": "Match all selected tags",
       "tagMatchAny": "Match any selected tag",
@@ -5593,9 +5599,12 @@
     "extras": "Installation resources",
     "checksums": "SHA-256 checksums",
     "saveTitle": "Save import options",
-    "saveBody": "Read Android saves with Shizuku or supported folder access. On desktop, connect and authorize an Android phone to import, or use a local iPhone / iPad backup. Standard iOS installations import save files exported on a computer.",
     "saveGuide": "Explore save import",
-    "windowsArmPackage": "Windows 11 ARM64 → x64"
+    "windowsArmPackage": "Windows 11 ARM64 → x64",
+    "saveAndroid": "Shizuku · folder access",
+    "saveDesktopLabel": "Desktop",
+    "saveDesktop": "Connected Android phone · iPhone / iPad local backup",
+    "saveIos": "Save file exported from a computer"
   },
   "app": {
     "offline": {

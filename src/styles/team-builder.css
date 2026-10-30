@@ -626,6 +626,17 @@
     min-width: 0;
     scroll-margin-top: 80px;
   }
+  /* Pre-rendered markup is the desktop layout; where the script will switch to the
+     compact one, keep it invisible until then so nothing visibly reflows. */
+  @media (max-width: 1199px) {
+    team-builder[data-prerendered] .tb-tool--desktop {
+      visibility: hidden;
+    }
+  }
+  /* Reserve the empty state's height while the box loads, so it never pushes the page. */
+  .tb-results-column {
+    min-block-size: 320px;
+  }
   .tb-results--empty {
     display: grid;
     min-height: 320px;

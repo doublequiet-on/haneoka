@@ -186,7 +186,9 @@
     },
     "search": {
       "placeholder": "搜尋資料、劇情與社群",
-      "hint": "查找樂曲、角色、劇情對白、說明指南與社群貼文。"
+      "hint": "查找樂曲、角色、劇情對白、說明指南與社群貼文。",
+      "recent": "最近搜尋",
+      "browse": "瀏覽"
     }
   },
   "navigation": {
@@ -431,7 +433,8 @@
       "info": "資訊",
       "conditions": "條件",
       "effects": "效果",
-      "scoreRanks": "分數等級"
+      "scoreRanks": "分數等級",
+      "description": "說明"
     },
     "songs": {
       "fields": {
@@ -1514,6 +1517,9 @@
         "find": "查詢",
         "notFound": "前 {count} 名中未找到"
       }
+    },
+    "comics": {
+      "numbered": "第{number}話"
     }
   },
   "story": {
@@ -4572,7 +4578,7 @@
       "forumChooseWritable": "請選擇可發文的板塊。",
       "forumPostCount": "{count} 個主題",
       "forumEmpty": "沒有可用板塊",
-      "forumReadOnly": "你可以閱讀此板塊，發文受到限制。",
+      "forumReadOnly": "唯讀",
       "tagMatch": "標籤匹配",
       "tagMatchAll": "匹配所有所選標籤",
       "tagMatchAny": "匹配任一所選標籤",
@@ -5593,9 +5599,12 @@
     "extras": "安裝資源",
     "checksums": "SHA-256 校驗檔案",
     "saveTitle": "存檔匯入方式",
-    "saveBody": "Android 可透過 Shizuku 或支援的資料夾存取方式讀取存檔；電腦連接並授權 Android 手機後即可匯入，也支援 iPhone / iPad 本機備份。標準 iOS 版可匯入從電腦匯出的存檔。",
     "saveGuide": "瞭解存檔匯入",
-    "windowsArmPackage": "Windows 11 ARM64 → x64"
+    "windowsArmPackage": "Windows 11 ARM64 → x64",
+    "saveAndroid": "Shizuku · 資料夾存取",
+    "saveDesktopLabel": "電腦",
+    "saveDesktop": "連接的 Android 手機 · iPhone / iPad 本機備份",
+    "saveIos": "從電腦匯出的存檔檔案"
   },
   "app": {
     "offline": {

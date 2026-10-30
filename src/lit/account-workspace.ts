@@ -355,11 +355,6 @@ export class AccountWorkspace extends LitElement {
     const data = new FormData(event.currentTarget as HTMLFormElement);
     const email = String(data.get("email") || "").trim();
     const password = String(data.get("password") || "");
-    const legal = Boolean(data.get("legal"));
-    if (!legal) {
-      this.error = this.label("legalAgreementRequired", "Accept the policies before continuing.");
-      return;
-    }
     if (this.config.turnstileSiteKey && !this.captchaToken) {
       this.error = this.label("completeChallenge", "Complete the verification challenge.");
       return;
@@ -876,16 +871,6 @@ ${
                 : nothing
             }
             ${this.renderChallenge()}
-            <label class="check-row">
-              <input name="legal" type="checkbox" required />
-              <span>
-                ${this.label("legalAgreementPrefix", "I agree to the")}
-                <a href="/privacy" target="_blank">${this.label("privacy", "Privacy Policy")}</a>
-                ${this.label("legalAgreementJoiner", "and")}
-                <a href="/terms" target="_blank">${this.label("terms", "Terms of Use")}</a>
-                ${this.label("legalAgreementSuffix", ".")}
-              </span>
-            </label>
             <button class="button" ?disabled=${this.busy}>
               ${this.mode === "signUp" ? icon("mark_email_read", 18) : icon("login", 18)}${this.busy ? this.label("working", "Working…") : this.mode === "signUp" ? this.label("signUp", "Create account") : this.label("signIn", "Sign in")}
             </button>
@@ -923,6 +908,10 @@ ${
                 `
               : nothing
           }
+          <nav class="account-legal md-body-small">
+            <a href="/privacy">${this.label("privacy", "Privacy Policy")}</a>
+            <a href="/terms">${this.label("terms", "Terms of Use")}</a>
+          </nav>
         </article>
       </section>
     `;

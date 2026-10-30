@@ -11,6 +11,7 @@ import { STATIC_DOCUMENT_UNDERLAY_START, STATIC_DOCUMENT_UNDERLAY_END } from "..
 import "../lit/community-workspace";
 import "../styles/catalog.css";
 import "../styles/community.css";
+import "../styles/playlists.css";
 const { locale, path, playlist = "", playlistServer = "intl" } = Astro.props as { locale: Locale; path?: string; playlist?: string; playlistServer?: string };
 const mode = path || "feeds";
 const route = `/community${path ? `/${path}` : ""}`;

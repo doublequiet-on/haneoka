@@ -18,7 +18,7 @@ import { LazyImages, nextImageCandidate } from "./ui/lazy-images";
 import { operationProgress } from "./ui/operation-progress";
 import { readCommunityForumDirectory } from "../lib/community-forum-directory";
 import { asyncRegion } from "./ui/async-region";
-import { readCommunityViewer, CommunityRealmChanged, type CommunityViewer } from "../lib/community-viewer";
+import { signedInHint, readCommunityViewer, CommunityRealmChanged, type CommunityViewer } from "../lib/community-viewer";
 import { communityPostCard } from "./views/community-post-card";
 import {
   CommunityReactions,
@@ -1142,7 +1142,9 @@ export class CommunityWorkspace extends LitElement {
       // reads that forum's posts, so the slug → posts chain is one request.
       const forumFeed = this.routeKind === "collection" && this.mode === "feeds" && Boolean(this.forumSlug) &&
         !this.selectedForumId && ["recommended", "latest", "following"].includes(this.feedScope);
-      const canBootstrap = !append && (postDetail || forumFeed || (this.routeKind === "collection" && this.mode === "feeds" &&
+      // A signed-out reader's following feed is a sign-in prompt, not a read.
+      const signedOutFollowing = this.feedScope === "following" && !signedInHint();
+      const canBootstrap = !append && !signedOutFollowing && (postDetail || forumFeed || (this.routeKind === "collection" && this.mode === "feeds" &&
         !this.forumSlug && !this.selectedForumId && ["recommended", "latest", "following"].includes(this.feedScope)) ||
         (this.routeKind === "collection" && this.mode === "forums" && !this.forumSlug) ||
         (this.routeKind === "user-detail" && /^[1-9]\d{0,15}$/u.test(this.entityId)) ||
@@ -6121,9 +6123,13 @@ export class CommunityWorkspace extends LitElement {
         >
         <div class="community-forum-header__body">
           <h2>${this.forumName(forum)}</h2>
-          <p class="community-forum-description">
-            ${localizedText(forum.descriptions, this.locale)}
-          </p>
+          ${
+            localizedText(forum.descriptions, this.locale)
+              ? html`
+                  <p class="community-forum-description">${localizedText(forum.descriptions, this.locale)}</p>
+                `
+              : nothing
+          }
           <div class="community-forum-stats">
             ${
               typeof forum.postCount === "number"
@@ -6137,9 +6143,7 @@ export class CommunityWorkspace extends LitElement {
             ${
               !forum.capabilities.canPost
                 ? html`
-                    <span role="status">
-                      ${this.label("forumReadOnly", "You can read this forum. Posting is restricted.")}
-                    </span>
+                    <span class="chip chip--static" role="status">${icon("lock", 16)}${this.label("forumReadOnly", "Read only")}</span>
                   `
                 : nothing
             }

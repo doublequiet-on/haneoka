@@ -1,0 +1,10 @@
+---
+import { staticBuildPaths } from "../../server/static-build";
+import NotFoundDocument from "../../components/NotFoundDocument.astro";
+import { LOCALES, type Locale } from "../../i18n/locales";
+export function getStaticPaths() {
+  return staticBuildPaths("src/pages/[locale]/404.astro", LOCALES.map((locale) => ({ params: { locale } })));
+}
+const { locale } = Astro.params as { locale: Locale };
+---
+<NotFoundDocument locale={locale} />

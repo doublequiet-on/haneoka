@@ -188,6 +188,7 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
   artworkCard: "catalog.cards.fields.artworkCard",
   ascending: "common.layout.ascending",
   attribute: "catalog.fields.attribute",
+  description: "catalog.fields.description",
   audio: "navigation.audio",
   awakening: "catalog.cards.fields.awakening",
   background: "story.labels.background",
@@ -2048,6 +2049,10 @@ export class CatalogScreen extends LitElement {
     if (this.profile.presentation === "song") this.restoreMetaReference(params);
     this.restoreFacets(params);
     this.selectedId = this.settings.entityId || params.get(this.selectionParam()) || "";
+    if (this.settings.entityContext && !this.selectedId && /\/detail\/?$/u.test(location.pathname)) {
+      location.replace(location.pathname.replace(/detail\/?$/u, ""));
+      return;
+    }
     if (this.isProvider() && this.profile.presentation === "song") {
       if (this.settings.entityContext) this.syncBestdoriChartPage(params);
       else if (this.selectedId) {
@@ -2445,9 +2450,12 @@ export class CatalogScreen extends LitElement {
     return cleanMarkup(this.itemTitleValue(item).text) || "—";
   }
   private itemTitleValue(item: Item) {
-    return this.profile.presentation === "song"
-      ? songTitle(item, this.settings.locale)
-      : resolveLocalizedText(this.first(item, this.profile.title), this.settings.locale);
+    if (this.profile.presentation === "song") return songTitle(item, this.settings.locale);
+    const value = resolveLocalizedText(this.first(item, this.profile.title), this.settings.locale);
+    const number = this.profile.presentation === "comic" ? /^Comic (\d+)$/u.exec(value.text)?.[1] : undefined;
+    return number
+      ? { text: clientText(this.settings.locale, "catalog.comics.numbered", "Comic {number}", { number }), locale: this.settings.locale }
+      : value;
   }
   itemTitleLanguage(item: Item) {
     return this.itemTitleValue(item).locale;

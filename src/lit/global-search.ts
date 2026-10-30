@@ -26,7 +26,11 @@ const uiLabelPaths: Readonly<Record<string, string>> = {
   "retry": "common.actions.retry",
   "search": "common.actions.search",
   "type": "catalog.fields.type",
-  "unavailable": "common.states.unavailable"
+  "unavailable": "common.states.unavailable",
+  "recent": "common.search.recent",
+  "clear": "common.actions.clear",
+  "remove": "common.actions.remove",
+  "browse": "common.search.browse"
 };
 
 
@@ -48,6 +52,32 @@ interface SearchApi {
   search(query: string, options?: SearchOptions): Promise<{ results: SearchHit[] }>;
 }
 const moduleUrl = "/pagefind/pagefind.js";
+const RECENT_KEY = "haneoka.search.recent.v1";
+const BROWSE: ReadonlyArray<[path: string, label: string, icon: string]> = [
+  ["catalog", "navigation.catalog", "category"],
+  ["songs", "navigation.songs", "music_note"],
+  ["member-cards", "navigation.memberCards", "style"],
+  ["support-cards", "navigation.supportCards", "photo_library"],
+  ["characters", "navigation.characters", "groups"],
+  ["events", "navigation.events", "event"],
+  ["gacha", "navigation.gacha", "redeem"],
+  ["stories", "navigation.stories", "auto_stories"],
+];
+function readRecent(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+function writeRecent(values: string[]) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(values.slice(0, 10)));
+  } catch {
+    // Private mode keeps no history.
+  }
+}
 let indexModule: Promise<SearchApi> | undefined;
 let indexLanguage = "";
 let initialization = Promise.resolve();
@@ -78,7 +108,10 @@ export class GlobalSearch extends LitElement {
     catalogBusy: { state: true }, communityBusy: { state: true },
     results: { state: true }, posts: { state: true }, catalogError: { state: true },
     communityError: { state: true }, total: { state: true }, catalogMore: { state: true },
+    recent: { state: true },
   };
+  /** Read after hydration: the browser's history cannot be part of the pre-rendered markup. */
+  declare recent: string[];
   declare locale: string;
   declare query: string;
   declare scope: SearchScope;
@@ -101,7 +134,7 @@ export class GlobalSearch extends LitElement {
   private composing = false;
   constructor() {
     super();
-    this.locale = "en"; this.query = ""; this.scope = "all";
+    this.locale = "en"; this.query = ""; this.scope = "all"; this.recent = [];
     this.catalogBusy = false; this.communityBusy = false;
     this.results = []; this.posts = []; this.catalogError = ""; this.communityError = "";
     this.total = 0; this.catalogMore = false;
@@ -158,7 +191,10 @@ export class GlobalSearch extends LitElement {
       this.timer = window.setTimeout(perform, 150);
     };
     const options = { signal: this.lifetime.signal };
-    form?.addEventListener("submit", (event) => { event.preventDefault(); perform(); }, options);
+    form?.addEventListener("submit", (event) => { event.preventDefault(); perform(); this.remember(); }, options);
+    this.addEventListener("click", (event) => {
+      if ((event.target as Element).closest?.(".search-result")) this.remember();
+    }, options);
     input?.addEventListener("focusin", () => this.warm(), options);
     input?.addEventListener("compositionstart", () => {
       this.composing = true; window.clearTimeout(this.timer); this.communityRequest?.abort(); ++this.generation;
@@ -172,11 +208,69 @@ export class GlobalSearch extends LitElement {
       if (event.key === "haneoka.release-server") this.search();
     }, options);
     this.search();
+    this.recent = readRecent();
   }
   disconnectedCallback() {
     ++this.generation;
     window.clearTimeout(this.timer); this.communityRequest?.abort(); this.lifetime?.abort();
     super.disconnectedCallback();
+  }
+  private remember() {
+    const query = this.query.trim();
+    if (query) writeRecent([query, ...readRecent().filter((entry) => entry !== query)]);
+    this.recent = readRecent();
+  }
+  private forget(query?: string) {
+    writeRecent(query === undefined ? [] : readRecent().filter((entry) => entry !== query));
+    this.recent = readRecent();
+  }
+  private renderStart() {
+    const recent = this.recent;
+    const server = readReleaseServer();
+    const text = (key: string) => clientText(this.locale, key, key);
+    return html`
+      ${
+        recent.length
+          ? html`
+              <section class="stack stack--tight" aria-labelledby="search-recent">
+                <div class="row row--between">
+                  <h2 id="search-recent">${this.label("recent")}</h2>
+                  <button class="button button--text" type="button" @click=${() => this.forget()}>${this.label("clear")}</button>
+                </div>
+                <div class="chip-set">
+                  ${recent.map(
+                    (query) => html`
+                      <span class="chip chip--input">
+                        <a class="chip__label" href=${`?q=${encodeURIComponent(query)}`}>${query}</a>
+                        <button class="chip__remove" type="button" aria-label=${this.label("remove")} @click=${() => this.forget(query)}>
+                          <svg class="material-icon" width="18" height="18" aria-hidden="true"><use href="/icons.svg#close"></use></svg>
+                        </button>
+                      </span>
+                    `,
+                  )}
+                </div>
+              </section>
+            `
+          : nothing
+      }
+      <section class="stack stack--tight" aria-labelledby="search-browse">
+        <h2 id="search-browse">${this.label("browse")}</h2>
+        <div class="chip-set">
+          ${BROWSE.map(
+            ([path, key, icon]) => html`
+              <a class="chip chip--assist" href=${`/${server}/${this.locale}/${path}/`}>
+                <svg class="material-icon" width="18" height="18" aria-hidden="true"><use href=${`/icons.svg#${icon}`}></use></svg>
+                ${text(key)}
+              </a>
+            `,
+          )}
+          <a class="chip chip--assist" href=${`/${this.locale}/community/`}>
+            <svg class="material-icon" width="18" height="18" aria-hidden="true"><use href="/icons.svg#forum"></use></svg>
+            ${text("navigation.community")}
+          </a>
+        </div>
+      </section>
+    `;
   }
   private selectScope(scope: SearchScope) {
     window.clearTimeout(this.timer);
@@ -330,7 +424,7 @@ export class GlobalSearch extends LitElement {
           </section>` : nothing}
         ${!this.catalogBusy && !this.communityBusy && !this.results.length && !this.posts.length && !this.catalogError && !this.communityError && !this.catalogMore
           ? emptyState({ title: this.label("empty") }) : nothing}
-      ` : nothing}
+      ` : this.renderStart()}
     `;
   }
 }

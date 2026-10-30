@@ -53,7 +53,7 @@ const extras = release.assets.filter((a) => !packages.includes(a) && a.name !== 
   </nav>
   <section class="download-save" aria-labelledby="download-save-heading">
     <span class="download-platform-icon"><Icon name="save" size={32} /></span>
-    <div><h2 id="download-save-heading"><I18nText keyName="download.saveTitle" locale={locale} /></h2><p><I18nText keyName="download.saveBody" locale={locale} /></p><a href="https://github.com/haneoka-gakuen/haneoka-app#getting-the-save" target="_blank" rel="noreferrer"><I18nText keyName="download.saveGuide" locale={locale} /><Icon name="arrow_outward" size={18} /></a></div>
+    <div><h2 id="download-save-heading"><I18nText keyName="download.saveTitle" locale={locale} /></h2><dl class="spec-list spec-list--split download-save__methods">{[["Android", "download.saveAndroid"], ["download.saveDesktopLabel", "download.saveDesktop"], ["iOS", "download.saveIos"]].map(([label, value]) => <div><dt>{label.startsWith("download.") ? <I18nText keyName={label} locale={locale} /> : label}</dt><dd><I18nText keyName={value} locale={locale} /></dd></div>)}</dl><a href="https://github.com/haneoka-gakuen/haneoka-app#getting-the-save" target="_blank" rel="noreferrer"><I18nText keyName="download.saveGuide" locale={locale} /><Icon name="arrow_outward" size={18} /></a></div>
   </section>
   <section id="platforms" class="download-platforms" aria-labelledby="download-platforms-heading">
     <header class="download-section-heading"><div><h2 id="download-platforms-heading"><I18nText keyName="download.packages" locale={locale} /></h2></div></header>

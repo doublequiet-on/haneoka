@@ -186,7 +186,9 @@
     },
     "search": {
       "placeholder": "資料・物語・コミュニティを検索",
-      "hint": "楽曲、キャラクター、物語の台詞、ガイド、コミュニティの投稿を検索できます。"
+      "hint": "楽曲、キャラクター、物語の台詞、ガイド、コミュニティの投稿を検索できます。",
+      "recent": "最近の検索",
+      "browse": "カテゴリー"
     }
   },
   "navigation": {
@@ -431,7 +433,8 @@
       "info": "情報",
       "conditions": "条件",
       "effects": "効果",
-      "scoreRanks": "スコアランク"
+      "scoreRanks": "スコアランク",
+      "description": "説明"
     },
     "songs": {
       "fields": {
@@ -1514,6 +1517,9 @@
         "find": "検索",
         "notFound": "上位{count}位内に見つかりません"
       }
+    },
+    "comics": {
+      "numbered": "第{number}話"
     }
   },
   "story": {
@@ -4572,7 +4578,7 @@
       "forumChooseWritable": "投稿できるフォーラムを選択してください。",
       "forumPostCount": "{count}件のトピック",
       "forumEmpty": "利用できるフォーラムはありません",
-      "forumReadOnly": "閲覧できます。投稿には制限があります。",
+      "forumReadOnly": "閲覧のみ",
       "tagMatch": "タグの一致条件",
       "tagMatchAll": "選択したすべてのタグに一致",
       "tagMatchAny": "選択したいずれかのタグに一致",
@@ -5593,9 +5599,12 @@
     "extras": "インストール用リソース",
     "checksums": "SHA-256 チェックサム",
     "saveTitle": "セーブの取り込み方法",
-    "saveBody": "Android は Shizuku または対応するフォルダーアクセスで読み込み。PC では Android 端末の接続・認証後に取り込めるほか、iPhone / iPad のローカルバックアップにも対応。通常の iOS 版では PC で書き出したセーブファイルを取り込めます。",
     "saveGuide": "セーブの取り込み方法",
-    "windowsArmPackage": "Windows 11 ARM64 → x64"
+    "windowsArmPackage": "Windows 11 ARM64 → x64",
+    "saveAndroid": "Shizuku · フォルダーアクセス",
+    "saveDesktopLabel": "パソコン",
+    "saveDesktop": "接続した Android 端末 · iPhone / iPad のローカルバックアップ",
+    "saveIos": "パソコンから書き出したセーブデータ"
   },
   "app": {
     "offline": {

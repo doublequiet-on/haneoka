@@ -65,8 +65,6 @@ interface CollectionDefinition {
  * SEO pages are never silently dropped.
  */
 const COLLECTIONS: CollectionDefinition[] = [
-  { collection: "circle", resource: "circle", route: "/catalog/circle", selectionParam: "entry", kind: "system", document: "entries", titleField: "title", subtitle: "kind", optional: true },
-  { collection: "challenge", resource: "challenge", route: "/catalog/challenge", selectionParam: "entry", kind: "system", document: "entries", titleField: "title", subtitle: "kind", optional: true },
   { collection: "missions", resource: "missions", route: "/catalog/missions", selectionParam: "entry", kind: "system", document: "entries", titleField: "title", subtitle: "kind" },
   { collection: "tgw-card", resource: "tgw-card", route: "/catalog/tgw-card", selectionParam: "entry", kind: "system", document: "entries", titleField: "title", subtitle: "" },
   {

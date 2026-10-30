@@ -26,6 +26,18 @@
     height: 20px;
     accent-color: var(--md-sys-color-primary);
   }
+  .account-legal {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .account-legal a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: 48px;
+    color: inherit;
+  }
   .oauth-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));

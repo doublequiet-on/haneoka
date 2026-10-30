@@ -3495,8 +3495,9 @@ async function serveStaticAsset(request: Request, env: Env): Promise<Response> {
   // fallback (unprefixed ones were redirected earlier), so match the segment
   // anywhere in the path — not only at the root.
   const preferredLocale = (() => {
-    const first = url.pathname.replace(/^\/+/, "").split("/")[0] || "";
-    return /^(ja|en|zh-TW|zh-CN|ko)$/u.test(first) ? first : null;
+    const [first = "", second = ""] = url.pathname.replace(/^\/+/, "").split("/");
+    const locale = /^(ja|en|zh-TW|zh-CN|ko)$/u;
+    return locale.test(first) ? first : locale.test(second) ? second : null;
   })();
   const locales = ["ja", "en", "zh-TW", "zh-CN", "ko"];
   // Ask for the entry's directory, not its /index.html: the asset layer
@@ -3545,7 +3546,20 @@ async function serveStaticAsset(request: Request, env: Env): Promise<Response> {
     const forums = await tryEntry("/admin/forums/");
     if (forums) return forums;
   }
-  return response;
+  return (await notFoundDocument(request, env, preferredLocale)) ?? response;
+}
+
+/** The reader's-language not-found page for a document navigation that matched nothing. */
+async function notFoundDocument(request: Request, env: Env, locale: string | null): Promise<Response | null> {
+  const url = new URL(request.url);
+  if ((request.method !== "GET" && request.method !== "HEAD") || !env.ASSETS) return null;
+  if (url.pathname.split("/").pop()?.includes(".") || !request.headers.get("Accept")?.includes("text/html")) return null;
+  const page = await env.ASSETS.fetch(new Request(new URL(`/${locale ?? "en"}/404/`, url), request));
+  if (!page.ok) return null;
+  const headers = new Headers(page.headers);
+  headers.set("Cache-Control", "no-store");
+  headers.delete("ETag");
+  return new Response(request.method === "HEAD" ? null : page.body, { status: 404, headers });
 }
 
 async function documentEntityAvailability(
@@ -4046,7 +4060,11 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
         const query = new URL(`/api/v1/servers/${pageRoute.server}/release`, url);
         query.search = new URLSearchParams({ projection: "page-data", contract: "catalog-page-v1", locale: pageRoute.locale, resource: pageRoute.kind, id: pageRoute.id }).toString();
         const lookup = await handlePageData(new Request(query), catalogPageBindings(env, request));
-        if (lookup?.status === 404) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+        if (lookup?.status === 404)
+          return (
+            (await notFoundDocument(assetRequest, env, pageRoute.locale)) ??
+            new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } })
+          );
         if (lookup?.ok) pageReady = (await lookup.json() as { state?: string }).state === "ready";
       }
       const provider = providerEntityFromUrl(url);

@@ -927,7 +927,7 @@ export class ArenaWorkspace extends LitElement {
     const started = this.now >= season.startAt;
     return html`
       <div class="arena-grid">
-        ${this.renderCondition(season, league)} ${this.renderEntry(season, league)}
+        ${this.renderCondition(season, league)}
         ${
           started
             ? html`

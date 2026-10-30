@@ -186,7 +186,9 @@
     },
     "search": {
       "placeholder": "搜索资料、剧情与社区",
-      "hint": "查找乐曲、角色、剧情对白、帮助指南和社区帖子。"
+      "hint": "查找乐曲、角色、剧情对白、帮助指南和社区帖子。",
+      "recent": "最近搜索",
+      "browse": "浏览"
     }
   },
   "navigation": {
@@ -431,7 +433,8 @@
       "info": "信息",
       "conditions": "条件",
       "effects": "效果",
-      "scoreRanks": "得分评级"
+      "scoreRanks": "得分评级",
+      "description": "说明"
     },
     "songs": {
       "fields": {
@@ -1514,6 +1517,9 @@
         "find": "查找",
         "notFound": "前 {count} 名中未找到"
       }
+    },
+    "comics": {
+      "numbered": "第{number}话"
     }
   },
   "story": {
@@ -4572,7 +4578,7 @@
       "forumChooseWritable": "请选择可发帖的板块。",
       "forumPostCount": "{count} 个主题",
       "forumEmpty": "没有可用板块",
-      "forumReadOnly": "你可以阅读此板块，发帖受到限制。",
+      "forumReadOnly": "只读",
       "tagMatch": "标签匹配",
       "tagMatchAll": "匹配所有所选标签",
       "tagMatchAny": "匹配任一所选标签",
@@ -5593,9 +5599,12 @@
     "extras": "安装资源",
     "checksums": "SHA-256 校验文件",
     "saveTitle": "存档导入方式",
-    "saveBody": "Android 可通过 Shizuku 或受支持的文件夹访问方式读取存档；电脑端连接并授权 Android 手机后即可导入，也支持 iPhone / iPad 本地备份。标准 iOS 版可导入从电脑导出的存档文件。",
     "saveGuide": "了解存档导入",
-    "windowsArmPackage": "Windows 11 ARM64 → x64"
+    "windowsArmPackage": "Windows 11 ARM64 → x64",
+    "saveAndroid": "Shizuku · 文件夹访问",
+    "saveDesktopLabel": "电脑",
+    "saveDesktop": "连接的 Android 手机 · iPhone / iPad 本地备份",
+    "saveIos": "从电脑导出的存档文件"
   },
   "app": {
     "offline": {

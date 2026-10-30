@@ -12,6 +12,7 @@
  * slot, the playlist's title as the heading once its hero scrolls away, and
  * the view's actions in the trailing row.
  */
+import { signedInHint } from "../lib/community-viewer";
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { readPageData } from "../lib/page-data";
 import { adoptPrerenderedWorkspace } from "../lib/workspace-page-data";
@@ -1069,7 +1070,7 @@ export class PlaylistHub extends LitElement {
                 },
               }),
             })
-          : this.signedInChecked
+          : this.signedInChecked || !signedInHint()
             ? html`
                 <section class="playlist-invite">
                   <span class="playlist-invite__mark shape-cookie-9">${icon("library_music", 28)}</span>

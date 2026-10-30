@@ -2716,7 +2716,9 @@ def _comics(data: BuildData) -> dict[str, Any]:
         url = data.asset(f"Assets/AddressableResources/Image/Comic/{asset}.png")
         output[str(identity)] = _present(
             comicId=identity,
-            title=data.text(row.get("_titleTextId"), f"Comic {identity}"),
+            title=data.text(row.get("_titleTextId"))
+            if row.get("_titleTextId")
+            else [f"第{identity}話", f"Comic {identity}", f"第{identity}話", f"第{identity}话", f"제{identity}화"],
             publicStartAt=_timestamp(row.get("_startAt")),
             characters=[int(value) for value in row.get("_characterIds", [])],
             thumbnail=url,
