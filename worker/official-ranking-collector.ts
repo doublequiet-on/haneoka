@@ -265,6 +265,12 @@ export class OfficialRankingCollector extends Container<Env> {
         if (!["auth_paused", "auth_uncertain"].includes(state.status)) state.status = "auth_paused";
         await this.persist(state, false); return;
       }
+      if (state.status === "failed" && state.lastFailure === undefined && state.run?.complete
+        && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration) {
+        state.lastFailure = null;
+        state.failures = 0;
+        state.nextAtMs = Date.now();
+      }
       if (state.run && !state.run.complete && Date.now() <= state.run.deadlineMs + 15_000) return;
       if (state.run && !state.run.complete && state.run.pendingAttempt && !state.run.resolvedAttempt) {
         state.blockedGeneration = state.run.generation;

@@ -27,6 +27,8 @@
 
 容器通过区域 Durable Object 的随机服务令牌接收 `/collect`，每次任务使用另一个随机令牌回调 `/api/internal/official-rankings/{region}/{runId}`。`OFFICIAL_CALLBACK_ORIGIN` 由 Worker 配置，生产值为 `https://haneoka.org`；回调拒绝重定向、其他主机及路径。`/health` 只返回就绪状态，不返回配置。私有配置和协议回执写入本轮权限受限的临时目录，任务退出后删除。
 
+加入分阶段诊断时，旧版本尚无目录、没有进入榜单请求检查点的已结束失败任务，会在下一次调度时重新尝试一次并写入诊断标记。认证暂停、请求结果未确认和限流期限保持原处理；公开读取不触发重试。
+
 读取接口为同域 `/api/v2/game/records/{region}`，目录、最新榜单、历史和状态路径见 [INTERFACES.md](INTERFACES.md)。GET 只读已保存的数据，不触发游戏请求，也不刷新观测时间。容器重启后的进度及历史来自 Durable Object、D1 和私有 R2，不依赖容器文件系统。
 
 云端失败的 `status.lastFailure` 保存固定阶段、错误类别及可用的 HTTP/gRPC 状态码；容器日志使用相同安全字段。异常原文、凭据、回调令牌和协议正文不进入这些诊断。
