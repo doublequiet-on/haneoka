@@ -17,6 +17,7 @@ import {
 } from "./static-catalog-source";
 import type { ReleaseServer } from "./release-server";
 import { formatDate as siteDate } from "./date-format";
+import { cardRarityName } from "./card-rarity";
 
 export interface SearchableCatalogFact {
   key: string;
@@ -368,7 +369,6 @@ function isStaticEntityId(definition: CollectionDefinition, id: string, server: 
   }
 }
 
-const RARITY_LABELS: Record<number, string> = { 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" };
 const KIND_LABEL_KEYS: Record<string, string> = {
   gameEvent: "catalog.events.kind.gameEvent",
   realLive: "catalog.events.kind.realLive",
@@ -448,7 +448,7 @@ function factsFor(
     const names = localizedNamesForIds(characterIds(value), characters, locale);
     if (names.length) facts.push({ key: "character", value: names.join("、") });
     if (value.rarity != null) {
-      const rarity = RARITY_LABELS[Number(value.rarity)];
+      const rarity = cardRarityName(value.rarity);
       if (rarity) facts.push({ key: "rarity", value: rarity });
     }
     const stats = asRecord(value.stat);

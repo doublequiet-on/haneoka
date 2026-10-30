@@ -1,9 +1,7 @@
 import { html, nothing } from "lit";
 import "../../styles/rarity-icon.css";
 
-export function cardRarityName(value: unknown): string {
-  return ({ 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" } as Record<number, string>)[Number(value)] || "";
-}
+export { cardRarityName } from "../../lib/card-rarity";
 
 /** Keep the native sprite square, including while its source is loading. */
 export function rarityIcon(source: string, label: string) {

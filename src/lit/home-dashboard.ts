@@ -75,6 +75,7 @@ import {
   type BirthdayGachaPeriod,
 } from "../lib/home-birthday";
 import { formatDate } from "../lib/date-format";
+import { cardRarityName } from "../lib/card-rarity";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -1539,9 +1540,7 @@ export class HomeDashboard extends LitElement {
                       )[Number(card.cardType)] || "",
                     ) || "";
                   const rarityName =
-                    ({ 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" } as Record<number, string>)[
-                      Number(card.rarity)
-                    ] || "";
+                    cardRarityName(card.rarity);
                   const rarity = this.marksFor(card).get(`RarityIconCenter_${rarityName}.png`) || "";
                   const images = (card.images || {}) as JsonRecord;
                   const releasedAt = timestamp(card.releasedAt);

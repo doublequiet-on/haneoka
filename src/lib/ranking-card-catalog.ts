@@ -3,6 +3,7 @@ import { asRecord, fetchStaticCatalog } from "./static-catalog-source";
 import type { ReleaseServer } from "./release-server";
 import type { RankingCardArtwork, RankingCardCatalog } from "./game-records";
 import { cardGrowthIcons, projectUiMarks } from "./ui-marks";
+import { cardRarityName } from "./card-rarity";
 
 /** Compact card art and progression tables shared by the song-ranking documents. */
 export async function rankingCardCatalog(server: ReleaseServer): Promise<RankingCardCatalog> {
@@ -16,7 +17,6 @@ export async function rankingCardCatalog(server: ReleaseServer): Promise<Ranking
   const mark = (name: string) =>
     marks[name] ? `/runtime/${source}/${marks[name].replace(/^runtime\//u, "")}` : "";
   const attributeColors: Record<number, string> = { 1: "Red", 2: "Blue", 3: "Green", 4: "Yellow", 5: "Purple" };
-  const rarityNames: Record<number, string> = { 2: "R", 3: "SR", 4: "SSR", 10: "EX" };
   const cards = (support: boolean): Record<string, RankingCardArtwork> =>
     Object.fromEntries(
       (graph.collections.get(support ? "support-cards" : "cards") || []).map(([id, card]) => {
@@ -29,7 +29,7 @@ export async function rankingCardCatalog(server: ReleaseServer): Promise<Ranking
             rarity: Number(card.rarity),
             avatar: String(asRecord(card.images)?.thumbnail || ""),
             attributeIcon: mark(`CardType-${attributeColors[Number(card.cardType)]}.png`),
-            rarityIcon: mark(`RarityIconCenter_${rarityNames[Number(card.rarity)]}.png`),
+            rarityIcon: mark(`RarityIconCenter_${cardRarityName(card.rarity)}.png`),
             ...(!support ? {
               liveSkillIcon: String(asRecord(asRecord(card.resolvedSkills)?.live)?.icon ?? ""),
               gekisoSkillIcon: String(asRecord(asRecord(card.resolvedSkills)?.gekisou)?.icon ?? ""),

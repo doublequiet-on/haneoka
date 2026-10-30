@@ -15,6 +15,7 @@ import { resourcePath } from "./resource-route";
 import { historyObject, type HistorySnapshot } from "@haneoka/game-data-exporter/gacha-history";
 import { gachaHistoryExpectation, gachaPoolRates } from "@haneoka/game-data-exporter/gacha-history-analysis";
 import { gachaTargetProgress, type GachaTargetProgress } from "@haneoka/game-data-exporter/gacha-history-points";
+import { cardRarityName } from "./card-rarity";
 
 export * from "@haneoka/game-data-exporter/gacha-history";
 
@@ -85,7 +86,7 @@ export function historyPoolViews(
       if ((type !== 2 && type !== 3) || !cardId || entry.pickup !== true) return [];
       const card = historyObject((type === 2 ? catalog.cards : catalog.supports)[cardId]);
       const rarity = card.rarity ?? entry.rarity;
-      const rarityLabel = RARITY_LABELS[String(rarity)] ?? "";
+      const rarityLabel = cardRarityName(rarity);
       const thumbnail = historyObject(card.images).thumbnail ?? card.image ?? entry.image;
       return [
         {
@@ -119,7 +120,6 @@ export function historyPoolViews(
     };
   });
 }
-const RARITY_LABELS: Record<string, string> = { 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" };
 const ATTRIBUTES = ["", "Red", "Blue", "Green", "Yellow", "Purple"];
 function historyMark(catalog: HistoryCatalogData | undefined, server: string) {
   return (name: string) => {
@@ -202,8 +202,7 @@ function historyExchangeTargets(
       const card = historyObject((type === 2 ? catalog.cards : catalog.supports)[id]);
       const image = historyObject(card.images).thumbnail ?? card.image ?? reward.image;
       const rarity = card.rarity ?? reward.rarity;
-      const rarityLabel =
-        ({ 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" } as Record<string, string>)[String(rarity)] ?? "";
+      const rarityLabel = cardRarityName(rarity);
       const attribute = ["", "Red", "Blue", "Green", "Yellow", "Purple"][Number(card.cardType ?? reward.cardType)];
       return {
         ...target,
@@ -271,7 +270,7 @@ export function historyBatchViews(
       const rarityLabel =
         type === 1
           ? ""
-          : (({ 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" } as Record<string, string>)[rarity] ?? unknown);
+          : cardRarityName(rarity) || unknown;
       const attribute = ["", "Red", "Blue", "Green", "Yellow", "Purple"][Number(card.cardType)];
       return {
         id: id || `prize:${prize.prizeId}`,

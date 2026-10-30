@@ -5,6 +5,7 @@ import type { GachaHistoryPrize, GachaHistoryBatch, GachaHistoryPool } from "../
 import { historyObject, historyDefaultGemConversion, historyPoolViews } from "../lib/gacha-history-data";
 import { localizedText } from "./shared/catalog";
 import { clientText } from "../i18n/client";
+import { cardRarityName } from "../lib/card-rarity";
 
 export function mountGachaHistoryPreview(view: GachaHistory, page: GachaHistoryPageData) {
   const catalog = page.variants.intl ?? page.variants.jp;
@@ -22,7 +23,7 @@ export function mountGachaHistoryPreview(view: GachaHistory, page: GachaHistoryP
       const card = historyObject(value);
       const rarity = Number(card.rarity);
       if (![2, 3, 4, 10, 20].includes(rarity)) continue;
-      const rarityLabel = { 2: "R", 3: "SR", 4: "SSR", 10: "EX", 20: "BD" }[rarity]!;
+      const rarityLabel = cardRarityName(rarity);
       const image = historyObject(card.images).thumbnail ?? card.image;
       cards.push({
         id,
