@@ -78,7 +78,7 @@ export function createNativeGekisoBasicRuntimeResolver(data: TeamBuilderData, in
         runtime.frames.every(frame => Array.isArray(frame.notes) &&
           frame.notes.every((note: NativeGekisoAdmittedPerfectNote) => note.judgement === 5))
         ? { missions: runtime.missions, freshStart: true } : undefined;
-      const phase = phases.compileBasic(runtime.assignment, runtime.expectedIdentity, runtime.frames, { perfectCumulativeJust, dormantRushSupports });
+      const phase = phases.compileBasic(runtime.assignment, runtime.expectedIdentity, runtime.frames, { perfectCumulativeJust, ...(dormantRushSupports === undefined ? {} : { dormantRushSupports: dormantRushSupports }) });
       if (!phase.value) return { value: null, gaps: phase.gaps };
       if (
         rules.server !== runtime.expectedIdentity.server ||
@@ -234,9 +234,9 @@ export function createNativeGekisoBasicRuntimeResolver(data: TeamBuilderData, in
             };
           }),
           randomLaw: runtime.randomLaw,
-          projection: runtime.projection,
+          ...(runtime.projection === undefined ? {} : { projection: runtime.projection }),
           budget: runtime.budget,
-          liveScore: runtime.liveScore,
+          ...(runtime.liveScore === undefined ? {} : { liveScore: runtime.liveScore }),
       };
       const luck = await evaluateGekisoLuckTimeline(rules, luckInput, controls);
       if (!luck.value) return { value: null, gaps: luck.gaps };

@@ -172,7 +172,7 @@ export function resolveNormalSkillEffects(input: {
       seconds: f(row.activationTimeSecond),
       value: row.effectValue,
       condition,
-      judgements: judgements ?? undefined,
+      ...(judgements == null ? {} : { judgements }),
     });
   }
   return { effects, gaps };
@@ -413,11 +413,11 @@ export function buildNormalSkillWindows(input: NormalSkillInput): NormalSkillRes
       timeMs,
       diffMillPercent: diff,
       handleId,
-      factorOwnerId: runtime.effect.factorOwnerId,
+      ...(runtime.effect.factorOwnerId === undefined ? {} : { factorOwnerId: runtime.effect.factorOwnerId }),
       memberSkillIndex: runtime.memberSkillIndex,
       effectId: runtime.effect.id,
       sequence: result.factorCommands.length,
-      judgement,
+      ...(judgement === undefined ? {} : { judgement: judgement }),
     });
   };
   const finish = (runtime: EffectRuntime, instance: Instance, timeMs: number) => {

@@ -57,7 +57,7 @@ export async function loadSongOptions(
     const file = String(difficulty.file ?? objectRow(difficulty.score).file ?? "");
     if (!file) throw new RangeError("chart-file-missing");
     const identity = teamBuilderSourceIdentity(data, "songs", selection.songId);
-    const response = await fetch(pinnedSongAssetUrl(identity, file), { signal, credentials: "omit" });
+    const response = await fetch(pinnedSongAssetUrl(identity, file), { ...(signal === undefined ? {} : { signal: signal }), credentials: "omit" });
     if (!response.ok) throw new Error(`chart-http:${response.status}`);
     verifySongAssetIdentity(response, identity);
     if (Number(response.headers.get("content-length")) > 2 * 1024 * 1024) throw new RangeError("chart-byte-limit");

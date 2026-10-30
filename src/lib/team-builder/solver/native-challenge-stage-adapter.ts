@@ -176,8 +176,8 @@ export async function prepareResourcePlanStages(
       // Normal mode consumes the parent's actual chart skill timestamps. GK
       // wrapper mission overrides are deliberately not interpreted as normal skills.
       const prepared = prepareEvaluationForSearch({ data, inventory: request.inventory, songs: [song],
-        characterRankTotalScope: request.characterRankTotalScope,
-        mode: "normal", requireGekisoPractice: selection.mode === "gekiso" ? true : undefined,
+        ...(request.characterRankTotalScope === undefined ? {} : { characterRankTotalScope: request.characterRankTotalScope }),
+        mode: "normal", ...(selection.mode === "gekiso" ? { requireGekisoPractice: true } : {}),
         objectives: ["score"], skillOrderCriterion: request.skillOrderCriterion,
         constraints: selection.constraints, budget: { maxMilliseconds: Math.max(1, Math.floor(stageRemaining())),
           maxEvaluations: maxEvaluations - evaluated, maxCandidates: 1000 } });

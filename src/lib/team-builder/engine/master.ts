@@ -622,7 +622,7 @@ export function compileFromTeamData(data: TeamBuilderData): EngineMaster {
     characters: Object.values(data.characters).filter((row) =>
       row.isNonPlayable !== true && !nonPlayable.has(num(row.characterId ?? row.id))),
     members: Object.values(data.members).map((card) => ({
-      levelLimits: card.levelLimits,
+      ...(card.levelLimits === undefined ? {} : { levelLimits: card.levelLimits }),
       id: card.id,
       characterId: card.characterId,
       bandId: card.bandId,

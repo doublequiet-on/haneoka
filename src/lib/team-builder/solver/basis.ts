@@ -49,7 +49,7 @@ export function applyEvaluationBasis(
     ((objective === "ss-surplus" || objective === "ss-ratio") && basis.kind !== "single")
   ) {
     result.value = null;
-    result.range = undefined;
+    delete result.range;
     result.status = "unavailable";
     result.gaps.push({
       code:

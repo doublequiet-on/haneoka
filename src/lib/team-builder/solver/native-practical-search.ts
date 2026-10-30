@@ -65,6 +65,8 @@ export async function prepareNativePracticalSearch(input: NativePracticalPrepara
   controls: NativePracticalControls = {}): Promise<NativePracticalResult> {
   const request = structuredClone(input), now = controls.now ?? (() => performance.now()), started = now();
   const elapsed = () => Math.max(0, now() - started);
+  const evaluationRequest = { ...request };
+  delete evaluationRequest.scoreDomain;
   validateSearchBudget(request.budget);
   if (request.schema !== "haneoka-native-practical-request-v1" || !request.data.identity.sourceId ||
     !request.modes.length || request.modes.length > 2 || new Set(request.modes).size !== request.modes.length ||
@@ -123,10 +125,11 @@ export async function prepareNativePracticalSearch(input: NativePracticalPrepara
       if (!chart) return;
       if (!chart.gaps.length) {
         try {
-          [chart.song] = await loadSongOptions(request.data, [{ songId: chart.parent, difficulty: chart.chart.difficulty }], loading.signal,
+          const [loadedSong] = await loadSongOptions(request.data, [{ songId: chart.parent, difficulty: chart.chart.difficulty }], loading.signal,
             { nativeGekisoPerfectPlan: "songId" in chart.chart && request.modes.includes("gekiso") &&
               request.scoreDomain !== "personal-solo" && request.objectives.includes("score") && request.constraints.justRate === 0 });
-          chart.song!.key = chart.key;
+          chart.song = loadedSong!;
+          chart.song.key = chart.key;
           if ("challengeMusicId" in chart.chart) {
             const scene = request.eventScene!;
             const context = resolveNativeChallengeContext(request.data, request.data.challengeMusicTable, {
@@ -184,7 +187,7 @@ export async function prepareNativePracticalSearch(input: NativePracticalPrepara
   const preparationElapsedMs = elapsed();
   computeStarted = now();
   const result = await refinePracticalCandidates({ contextFingerprint, ...options, constraints: request.constraints,
-    tasks, directions, baseline: request.baseline, finalistLimit: request.finalistLimit }, {
+    tasks, directions, ...(request.baseline === undefined ? {} : { baseline: request.baseline }), ...(request.finalistLimit === undefined ? {} : { finalistLimit: request.finalistLimit }) }, {
     async priority(assignment, task) {
       const chart = byChart.get(task.songKey)!;
       if (!chart.song || chart.gaps.length || cancelled() || expired()) return null;
@@ -192,9 +195,9 @@ export async function prepareNativePracticalSearch(input: NativePracticalPrepara
       const inventory = { ...request.inventory, members: request.inventory.members.filter(member => memberIds.has(member.instanceId)),
         snapshots: request.inventory.snapshots.filter(photo => photoIds.has(photo.instanceId)) };
       try {
-        const prepared = preparations.get(task, assignment, () => prepareEvaluationForSearch({ ...request, inventory, songs: [chart.song!], mode: task.mode,
-          scoreDomain: task.mode === "gekiso" ? task.objective === "score" ? request.scoreDomain ?? "personal-live" : "personal-solo" : undefined,
-          objectives: [task.objective], challengeMusicId: "challengeMusicId" in chart.chart ? chart.chart.challengeMusicId : undefined }));
+        const prepared = preparations.get(task, assignment, () => prepareEvaluationForSearch({ ...evaluationRequest, inventory, songs: [chart.song!], mode: task.mode,
+          ...(task.mode === "gekiso" ? { scoreDomain: task.objective === "score" ? request.scoreDomain ?? "personal-live" : "personal-solo" } : {}),
+          objectives: [task.objective], ...("challengeMusicId" in chart.chart ? { challengeMusicId: chart.chart.challengeMusicId } : {}) }));
         const profiles = prepared.resolveSlots?.(assignment, prepareSong(chart.song, prepared.input.evaluation));
         if (!profiles || profiles.length !== 5 || profiles.some(profile => !profile || profile.gaps.length || !profile.bpPower)) return null;
         // Same authoritative deck getter used by the native score consumer.
@@ -213,9 +216,9 @@ export async function prepareNativePracticalSearch(input: NativePracticalPrepara
         const inventory = { ...request.inventory, members: request.inventory.members.filter(member => memberIds.has(member.instanceId)),
           snapshots: request.inventory.snapshots.filter(photo => photoIds.has(photo.instanceId)) };
         try {
-          const prepared = preparations.get(task, assignment, () => prepareEvaluationForSearch({ ...request, inventory, songs: [chart.song!], mode: task.mode,
-            scoreDomain: task.mode === "gekiso" ? task.objective === "score" ? request.scoreDomain ?? "personal-live" : "personal-solo" : undefined,
-            objectives: [task.objective], challengeMusicId: "challengeMusicId" in chart.chart ? chart.chart.challengeMusicId : undefined }));
+          const prepared = preparations.get(task, assignment, () => prepareEvaluationForSearch({ ...evaluationRequest, inventory, songs: [chart.song!], mode: task.mode,
+            ...(task.mode === "gekiso" ? { scoreDomain: task.objective === "score" ? request.scoreDomain ?? "personal-live" : "personal-solo" } : {}),
+            objectives: [task.objective], ...("challengeMusicId" in chart.chart ? { challengeMusicId: chart.chart.challengeMusicId } : {}) }));
           candidate = await prepared.evaluate(assignment, prepareSong(chart.song, prepared.input.evaluation), {
             cancelled, expired, yield: controls.yield ?? (() => new Promise<void>(resolve => setTimeout(resolve, 0))), progress: () => {},
           });
@@ -227,7 +230,7 @@ export async function prepareNativePracticalSearch(input: NativePracticalPrepara
       taskGaps.set(task.key, [...(taskGaps.get(task.key) ?? []), ...metric.gaps]);
       return { contextFingerprint, orders: 120 as const, complete: !cancelled() && !expired() && metric.value !== null && !metric.gaps.length, candidate };
     },
-  }, { cancelled, expired: () => expired() || evaluated >= request.budget.maxEvaluations, yield: controls.yield,
+  }, { cancelled, expired: () => expired() || evaluated >= request.budget.maxEvaluations, ...(controls.yield === undefined ? {} : { yield: controls.yield }),
     progress: value => progress(value) });
   // Preserve precise per-task unavailable input axes after the scheduler's
   // incomplete-cell marker, without assigning them a zero feature score.

@@ -148,7 +148,7 @@ export function createNativeGekisoPhaseResolver(data: TeamBuilderData, input: Op
         level,
         mission: row.gekisouMissionType as GekisoSelectedSkill["mission"],
         effectRows: dataRows(row.effects),
-        supportExecTiming: timing as number | undefined,
+        ...(typeof timing === "number" ? { supportExecTiming: timing } : {}),
       },
       gaps: [],
     };

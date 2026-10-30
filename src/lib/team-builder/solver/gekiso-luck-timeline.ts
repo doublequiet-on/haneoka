@@ -273,7 +273,7 @@ export async function evaluateGekisoLuckTimeline(
       old.liveScoreMass += value.liveScoreMass;
       value.liveRangeMass.forEach((mass, index) => { old.liveRangeMass[index]! += mass; });
       value.countMass.forEach((mass, result) => {
-        old.countMass[result] += mass;
+        old.countMass[result]! += mass;
       });
     } else target.set(identity, value);
   };
@@ -378,8 +378,8 @@ export async function evaluateGekisoLuckTimeline(
             drawTimeMs: timeMs,
             minimumEntries: state.minimumEntries,
             randomLaw: input.randomLaw,
-            itemOrder: input.itemOrder,
-            orderedItemsByChance: input.orderedItemsByChance,
+            ...(input.itemOrder === undefined ? {} : { itemOrder: input.itemOrder }),
+            ...(input.orderedItemsByChance === undefined ? {} : { orderedItemsByChance: input.orderedItemsByChance }),
           });
         if (kernelKey !== null) kernels.set(kernelKey, resolved);
         if (!resolved.value) return { value: null, gaps: resolved.gaps };
@@ -399,7 +399,7 @@ export async function evaluateGekisoLuckTimeline(
           merge(next, {
             probability,
             pointMass: state.pointMass * weight + pointGain * probability,
-            liveLedger,
+            ...(liveLedger === undefined ? {} : { liveLedger: liveLedger }),
             liveScoreMass: state.liveScoreMass * weight,
             liveRangeMass: state.liveRangeMass.map((mass) => mass * weight) as [number, number, number],
             // Mean-only counters are carried exclusively as probability mass.
@@ -411,7 +411,7 @@ export async function evaluateGekisoLuckTimeline(
                     ...branch.result.state,
                     totalBonusPoint: totalBonusPoint + branch.result.state.totalBonusPoint,
                     resultCounts: resultCounts.map(
-                      (value, result) => value + branch.result.state.resultCounts[result],
+                      (value, result) => value + branch.result.state.resultCounts[result]!,
                     ) as [number, number, number, number],
                   }
                 : branch.result.state,
@@ -468,7 +468,7 @@ export async function evaluateGekisoLuckTimeline(
       }
       merge(updated, {
         ...state,
-        liveLedger,
+        ...(liveLedger === undefined ? {} : { liveLedger: liveLedger }),
         countMass: [...state.countMass],
         minimumEntries: entries,
         rushBonusHandleActive: frame.clearRushBonusBeforeNotes ? false : state.rushBonusHandleActive,
@@ -536,7 +536,7 @@ export async function evaluateGekisoLuckTimeline(
         (pointLaw.get(outcome.state.totalBonusPoint) ?? 0) + outcome.probability,
       );
     outcome.countMass.forEach((value, result) => {
-      counts[result] += value;
+      counts[result]! += value;
     });
   }
   const pointExpectation = outcomes.reduce((sum, outcome) => sum + outcome.pointMass, 0);

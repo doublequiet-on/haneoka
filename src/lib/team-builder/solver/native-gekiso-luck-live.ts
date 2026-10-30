@@ -71,8 +71,10 @@ export function createNativeGekisoLuckLiveScoreResolver(data: TeamBuilderData, i
       if ([...counts.values()].some((count) => count !== 0))
         return unavailableMetric("native-gekiso-live-chart-admission-mismatch", "extra admitted history");
       const plays: NativeGekisoBasicRuntimeResult[] = [];
+      const pointsTape = { ...tape };
+      delete pointsTape.liveScore;
       for (const index of luckIndices) {
-        const played = await runtime.evaluate(rules, { ...tape, projection: "expectations-only", liveScore: undefined,
+        const played = await runtime.evaluate(rules, { ...pointsTape, projection: "expectations-only",
           ...(threeLuck ? { isolatedLuckRangeIndex: index } : {}) }, controls);
         if (!played.value) return { value: null, status: "unavailable", assumptions: [], gaps: played.gaps };
         plays.push(played.value);
@@ -173,7 +175,7 @@ export function createNativeGekisoLuckLiveScoreResolver(data: TeamBuilderData, i
         },
       });
       if (metric.value !== null) metric.scoreDomain = "personal-live";
-      metric.breakdown = metric.breakdown?.map((entry) => ({ ...entry,
+      if (metric.breakdown) metric.breakdown = metric.breakdown.map((entry) => ({ ...entry,
         key: entry.key.replace(/^normal-score-/u, "gekiso-luck-expected-score-"),
         source: entry.key.startsWith("normal-score-") ? "complete Luck expectation per native member order" : entry.source }));
       return metric;

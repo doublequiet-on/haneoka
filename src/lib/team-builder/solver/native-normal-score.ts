@@ -159,7 +159,7 @@ export function createNativeNormalScoreResolver(data: TeamBuilderData, input: Op
     }
     while (prefixes.length && (prefixes.length >= 48 || cachedNodes + sums.length > 200000))
       cachedNodes -= prefixes.shift()!.sums.length;
-    prefixes.push({ song, power, factor, sums, augmentation, luckPercent });
+    prefixes.push({ song, power, factor, sums, ...(augmentation === undefined ? {} : { augmentation: augmentation }), luckPercent });
     cachedNodes += sums.length;
     return sums;
   }

@@ -39,6 +39,6 @@ new Function("module", "exports", "require", source)(compiled, compiled.exports,
 if (!compiled.exports.evaluateMetaReference) throw new Error("Meta reference core entry missing");
 const result = await compiled.exports.evaluateMetaReference(request.data, request.profile, request.charts, {
   maxMilliseconds: request.maxMilliseconds,
-  calculatedAt: request.calculatedAt,
+  ...(request.calculatedAt === undefined ? {} : { calculatedAt: request.calculatedAt }),
 });
 process.stdout.write(JSON.stringify(result) + "\n");

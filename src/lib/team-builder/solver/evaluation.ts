@@ -131,15 +131,15 @@ export function prepareEvaluation(request: EvaluationRequest): OptimizationInput
       throw new RangeError("different-runtime-context");
     return {
       ...data.identity,
-      skillOrderCriterion: request.skillOrderCriterion,
-      scoreDomain: request.scoreDomain,
+      ...(request.skillOrderCriterion === undefined ? {} : { skillOrderCriterion: request.skillOrderCriterion }),
+      ...(request.scoreDomain === undefined ? {} : { scoreDomain: request.scoreDomain }),
       ...options,
       inputGaps: options.gaps,
       songs,
       objectives: request.objectives,
       constraints: request.constraints,
       budget: request.budget,
-      basis: request.basis,
+      ...(request.basis === undefined ? {} : { basis: request.basis }),
       evaluation: request.nativeRuntime,
     };
   }
@@ -218,8 +218,8 @@ export function prepareEvaluation(request: EvaluationRequest): OptimizationInput
   }
   return {
     ...data.identity,
-    skillOrderCriterion: request.skillOrderCriterion,
-    scoreDomain: request.scoreDomain,
+    ...(request.skillOrderCriterion === undefined ? {} : { skillOrderCriterion: request.skillOrderCriterion }),
+    ...(request.scoreDomain === undefined ? {} : { scoreDomain: request.scoreDomain }),
     members: options.members,
     snapshots: options.snapshots,
     inputGaps: options.gaps,
@@ -227,7 +227,7 @@ export function prepareEvaluation(request: EvaluationRequest): OptimizationInput
     objectives: request.objectives,
     constraints: request.constraints,
     budget: request.budget,
-    basis: request.basis,
+    ...(request.basis === undefined ? {} : { basis: request.basis }),
     evaluation,
   };
 }
@@ -260,8 +260,10 @@ export function prepareEvaluationForSearch(request: EvaluationRequest): Prepared
     if (request.nativeRuntime || request.mode !== "gekiso" || request.scoreDomain === "personal-solo" ||
       request.constraints.justRate !== 0)
       throw new RangeError("native-gekiso-context-domain");
-    const normal = prepareEvaluationForSearch({ ...request, nativeGekisoPlans: undefined,
-      mode: "normal", scoreDomain: undefined, requireGekisoPractice: true });
+    const normalRequest = { ...request, mode: "normal" as const, requireGekisoPractice: true as const };
+    delete normalRequest.nativeGekisoPlans;
+    delete normalRequest.scoreDomain;
+    const normal = prepareEvaluationForSearch(normalRequest);
     return createNativeGekisoContextEvaluation(request.data, normal, request.nativeGekisoPlans, request.nativeGekisoRankingScenario);
   }
   if (request.nativeRuntime && (request.skillOrderCriterion === "worst-ap" || request.skillOrderCriterion === "best-ap"))

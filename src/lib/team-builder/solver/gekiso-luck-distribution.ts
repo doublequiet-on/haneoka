@@ -74,8 +74,8 @@ export function createGekisoLuckDistributionResolver(rules: GekisoRules) {
         minimumEntries: input.minimumEntries,
         probabilityUpFactorAtDraw: input.step.probabilityUpFactor!,
         randomLaw: input.randomLaw,
-        itemOrder: input.itemOrder,
-        orderedItems: input.orderedItemsByChance?.[0],
+        ...(input.itemOrder === undefined ? {} : { itemOrder: input.itemOrder }),
+        ...(input.orderedItemsByChance?.[0] === undefined ? {} : { orderedItems: input.orderedItemsByChance?.[0] }),
       });
       if (!initial.value) return { value: null, gaps: initial.gaps };
       if (initial.value.failureProbability > 0)
@@ -106,8 +106,8 @@ export function createGekisoLuckDistributionResolver(rules: GekisoRules) {
         minimumEntries: initial.entries,
         probabilityUpFactorAtDraw: input.step.probabilityUpFactor!,
         randomLaw: input.randomLaw,
-        itemOrder: input.itemOrder,
-        orderedItems: input.orderedItemsByChance?.[chanceType],
+        ...(input.itemOrder === undefined ? {} : { itemOrder: input.itemOrder }),
+        ...(input.orderedItemsByChance?.[chanceType] === undefined ? {} : { orderedItems: input.orderedItemsByChance?.[chanceType] }),
       });
       if (!next.value) return { value: null, gaps: next.gaps };
       if (next.value.failureProbability > 0)

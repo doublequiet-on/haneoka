@@ -216,10 +216,7 @@ export function evaluateAssignment(
       ? {
           ...score,
           value: numerator - threshold,
-          range:
-            domain === "personal" && score.range
-              ? { minimum: score.range.minimum - threshold, maximum: score.range.maximum - threshold }
-              : undefined,
+          ...(domain === "personal" && score.range ? { range: { minimum: score.range.minimum - threshold, maximum: score.range.maximum - threshold } } : {}),
           status: domain === "room" ? "conditional" : score.status,
           assumptions: [...score.assumptions, ...(domain === "room" ? ["explicit-room-score-context"] : [])],
           gaps: [],
@@ -234,19 +231,17 @@ export function evaluateAssignment(
           ],
         }
       : unavailableMetric("ss-surplus-context-unresolved", "matching native score domain and positive threshold");
+  if (domain !== "personal") delete surplus.range;
   const ratioValue = calculateSSRatio(numerator, threshold, domain, domain);
   const ratio: MetricValue =
     score.value !== null && ratioValue !== null
       ? {
           value: ratioValue,
-          range:
-            domain === "personal" && score.range
-              ? { minimum: score.range.minimum / threshold!, maximum: score.range.maximum / threshold! }
-              : undefined,
-          bestSkillOrder: score.bestSkillOrder,
-          worstSkillOrder: score.worstSkillOrder,
-          skillOrderCriterion: score.skillOrderCriterion,
-          scoreDomain: score.scoreDomain,
+          ...(domain === "personal" && score.range ? { range: { minimum: score.range.minimum / threshold!, maximum: score.range.maximum / threshold! } } : {}),
+          ...(score.bestSkillOrder === undefined ? {} : { bestSkillOrder: score.bestSkillOrder }),
+          ...(score.worstSkillOrder === undefined ? {} : { worstSkillOrder: score.worstSkillOrder }),
+          ...(score.skillOrderCriterion === undefined ? {} : { skillOrderCriterion: score.skillOrderCriterion }),
+          ...(score.scoreDomain === undefined ? {} : { scoreDomain: score.scoreDomain }),
           status: domain === "room" ? "conditional" : score.status,
           assumptions: [...score.assumptions, ...(domain === "room" ? ["explicit-room-score-context"] : [])],
           gaps: [],
