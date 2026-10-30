@@ -86,7 +86,8 @@ origin、状态、计数和查询回执，公开榜单正文写入指定文件�
 `export` 导出已验证账号的旧版单账号配置；`export-pool` 导出
 `haneoka:official-ranking-account-pool/1`，包含 `region`、`selectedAccountId` 和
 `accounts`。每个 entry 包含 `id`、`label`、`source`、`enabled`、`state`、
-`lastSuccessAtMs`、可选 `pauseReason` 与完整 `clientVersion`、`credentials`、`masterConfig`。
+`lastSuccessAtMs`、`nextRequestAtMs`、可选 `pauseReason` 与完整 `clientVersion`、`credentials`、`masterConfig`。
+临时 cooldown 按 `nextRequestAtMs` 到期恢复，不改变认证／权限暂停。
 全部账号暂停时仍可导出；已知权限／认证暂停随配置保留，缺少旧暂停原因时保守暂停全区。
 导出总大小限制为 5120 bytes，文件权限为 0600，用现有 GitHub secret → Cloudflare
 secret 流程传递。云采集使用现有 Durable Object 与 Container；交接后停止本地对同一

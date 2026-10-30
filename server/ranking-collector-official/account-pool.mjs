@@ -186,7 +186,7 @@ export class AccountPool {
     if (rows.some((row) => row.lease_until > now())) fail("account_busy");
     const accounts = rows.map((row) => ({ id: row.id, label: row.label, source: row.source, enabled: row.enabled === 1,
       state: row.state, ...(state?.blocked_account === row.id && state.blocked_kind ? { pauseReason: state.blocked_kind } : {}),
-      lastSuccessAtMs: row.last_success_at, ...this.unseal(row) }));
+      lastSuccessAtMs: row.last_success_at, nextRequestAtMs: row.next_request_at, ...this.unseal(row) }));
     const selectedAccountId = rows.some((row) => row.id === state?.selected_account) ? state.selected_account : undefined;
     const config = { contract: "haneoka:official-ranking-account-pool/1", region, ...(selectedAccountId ? { selectedAccountId } : {}), accounts };
     if (Buffer.byteLength(JSON.stringify(config)) > 5120) fail("configuration_too_large");

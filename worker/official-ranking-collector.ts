@@ -327,7 +327,7 @@ export class OfficialRankingCollector extends Container<Env> {
   private async unavailablePool(state: CollectorState, pool: OfficialCollectorPool): Promise<void> {
     const times = pool.accounts.filter((account) => account.enabled && account.ready
       && !state.accounts?.[account.identity]?.blocked[account.authGeneration])
-      .map((account) => Math.max(state.accounts?.[account.identity]?.cooldownUntilMs ?? 0, state.accounts?.[account.identity]?.leaseUntilMs ?? 0))
+      .map((account) => Math.max(account.availableAtMs, state.accounts?.[account.identity]?.cooldownUntilMs ?? 0, state.accounts?.[account.identity]?.leaseUntilMs ?? 0))
       .filter((time) => time > Date.now());
     if (state.permissionPause || state.legacyPermissionBlock || pool.accounts.some((account) => state.accounts?.[account.identity]?.blocked[account.authGeneration])) state.status = "auth_paused";
     else state.status = "no_available_account";
@@ -349,12 +349,14 @@ export class OfficialRankingCollector extends Container<Env> {
       if (!pool) { state.status = "not_configured"; await this.persist(state, false); return; }
       this.synchronizePool(state, pool);
       if (state.callbackProtocolVersion !== 1 && state.status === "failed" && state.run?.complete
-        && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration
+        && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration && !state.permissionPause && !state.legacyPermissionBlock
         && state.lastFailure?.stage === "catalog_callback" && state.lastFailure.code === "CallbackError"
         && state.lastFailure.httpStatus === 403) {
         state.callbackProtocolVersion = 1;
         state.failures = 0;
         state.nextAtMs = Date.now();
+        const health = this.runHealth(state);
+        if (health) { health.cooldownUntilMs = 0; health.failures = 0; }
       }
       if (state.status === "failed" && state.lastFailure === undefined && state.run?.complete
         && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration) {
@@ -383,9 +385,9 @@ export class OfficialRankingCollector extends Container<Env> {
     const canSchedule = !state.permissionPause && !state.legacyPermissionBlock && accounts.some(ready);
     const counts = { accounts: accounts.length, enabled: accounts.filter((account) => account.enabled).length,
       ready: state.permissionPause || state.legacyPermissionBlock ? 0 : accounts.filter((account) => ready(account)
-        && (state.accounts?.[account.identity]?.cooldownUntilMs ?? 0) <= now && (state.accounts?.[account.identity]?.leaseUntilMs ?? 0) <= now).length,
+        && account.availableAtMs <= now && (state.accounts?.[account.identity]?.cooldownUntilMs ?? 0) <= now && (state.accounts?.[account.identity]?.leaseUntilMs ?? 0) <= now).length,
       paused: accounts.filter((account) => Boolean(state.accounts?.[account.identity]?.blocked[account.authGeneration]) || !account.enabled || !account.ready).length,
-      coolingDown: accounts.filter((account) => (state.accounts?.[account.identity]?.cooldownUntilMs ?? 0) > now).length,
+      coolingDown: accounts.filter((account) => Math.max(account.availableAtMs, state.accounts?.[account.identity]?.cooldownUntilMs ?? 0) > now).length,
       leased: accounts.filter((account) => (state.accounts?.[account.identity]?.leaseUntilMs ?? 0) > now).length };
     return { contract: "haneoka:ranking-status/1", region, serverTimeMs: now, collectorStatus: unavailable ?? state.status,
       collectionEnabled: officialRegionEnabled(this.env.OFFICIAL_RANKING_ENABLED_REGIONS, region),

@@ -19,6 +19,7 @@ export interface OfficialCollectorAccount {
   legacyGenerations: string[];
   enabled: boolean;
   ready: boolean;
+  availableAtMs: number;
   initialPause: "auth_paused" | "auth_uncertain" | null;
   permissionPaused: boolean;
   clientVersion: string;
@@ -40,7 +41,7 @@ export interface OfficialCollectorAccountHealth {
 
 export function selectOfficialCollectorAccount(pool: OfficialCollectorPool, health: Record<string, OfficialCollectorAccountHealth>, now: number): OfficialCollectorAccount | null {
   return pool.accounts.filter((account) => account.enabled && account.ready && !account.initialPause && !health[account.identity]?.blocked[account.authGeneration]
-    && (health[account.identity]?.cooldownUntilMs ?? 0) <= now && (health[account.identity]?.leaseUntilMs ?? 0) <= now)
+    && account.availableAtMs <= now && (health[account.identity]?.cooldownUntilMs ?? 0) <= now && (health[account.identity]?.leaseUntilMs ?? 0) <= now)
     .sort((left, right) => Number(right.identity === pool.preferredIdentity) - Number(left.identity === pool.preferredIdentity)
       || (health[left.identity]?.lastUsedAtMs ?? 0) - (health[right.identity]?.lastUsedAtMs ?? 0) || left.identity.localeCompare(right.identity))[0] ?? null;
 }
@@ -80,6 +81,9 @@ export async function parseOfficialCollectorConfiguration(raw: string, region: G
       throw new Error("invalid_collector_config");
     if (config.pauseReason !== undefined && !["authentication", "permission", "auth_uncertain", "device_conflict", "version"].includes(String(config.pauseReason)))
       throw new Error("invalid_collector_config");
+    if (pooled && config.nextRequestAtMs !== undefined && (typeof config.nextRequestAtMs !== "number"
+      || !Number.isSafeInteger(config.nextRequestAtMs) || config.nextRequestAtMs < 0 || config.nextRequestAtMs > 8_640_000_000_000_000))
+      throw new Error("invalid_collector_config");
     const authentication = { player_id: auth.player_id, credential: auth.credential, device_id: deviceId, ...(bid ? { bid } : {}) };
     const playerIdentity = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(auth.player_id) ? auth.player_id.toLowerCase() : auth.player_id;
     const identity = await digest({ region, player_id: playerIdentity });
@@ -93,7 +97,8 @@ export async function parseOfficialCollectorConfiguration(raw: string, region: G
     const masterConfig = object(config.masterConfig);
     if (!Object.keys(masterConfig).length) throw new Error("invalid_collector_config");
     accounts.push({ identity, generation, authGeneration, legacyGenerations, enabled: !pooled || config.enabled === true,
-      ready: !pooled || config.state === "ready",
+      ready: !pooled || config.state === "ready" || config.state === "cooldown",
+      availableAtMs: pooled ? Number(config.nextRequestAtMs ?? 0) : 0,
       initialPause: pooled && (["auth_required", "device_conflict"].includes(String(config.state))
         || ["authentication", "permission", "auth_uncertain", "device_conflict"].includes(String(config.pauseReason)))
         ? config.pauseReason === "auth_uncertain" ? "auth_uncertain" : "auth_paused" : null,

@@ -39,7 +39,7 @@
 区域 Durable Object 持久保存调度、当前凭据代际、在途检查点与暂停/冷却；D1 保存历史索引，私有 R2 保存不可变正文。容器临时目录及完成任务缓存只用于本轮执行，不是恢复或读接口的依据。Worker 重新读取同一观测不会修改时间或生成新游标。
 
 区服 secret 向后兼容单账号结构，并接受 `haneoka:official-ranking-account-pool/1`：
-`{contract,region,selectedAccountId?,accounts:[{id,label?,source?,enabled,state,pauseReason?,clientVersion,credentials,masterConfig}]}`。
+`{contract,region,selectedAccountId?,accounts:[{id,label?,source?,enabled,state,pauseReason?,nextRequestAtMs?,clientVersion,credentials,masterConfig}]}`。
 `credentials` 为原有同服、固定 origin 的凭据文档；池内 ID 和别名不参与真实身份或认证代摘要。
 同一真实身份不能重复登记。仅 ready 且启用的 entry 可调度；池的暂停状态不因重新部署、
 更换池内 ID 或切换单号／池格式清除。403/7 权限暂停和429/8冷却覆盖全区，401/16及明确
