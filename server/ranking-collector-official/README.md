@@ -92,6 +92,7 @@ origin、状态、计数和查询回执，公开榜单正文写入指定文件�
 导出总大小限制为 5120 bytes，文件权限为 0600，用现有 GitHub secret → Cloudflare
 secret 流程传递。云采集使用现有 Durable Object 与 Container；交接后停止本地对同一
 身份发起查询，账号密码、SDK token 和游戏凭据不进入浏览器、日志或仓库。
+四区配置齐全后，`official-ranking-config.yml` 的 `region=all` 一次核对并写入四个号池，随后触发一次 Worker 发布。
 
 ## 环境与配置
 

@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       region:
-        description: Region with a verified official account and Master configuration
+        description: Verified region or all verified regional pools
         required: true
         type: choice
-        options: [jp, tw, en, kr]
+        options: [jp, tw, en, kr, all]
         default: jp
 permissions:
   contents: read
@@ -29,23 +29,33 @@ jobs:
       - name: Prepare the selected protected configuration
         env:
           RANKING_REGION: ${{ inputs.region }}
-          RANKING_CONFIG: ${{ inputs.region == 'jp' && secrets.OFFICIAL_RANKING_JP_CONFIG || inputs.region == 'tw' && secrets.OFFICIAL_RANKING_TW_CONFIG || inputs.region == 'en' && secrets.OFFICIAL_RANKING_EN_CONFIG || inputs.region == 'kr' && secrets.OFFICIAL_RANKING_KR_CONFIG }}
+          OFFICIAL_RANKING_JP_CONFIG: ${{ secrets.OFFICIAL_RANKING_JP_CONFIG }}
+          OFFICIAL_RANKING_TW_CONFIG: ${{ secrets.OFFICIAL_RANKING_TW_CONFIG }}
+          OFFICIAL_RANKING_EN_CONFIG: ${{ secrets.OFFICIAL_RANKING_EN_CONFIG }}
+          OFFICIAL_RANKING_KR_CONFIG: ${{ secrets.OFFICIAL_RANKING_KR_CONFIG }}
         run: |
           node --input-type=module <<'NODE'
           import fs from "node:fs";
           import path from "node:path";
           import { parseOfficialCollectorConfiguration } from "./src/lib/official-ranking.ts";
           const region = process.env.RANKING_REGION;
-          const raw = process.env.RANKING_CONFIG;
-          if (!["jp", "tw", "en", "kr"].includes(region) || !raw || Buffer.byteLength(raw, "utf8") > 5120)
-            throw new Error("Selected official ranking configuration is missing");
-          try { await parseOfficialCollectorConfiguration(raw, region); }
-          catch { throw new Error("Selected official ranking configuration is invalid"); }
+          const regions = ["jp", "tw", "en", "kr"];
+          if (region !== "all" && !regions.includes(region)) throw new Error("Invalid official ranking region");
+          const secrets = {};
+          for (const selected of region === "all" ? regions : [region]) {
+            const key = `OFFICIAL_RANKING_${selected.toUpperCase()}_CONFIG`;
+            const raw = process.env[key];
+            if (!raw || Buffer.byteLength(raw, "utf8") > 5120)
+              throw new Error("Selected official ranking configuration is missing");
+            try { await parseOfficialCollectorConfiguration(raw, selected); }
+            catch { throw new Error("Selected official ranking configuration is invalid"); }
+            secrets[key] = raw;
+          }
           const version = fs.readFileSync("pnpm-workspace.yaml", "utf8").match(/^\s+wrangler:\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
           if (!version) throw new Error("The locked Wrangler version is missing");
           fs.appendFileSync(process.env.GITHUB_ENV, `HANEOKA_WRANGLER_VERSION=${version}\n`);
           fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "official-ranking-secrets.json"),
-            JSON.stringify({ [`OFFICIAL_RANKING_${region.toUpperCase()}_CONFIG`]: raw }),
+            JSON.stringify(secrets),
             { mode: 0o600, flag: "wx" });
           NODE
       - name: Verify the production Worker exists

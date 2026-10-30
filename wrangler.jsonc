@@ -19,7 +19,7 @@
     "BETTER_AUTH_URL": "https://haneoka.org",
     "AUTH_EMAIL_FROM": "noreply@haneoka.org",
     "TURNSTILE_ENABLED": "false",
-    "OFFICIAL_RANKING_ENABLED_REGIONS": "jp,tw",
+    "OFFICIAL_RANKING_ENABLED_REGIONS": "jp,tw,en,kr",
     "OFFICIAL_RANKING_READ_REGIONS": "",
   },
 
