@@ -41,6 +41,42 @@ docker build -t haneoka-official-ranking:local server/ranking-collector-official
 
 该命令从仓库根目录运行，只构建镜像，不配置凭据或启用生产采集。
 
+## 已有账号池
+
+`account-pool.mjs` 使用 Node 24 的 SQLite 与 AES-GCM，兼容原 T62 私密目录中的
+`pool-local.sqlite`、`pool-encryption-key`，保留原账号记录。管理和导出命令不联网；
+`query` 调用同包 Python 协议内核，不执行 SDK 登录、注册或角色创建。
+
+```sh
+node account-pool.mjs status --directory <私密号池目录>
+node account-pool.mjs import --directory <私密号池目录> --config <完整区服配置.json> --label <账号别名> --source sdk
+node account-pool.mjs pause --directory <私密号池目录> --account <池内账号ID>
+node account-pool.mjs enable --directory <私密号池目录> --account <池内账号ID>
+node account-pool.mjs select --directory <私密号池目录> --region tw --account <池内账号ID>
+node account-pool.mjs query --directory <私密号池目录> --region tw --kind total --id 4 --python <采集器Python> --output <新的私密结果.json>
+node account-pool.mjs query --directory <私密号池目录> --region tw --kind challenge --id 10 --python <采集器Python> --proxy http://127.0.0.1:7897 --output <新的私密结果.json>
+node account-pool.mjs export --directory <私密号池目录> --region tw --output <新的单账号配置.json>
+node account-pool.mjs export-pool --directory <私密号池目录> --region tw --output <新的区服号池配置.json>
+```
+
+导入使用上文完整区服配置结构；`--source` 支持 `sdk`、`guest`、`import`，这里只标记
+已有会话来源。配置、密钥及号池目录须为本机私密文件；命令只输出别名、池内 ID、
+origin、状态、计数和查询回执，公开榜单正文写入指定文件，排除查询账号的 myRank/myScore。
+原记录缺少可验证的 origin 时显示 `origin_required`，不使用默认来源发送其凭据。
+
+每区显式选择一个账号；每次查询持有 60 秒独占租约，使用原表的区域预算和凭据代际
+更新条件。认证或设备拒绝持久暂停该区查询，切换账号、启用账号、修改别名或 Master
+配置不能解除暂停；同账号真实认证字段更新后恢复。查询不会在失败后换号重放。
+过期租约仍由凭据代际与随机租约令牌校验结果归属。输出配置和结果不覆盖已有文件。
+
+`export` 导出已验证账号的旧版单账号配置；`export-pool` 导出
+`haneoka:official-ranking-account-pool/1`，包含 `region`、`selectedAccountId` 和
+`accounts`。每个 entry 包含 `id`、`label`、`source`、`enabled`、`state`、
+`lastSuccessAtMs` 与完整 `clientVersion`、`credentials`、`masterConfig`。
+导出总大小限制为 5120 bytes，文件权限为 0600，用现有 GitHub secret → Cloudflare
+secret 流程传递。云采集使用现有 Durable Object 与 Container；交接后停止本地对同一
+身份发起查询，账号密码、SDK token 和游戏凭据不进入浏览器、日志或仓库。
+
 ## 环境与配置
 
 推荐使用与仓库管线一致的 Python 3.13，最低支持 Python 3.12；Python TLS 需要支持 ALPN。运行依赖固定在 `requirements.txt`，通过离线安装入口创建独立虚拟环境。
