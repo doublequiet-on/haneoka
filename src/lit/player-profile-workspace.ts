@@ -111,7 +111,7 @@ export class PlayerProfileWorkspace extends GameRecordsCardsElement {
       ? (requested as GameRecordsRegion)
       : defaultGameRecordsRegion(readReleaseServer(), this.locale);
     this.rankingEndpoint = playerProfileRankingEndpoint(url.searchParams.get("ranking"), this.region);
-    this.points = Boolean(this.rankingEndpoint?.endsWith("/latest"));
+    this.points = Boolean(this.rankingEndpoint && /\/events\/[1-9][0-9]*\/latest$/u.test(this.rankingEndpoint));
     this.profileQuery = url.searchParams.get("profileId") || "";
     addEventListener(
       "haneoka:locale-ready",

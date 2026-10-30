@@ -40,6 +40,7 @@ import "../styles/song-ranking.css";
 import { snackbar } from "../lib/snackbar";
 
 type Region = GameRecordsRegion;
+type RankingView = "total" | "challenge" | "points";
 let trackerSequence = 0;
 
 export class EventTracker extends LitElement {
@@ -52,6 +53,7 @@ export class EventTracker extends LitElement {
     info: { state: true },
     songs: { state: true },
     challengeId: { state: true },
+    rankingView: { state: true },
     now: { state: true },
     refreshing: { state: true },
   };
@@ -63,6 +65,7 @@ export class EventTracker extends LitElement {
   declare info: JsonRecord | null;
   declare songs: Record<string, JsonRecord>;
   declare challengeId: string;
+  declare rankingView: RankingView | "";
   declare now: number;
   declare refreshing: boolean;
   private requests = new RequestScope();
@@ -87,6 +90,7 @@ export class EventTracker extends LitElement {
     this.info = null;
     this.songs = {};
     this.challengeId = "";
+    this.rankingView = "";
     this.now = Date.now();
     this.refreshing = false;
   }
@@ -135,6 +139,9 @@ export class EventTracker extends LitElement {
       ? (requested as Region)
       : defaultGameRecordsRegion(this.server, this.locale);
     this.challengeId = params.get("challenge") || "";
+    const board = params.get("board");
+    this.rankingView = board === "total" || board === "challenge" || board === "points"
+      ? board : this.challengeId ? "challenge" : "";
     addEventListener(
       "haneoka:locale-ready",
       () => {
@@ -265,15 +272,21 @@ export class EventTracker extends LitElement {
     this.challengeId = id;
     this.syncUrl();
     void this.updateComplete.then(() =>
-      this.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView({
+      this.querySelector<HTMLElement>('.collection[role="tablist"] [role="tab"][aria-selected="true"]')?.scrollIntoView({
         block: "nearest",
         inline: "nearest",
       }),
     );
   }
+  private selectRanking(view: RankingView) {
+    this.rankingView = view;
+    this.syncUrl();
+  }
   private syncUrl() {
     const url = new URL(location.href);
     url.searchParams.set("region", this.region);
+    if (this.rankingView) url.searchParams.set("board", this.rankingView);
+    else url.searchParams.delete("board");
     if (this.challengeId) url.searchParams.set("challenge", this.challengeId);
     else url.searchParams.delete("challenge");
     history.replaceState(history.state, "", url);
@@ -356,6 +369,17 @@ export class EventTracker extends LitElement {
       event.pointRankingEnabled && !["pending", "missed", "disabled", "unknown"].includes(event.pointRankingStatus);
     const totalReadable = event.totalRankingEnabled &&
       ["collecting", "finalizing", "archived"].includes(event.totalRankingStatus || "");
+    const boards: RankingView[] = [
+      ...(event.totalRankingEnabled ? ["total" as const] : []),
+      "challenge",
+      ...(event.pointRankingEnabled ? ["points" as const] : []),
+    ];
+    const activeBoard = this.rankingView && boards.includes(this.rankingView) ? this.rankingView : boards[0];
+    const boardLabels: Record<RankingView, string> = {
+      total: this.label("totalTab", "Total"),
+      challenge: this.label("challengeTab", "Songs"),
+      points: this.label("pointTab", "Points"),
+    };
     const marks = this.musicTypeMarks[this.sourceServer()] || new Map<string, string>();
     // A CBT edition has no public event page; its art stays a picture here.
     const eventHref = isPublicReleaseServer(this.infoServer)
@@ -402,7 +426,18 @@ export class EventTracker extends LitElement {
             </div>
           </header>
         </div>
-        <section class="detail-section">
+        <nav class="tabs" role="tablist" aria-label=${this.label("title", "Event tracker")}
+          @keydown=${rovingKeydown(boards, activeBoard, (view) => this.selectRanking(view))}>
+          ${boards.map((view) => html`
+            <button class="tab" type="button" role="tab" id=${`event-board-${view}`}
+              aria-controls=${`event-ranking-${view}`} aria-selected=${String(activeBoard === view)}
+              tabindex=${activeBoard === view ? 0 : -1} @click=${() => this.selectRanking(view)}>
+              <span>${boardLabels[view]}</span><span class="tab__indicator"></span>
+            </button>
+          `)}
+        </nav>
+        <section class="detail-section" role="tabpanel" id="event-ranking-challenge"
+          aria-labelledby="event-board-challenge" ?hidden=${activeBoard !== "challenge"}>
           ${renderDetailSectionHeading(this.label("challengeRanking", "Challenge song ranking"), "works")}
           ${
             event.challenges.length
@@ -496,7 +531,8 @@ export class EventTracker extends LitElement {
           }
         </section>
         ${event.totalRankingEnabled ? html`
-          <section class="detail-section">
+          <section class="detail-section" role="tabpanel" id="event-ranking-total"
+            aria-labelledby="event-board-total" ?hidden=${activeBoard !== "total"}>
             ${renderDetailSectionHeading(this.label("totalRanking", "Total song ranking"), "works")}
             ${totalReadable ? html`
               <song-ranking
@@ -512,7 +548,8 @@ export class EventTracker extends LitElement {
             ` : emptyState({ title: this.label("pending", "Ranking data is being collected."), icon: "hourglass_top" })}
           </section>
         ` : nothing}
-        ${this.data.provider !== "official" || event.pointRankingEnabled ? html`<section class="detail-section">
+        ${event.pointRankingEnabled ? html`<section class="detail-section" role="tabpanel" id="event-ranking-points"
+          aria-labelledby="event-board-points" ?hidden=${activeBoard !== "points"}>
           ${renderDetailSectionHeading(this.label("pointRanking", "Event point ranking"), "works")}
           ${
             pointsReadable
