@@ -62,7 +62,9 @@ class NetRandom {
 export class LiveRandom {
   private streams: NetRandom[];
   draws = 0;
-  constructor(public baseSeed = 0) {
+  public baseSeed: number;
+  constructor(baseSeed = 0) {
+    this.baseSeed = baseSeed;
     this.streams = [0, 1, 2, 3].map((index) => new NetRandom(Math.imul(index, -0x61c88647) ^ baseSeed));
   }
   value(stream: number): number {

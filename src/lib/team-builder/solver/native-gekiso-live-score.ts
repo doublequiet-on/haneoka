@@ -64,8 +64,11 @@ export function createNativeGekisoNoLuckLiveScoreResolver(data: TeamBuilderData,
         local.push(gap("native-gekiso-live-range-start-mismatch", "native source start-time getter"));
       const completeFrames = [0, 1, 2].map((rangeIndex) => tape.frames.find((frame) =>
         frame.rangeUpdates.some((update) => update.rangeIndex === rangeIndex && update.simulateState === 7))?.timeMs);
-      if (completeFrames.some((time, i) => time === undefined || time < ranges[i]?.endTimeMs ||
-        (i < 2 && time > ranges[i + 1]?.startTimeMs)))
+      if (completeFrames.some((time, i) => {
+        const range = ranges[i], next = ranges[i + 1];
+        return time === undefined || !range || time < range.endTimeMs ||
+          (i < 2 && (!next || time > next.startTimeMs));
+      }))
         local.push(gap("native-gekiso-live-range-completion-unresolved", "completed rank before next range starts"));
       if (local.length) return { value: null, status: "unavailable", gaps: local, assumptions: [] };
       const played = await runtime.evaluate(rules, tape, controls);

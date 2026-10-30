@@ -410,13 +410,17 @@ export class Controller implements GekisouComboInfo {
   stateUpdates: number[] = [];
   currentPlayingIndex = -1;
 
+  private readonly rushPercent: number;
+  private readonly lastNoteDelayMs: number;
   constructor(
     ranges: readonly (readonly [number, number, number])[],
     notes: readonly (readonly [id: number, timeMs: number])[],
     t: GekisouTables,
-    private readonly rushPercent: number,
-    private readonly lastNoteDelayMs: number,
+    rushPercent: number,
+    lastNoteDelayMs: number,
   ) {
+    this.rushPercent = rushPercent;
+    this.lastNoteDelayMs = lastNoteDelayMs;
     this.ranges = ranges.map(([s, e, mission]) => ({
       startMs: s,
       endMs: e,
@@ -848,7 +852,9 @@ export class Controller implements GekisouComboInfo {
 /** The chart's fevers: Wait → Fever at the start and Fever → End at the end, at most one step per frame. */
 export class FeverUpdater {
   private state: number[];
-  constructor(private readonly fevers: readonly (readonly [number, number])[]) {
+  private readonly fevers: readonly (readonly [number, number])[];
+  constructor(fevers: readonly (readonly [number, number])[]) {
+    this.fevers = fevers;
     this.state = fevers.map(() => FEVER_WAIT);
   }
   private readonly out: [number, number][] = [];

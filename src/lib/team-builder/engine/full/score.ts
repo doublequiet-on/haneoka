@@ -146,13 +146,21 @@ export interface ScoreSettings {
 export class ScoreCalculator {
   readonly state = new FactorState();
   readonly levelFactor: number;
+  readonly settings: ScoreSettings;
+  readonly power: number;
+  readonly convertedCount: number;
+  readonly assist: number;
   constructor(
-    readonly settings: ScoreSettings,
-    readonly power: number,
+    settings: ScoreSettings,
+    power: number,
     level: number,
-    readonly convertedCount: number,
-    readonly assist = 1,
+    convertedCount: number,
+    assist = 1,
   ) {
+    this.settings = settings;
+    this.power = power;
+    this.convertedCount = convertedCount;
+    this.assist = assist;
     this.levelFactor = f(f(f((level - 5) | 0) * LEVEL_STEP) + 1);
   }
   table(type: number, combo: number): number {
@@ -223,10 +231,12 @@ export class IncrementalScore {
   private pendingFixed: [number, number] | null = null;
   rankBonus = 0;
 
+  readonly calc: ScoreCalculator;
   constructor(
-    readonly calc: ScoreCalculator,
+    calc: ScoreCalculator,
     musicLengthMs: number,
   ) {
+    this.calc = calc;
     this.maxFrame = getFrame(musicLengthMs) + EXTRA_FRAMES;
     this.notes = new Array(this.maxFrame);
     this.factors = new Array(this.maxFrame);

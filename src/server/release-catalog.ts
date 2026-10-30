@@ -58,14 +58,22 @@ export type ReleaseCatalogErrorCode =
 export class ReleaseCatalogError extends Error {
   readonly name = "ReleaseCatalogError";
 
+  readonly code: ReleaseCatalogErrorCode;
+  readonly status: 404 | 502 | 503;
+  readonly path: string | undefined;
+  readonly fallbackToHttp: boolean;
   constructor(
-    readonly code: ReleaseCatalogErrorCode,
-    readonly status: 404 | 502 | 503,
+    code: ReleaseCatalogErrorCode,
+    status: 404 | 502 | 503,
     message: string,
-    readonly path?: string,
-    readonly fallbackToHttp = false,
+    path?: string,
+    fallbackToHttp = false,
   ) {
     super(message);
+    this.code = code;
+    this.status = status;
+    this.path = path;
+    this.fallbackToHttp = fallbackToHttp;
   }
 }
 
