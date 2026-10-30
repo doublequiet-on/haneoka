@@ -78,8 +78,8 @@ def serve():
                 if len(completed) > 16:
                     del completed[next(iter(completed))]
                 self.reply(200, result)
-            except CallbackError:
-                self.reply(502, {'error': 'callback_unavailable'})
+            except CallbackError as error:
+                self.reply(502, {'error': 'callback_unavailable', 'failure': error.failure})
             except Exception as error:
                 report_failure(job['region'],failure_info('container',error))
                 self.reply(500, {'error': 'collection_failed'})

@@ -24,7 +24,10 @@ from transport import Sampler, VersionError
 
 
 class CallbackError(RuntimeError):
-    pass
+    def __init__(self,message,receipt=None):
+        self.receipt=receipt or {}
+        self.failure=None
+        super().__init__(message)
 
 
 def failure_info(stage, error, receipt=None):
@@ -73,6 +76,7 @@ class Updates:
         raw = json.dumps(dict(self.base, type=kind, **fields), ensure_ascii=False).encode()
         request = Request(self.url, data=raw, method='POST', headers={
             'Content-Type': 'application/json', 'Authorization': 'Bearer ' + self.token})
+        receipt = None
         for attempt in range(3):
             remaining = self.deadline - time.time()
             if remaining <= 0:
@@ -80,22 +84,23 @@ class Updates:
             try:
                 with self.opener.open(request, timeout=min(5, remaining)) as response:
                     if response.status != 200:
-                        raise CallbackError('callback rejected')
+                        raise CallbackError('callback rejected',{'status':response.status})
                 return
             except HTTPError as error:
                 status = error.code
+                receipt = {'status':status}
                 error.close()
                 if status < 500 and status != 429:
-                    raise CallbackError('callback rejected') from None
+                    raise CallbackError('callback rejected',receipt) from None
             except CallbackError:
                 raise
-            except Exception:
-                pass
+            except Exception as error:
+                receipt = {'error_type':type(error).__name__}
             if attempt < 2:
                 remaining = self.deadline - time.time()
                 if remaining > 0:
                     time.sleep(min(.25 * (attempt + 1), remaining))
-        raise CallbackError('callback unavailable')
+        raise CallbackError('callback unavailable',receipt)
 
 
 def private_json(path, value):
@@ -223,7 +228,8 @@ def run_job(job, origin):
                     if final_status in ('auth_paused', 'rate_limited'):
                         break
         except CallbackError as error:
-            report_failure(region,failure_info(stage,error))
+            error.failure=failure_info(stage,error,error.receipt)
+            report_failure(region,error.failure)
             raise
         except (CatalogRequestError, VersionError) as error:
             final_status = failure_status(error.receipt, authenticated=False)
@@ -244,6 +250,7 @@ def run_job(job, origin):
             fields['retryAfterSeconds'] = retry_after
         try:updates.send('complete', **fields)
         except CallbackError as error:
-            report_failure(region,failure_info('complete_callback',error))
+            error.failure=failure_info('complete_callback',error,error.receipt)
+            report_failure(region,error.failure)
             raise
     return {'runId': job['runId'], 'status': final_status}

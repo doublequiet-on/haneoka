@@ -94,6 +94,30 @@ function validateFailure(value: unknown): asserts value is OfficialCollectorFail
     || failure.httpStatus !== undefined && (typeof failure.httpStatus !== "number" || !Number.isInteger(failure.httpStatus) || failure.httpStatus < 100 || failure.httpStatus > 599)
     || failure.grpcStatus !== undefined && (typeof failure.grpcStatus !== "string" || !/^[0-9]{1,3}$/u.test(failure.grpcStatus))) throw new Error("invalid_failure");
 }
+async function responseFailure(response: Response): Promise<OfficialCollectorFailure | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  try {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > 1024) return null;
+      chunks.push(next.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const failure: unknown = object(JSON.parse(new TextDecoder().decode(bytes))).failure;
+    validateFailure(failure);
+    return { stage: failure.stage, code: failure.code,
+      ...(failure.httpStatus !== undefined ? { httpStatus: failure.httpStatus } : {}),
+      ...(failure.grpcStatus !== undefined ? { grpcStatus: failure.grpcStatus } : {}) };
+  } catch { return null; }
+  finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+}
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 }
@@ -308,8 +332,8 @@ export class OfficialRankingCollector extends Container<Env> {
       const response = await this.containerFetch("http://container/collect", { method: "POST",
         headers: { Authorization: `Bearer ${serviceToken}`, "Content-Type": "application/json" },
         body: JSON.stringify(job), signal: AbortSignal.timeout(JOB_MS + 15_000) });
-      if (!response.ok) failure = { stage: "container", code: "http_error", httpStatus: response.status };
-      await response.body?.cancel();
+      if (!response.ok) failure = await responseFailure(response) ?? { stage: "container", code: "http_error", httpStatus: response.status };
+      else await response.body?.cancel();
     } catch (error) {
       failure = { stage: "container", code: error instanceof Error && error.name === "TimeoutError" ? "TimeoutError" : "container_fetch_failed" };
     }
