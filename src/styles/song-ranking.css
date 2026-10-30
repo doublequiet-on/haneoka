@@ -535,6 +535,8 @@
     event-tracker song-ranking[summary] .song-ranking__avatar {
       grid-column: 2;
       grid-row: 1;
+      width: 32px;
+      height: 32px;
     }
     event-tracker song-ranking[summary] .song-ranking__player-copy {
       grid-column: 3 / -1;

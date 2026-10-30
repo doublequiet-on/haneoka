@@ -371,9 +371,10 @@ export class EventTracker extends LitElement {
       ["collecting", "finalizing", "archived"].includes(event.totalRankingStatus || "");
     const boards: RankingView[] = [
       ...(event.totalRankingEnabled ? ["total" as const] : []),
-      "challenge",
+      ...(event.challenges.length ? ["challenge" as const] : []),
       ...(event.pointRankingEnabled ? ["points" as const] : []),
     ];
+    if (!boards.length) boards.push("challenge");
     const activeBoard = this.rankingView && boards.includes(this.rankingView) ? this.rankingView : boards[0];
     const boardLabels: Record<RankingView, string> = {
       total: this.label("totalTab", "Total"),
