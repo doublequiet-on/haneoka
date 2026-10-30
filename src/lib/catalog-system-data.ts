@@ -11,7 +11,7 @@ export interface CatalogSystemPayload {
   entityId?: string;
   arena?: ArenaCatalog;
   marks?: Record<string, string>;
-  /** Card art and growth tables for the Arena leaderboard, for the page's own server. */
+  /** Card art and growth tables for the Arena leaderboard, for both releases (any region can be shown). */
   rankingCards?: Partial<Record<"jp" | "intl", RankingCardCatalog>>;
   pointName?: unknown;
   release?: { releaseId: string; sourceId: string };

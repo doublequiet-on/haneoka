@@ -26,7 +26,7 @@ import type { ArenaPopulationDto, ArenaRankingDto, GameRecordsRegion } from "../
 import { readPageData } from "../lib/page-data";
 import { adoptPrerenderedWorkspace } from "../lib/workspace-page-data";
 import { clearAppBarActions, setAppBarActions } from "../lib/app-bar";
-import { resourcePath, releaseServerFromPath } from "../lib/resource-route";
+import { resourcePath, releaseServerFromPath, type ReleaseServer } from "../lib/resource-route";
 import { gekisouMission } from "../lib/gekisou";
 import { navigationDocumentUrl } from "../lib/document-url";
 import { catalogUrl, fetchJson, gameDateTime, localizedText, preferredLocale } from "./shared/catalog";
@@ -82,7 +82,12 @@ export class ArenaWorkspace extends LitElement {
   private catalog?: ArenaCatalog;
   private marks: Record<string, string> = {};
   private cards: CatalogSystemPayload["rankingCards"] = {};
+  /** The page's release server; the URL keeps it whatever region is shown. */
   private server = "jp";
+  /** The release whose Arena data the selected region reads. */
+  private dataServer = "jp";
+  private sources = new Map<string, { catalog: ArenaCatalog; marks: Record<string, string> }>();
+  private sourceRequest?: AbortController;
   private owner = `arena-${++sequence}`;
   private timer = 0;
   private request?: AbortController;
@@ -128,10 +133,11 @@ export class ArenaWorkspace extends LitElement {
   preparePage(payload: CatalogSystemPayload, locale: string) {
     adoptPrerenderedWorkspace(this);
     this.locale = locale as Locale;
-    this.server = payload.server;
+    this.server = this.dataServer = payload.server;
     this.now = Date.now();
     this.catalog = payload.arena;
     this.marks = payload.marks || {};
+    if (payload.arena) this.sources.set(payload.server, { catalog: payload.arena, marks: this.marks });
     this.cards = payload.rankingCards || {};
     this.region = defaultGameRecordsRegion(payload.server, locale);
     this.phase = "ready";
@@ -139,7 +145,7 @@ export class ArenaWorkspace extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.locale = preferredLocale(this.locale) as Locale;
-    this.server = releaseServerFromPath(location.pathname) || "jp";
+    this.server = this.dataServer = releaseServerFromPath(location.pathname) || "jp";
     addEventListener("haneoka:locale-ready", this.localeReady);
     document.addEventListener("visibilitychange", this.visibility);
     addEventListener("popstate", this.restoreState);
@@ -147,6 +153,7 @@ export class ArenaWorkspace extends LitElement {
   }
   disconnectedCallback() {
     this.request?.abort();
+    this.sourceRequest?.abort();
     this.populationRequest?.abort();
     clearTimeout(this.timer);
     this.images.disconnect();
@@ -165,14 +172,9 @@ export class ArenaWorkspace extends LitElement {
       const request = (this.request = new AbortController());
       this.phase = "loading";
       try {
-        const catalog = await fetchJson<ArenaCatalog>(
-          `${catalogUrl("arena", "", this.server)}?projection=${ARENA_PROJECTION}`,
-          { signal: request.signal },
-        );
-        const marksUrl = new URL(catalogUrl("ui-marks", "", this.server), location.origin);
-        marksUrl.searchParams.set("release", catalog.identity.releaseId);
-        const marks = await fetchJson<Record<string, string>>(marksUrl.toString(), { signal: request.signal });
+        const { catalog, marks } = await this.fetchSource(this.server, request.signal);
         if (request.signal.aborted) return;
+        this.sources.set(this.server, { catalog, marks });
         this.catalog = catalog;
         this.marks = marks;
         this.region = defaultGameRecordsRegion(
@@ -189,6 +191,48 @@ export class ArenaWorkspace extends LitElement {
       this.restoreState();
       this.schedule();
     }
+  }
+  private async fetchSource(server: string, signal: AbortSignal) {
+    const catalog = await fetchJson<ArenaCatalog>(`${catalogUrl("arena", "", server)}?projection=${ARENA_PROJECTION}`, {
+      signal,
+    });
+    const marksUrl = new URL(catalogUrl("ui-marks", "", server), location.origin);
+    marksUrl.searchParams.set("release", catalog.identity.releaseId);
+    return { catalog, marks: await fetchJson<Record<string, string>>(marksUrl.toString(), { signal }) };
+  }
+  /** Japan reads the Japanese release; Taiwan, English and Korea read the international one. */
+  private regionServer(region: GameRecordsRegion) {
+    if (region !== "jp") return "intl";
+    return this.server === "jp" || this.server === "jp-cbt" ? this.server : "jp";
+  }
+  /** Shows the selected region's own Arena seasons, loading that release once when it differs from the page's. */
+  private async showRegion() {
+    const server = this.regionServer(this.region);
+    if (server === this.dataServer && this.catalog) return;
+    let source = this.sources.get(server);
+    if (!source) {
+      this.sourceRequest?.abort();
+      const request = (this.sourceRequest = new AbortController());
+      this.phase = "loading";
+      try {
+        source = await this.fetchSource(server, request.signal);
+      } catch {
+        if (!request.signal.aborted) this.phase = "error";
+        return;
+      }
+      if (request.signal.aborted) return;
+      this.sources.set(server, source);
+    }
+    if (this.regionServer(this.region) !== server) return;
+    this.catalog = source.catalog;
+    this.marks = source.marks;
+    this.dataServer = server;
+    this.ranking = null;
+    this.population = null;
+    if (!this.seasons().some((season) => season.id === this.selectedSeasonId)) this.selectedSeasonId = "";
+    this.phase = "ready";
+    this.writeState();
+    this.schedule();
   }
   private schedule() {
     clearTimeout(this.timer);
@@ -224,7 +268,7 @@ export class ArenaWorkspace extends LitElement {
     return season.leagues.find((league) => league.bandId === this.bandId) || season.leagues[0];
   }
   private regions(): GameRecordsRegion[] {
-    return this.server === "jp" || this.server === "jp-cbt" ? ["jp"] : ["tw", "en", "kr"];
+    return ["jp", "tw", "en", "kr"];
   }
   private restoreState = () => {
     const url = navigationDocumentUrl();
@@ -236,6 +280,7 @@ export class ArenaWorkspace extends LitElement {
     if (region && this.regions().includes(region)) this.region = region;
     const tab = url.hash.slice(1) as Tab;
     this.tab = TABS.includes(tab) ? tab : "overview";
+    void this.showRegion();
   };
   private writeState() {
     const url = navigationDocumentUrl();
@@ -243,13 +288,14 @@ export class ArenaWorkspace extends LitElement {
       value ? url.searchParams.set(key, value) : url.searchParams.delete(key);
     set("season", this.selectedSeasonId || null);
     set("band", this.bandId ? String(this.bandId) : null);
-    set("region", this.regions().length > 1 ? this.region : null);
+    set("region", this.region === defaultGameRecordsRegion(this.server as Parameters<typeof defaultGameRecordsRegion>[0], this.locale) ? null : this.region);
     url.hash = this.tab === "overview" ? "" : this.tab;
     history.replaceState(history.state, "", url);
   }
   private select(patch: Partial<Pick<ArenaWorkspace, "selectedSeasonId" | "bandId" | "tab" | "region">>) {
     Object.assign(this, patch);
     this.writeState();
+    if (patch.region) void this.showRegion();
   }
 
   /* ---------- formatting ---------- */
@@ -275,7 +321,7 @@ export class ArenaWorkspace extends LitElement {
     return days ? this.t("remainingDays", { days, hours }) : this.t("remainingHours", { hours, minutes: rest });
   }
   private href(kind: "songs" | "items" | "events" | "exchange", id: string) {
-    return resourcePath({ server: this.server, locale: this.locale, kind, id });
+    return resourcePath({ server: this.dataServer as ReleaseServer, locale: this.locale, kind, id });
   }
   private tierName(rank: ArenaRank) {
     return this.name(rank.name).replace(/\s*[0-9０-９]+$/u, "");
@@ -300,7 +346,7 @@ export class ArenaWorkspace extends LitElement {
     const color = ["", "Red", "Blue", "Green", "Yellow", "Purple"][value];
     const url = (source: string | undefined) =>
       source &&
-      `/runtime/${this.server}/${source.replace(/^runtime\//u, "")}?release=${this.catalog!.identity.releaseId}`;
+      `/runtime/${this.dataServer}/${source.replace(/^runtime\//u, "")}?release=${this.catalog!.identity.releaseId}`;
     const fallback = color ? url(this.marks[`CardType-${color}.png`]) : "";
     const image = url(this.marks[`sp_icon_live_music_type_${value}.png`]) || fallback;
     return image
@@ -406,17 +452,7 @@ export class ArenaWorkspace extends LitElement {
     setAppBarActions(
       this.owner,
       html`
-        ${
-          this.regions().length > 1 && (this.tab === "ranking" || this.tab === "overview")
-            ? gameRecordsRegionPicker(
-                this.locale,
-                this.region,
-                (region) => this.select({ region }),
-                "arena-region",
-                this.regions(),
-              )
-            : nothing
-        }
+        ${gameRecordsRegionPicker(this.locale, this.region, (region) => this.select({ region }), "arena-region", this.regions())}
         ${
           league
             ? html`
@@ -811,7 +847,7 @@ export class ArenaWorkspace extends LitElement {
       [this.t("memberUse"), count((row) => row.cards.map((card) => card.memberCardId)), false],
       [this.t("supportUse"), count((row) => row.cards.map((card) => card.supportCardId)), true],
     ];
-    const source = this.server === "jp" || this.server === "jp-cbt" ? "jp" : "intl";
+    const source = this.dataServer === "jp" || this.dataServer === "jp-cbt" ? "jp" : "intl";
     const catalog = this.cards?.[source];
     return html`
       <section class="surface stack arena-wide">
@@ -827,7 +863,7 @@ export class ArenaWorkspace extends LitElement {
                     return html`
                       <li title=${art ? localizedText(art.name, this.locale) : String(id)}>
                         <a
-                          href=${resourcePath({ server: this.server, locale: this.locale, kind: support ? "support-cards" : "member-cards", id: String(id) })}
+                          href=${resourcePath({ server: this.dataServer as ReleaseServer, locale: this.locale, kind: support ? "support-cards" : "member-cards", id: String(id) })}
                         >
                           ${
                             art?.image

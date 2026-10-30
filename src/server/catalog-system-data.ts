@@ -45,8 +45,7 @@ async function loadData(kind: CatalogSystemKind, server: ReleaseServer, locale: 
     const release = await staticCatalogRelease(server);
     payload.arena = await arenaCatalog(server, release);
     payload.marks = await fetchStaticCatalog("ui-marks", server, release) as Record<string, string>;
-    const source = server === "jp" || server === "jp-cbt" ? "jp" : "intl";
-    payload.rankingCards = { [source]: (await rankingCardsPageData())[source] };
+    payload.rankingCards = await rankingCardsPageData();
     return payload;
   }
   if (kind === "studio") {
