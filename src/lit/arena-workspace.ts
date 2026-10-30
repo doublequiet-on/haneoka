@@ -832,12 +832,23 @@ export class ArenaWorkspace extends LitElement {
                           ${
                             art?.image
                               ? html`
-                                  <img
-                                    src=${art.image}
-                                    alt=""
-                                    loading="lazy"
-                                    class=${support ? "arena-usage__support" : ""}
-                                  />
+                                  <span class=${`arena-usage__media card-media card-media--${support ? "support" : "member"}`}>
+                                    <img class="arena-usage__art" src=${art.image} alt="" loading="lazy" decoding="async" />
+                                    ${
+                                      art.attributeIcon
+                                        ? html`
+                                            <img class="card-media__attribute" src=${art.attributeIcon} alt="" />
+                                          `
+                                        : nothing
+                                    }
+                                    ${
+                                      art.rarityIcon
+                                        ? html`
+                                            <img class="card-media__rarity" src=${art.rarityIcon} alt="" />
+                                          `
+                                        : nothing
+                                    }
+                                  </span>
                                 `
                               : html`
                                   <span class="arena-usage__empty">${id}</span>

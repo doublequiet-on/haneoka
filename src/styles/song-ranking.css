@@ -40,6 +40,11 @@
     margin: 0;
     padding: 0;
   }
+  /* A full board is thousands of images; rows off screen skip style, layout and paint. */
+  .song-ranking__entry {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 96px;
+  }
   .song-ranking__entry + .song-ranking__entry {
     border-top: 1px solid var(--md-sys-color-outline-variant);
   }

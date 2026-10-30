@@ -41,14 +41,15 @@ export abstract class GameRecordsCardsElement extends LitElement {
       .toLocaleUpperCase(this.locale);
   }
 
-  protected profileMedia(name: string, image: string) {
+  /** `indicator` is off for card art: hundreds of spinning indicators on a full board cost more than they tell. */
+  protected profileMedia(name: string, image: string, indicator = true) {
     return image
       ? html`
           <span
             class=${live(`song-ranking__player-media${this.failedImages.has(image) ? " is-error" : this.readyImages.has(image) ? " is-loaded" : ""}`)}
           >
             ${
-              !this.readyImages.has(image)
+              indicator && !this.readyImages.has(image)
                 ? html`
                     ${loadingIndicator({ label: this.label("loading", "Loading") })}
                   `
@@ -120,7 +121,7 @@ export abstract class GameRecordsCardsElement extends LitElement {
     const level = artwork ? this.cardLevel(artwork, card, support) : null;
     const body = html`
       <span class=${`song-ranking__card-media card-media card-media--${support ? "support" : "member"}${support ? " song-ranking__card-media--support" : ""}`}>
-        ${artwork?.image ? this.profileMedia(name, artwork.image) : icon("broken_image", 24)}
+        ${artwork?.image ? this.profileMedia(name, artwork.image, false) : icon("broken_image", 24)}
         ${
           artwork?.attributeIcon
             ? html`

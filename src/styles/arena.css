@@ -371,14 +371,25 @@
     display: block;
     inline-size: 100%;
   }
-  .arena-usage__list img,
+  .arena-usage__media,
   .arena-usage__empty {
+    position: relative;
     display: block;
     inline-size: 100%;
     aspect-ratio: 1;
+    overflow: hidden;
     border-radius: var(--md-sys-shape-corner-small);
-    object-fit: cover;
     background: var(--md-sys-color-surface-container-highest);
+  }
+  .arena-usage__media.card-media--support {
+    aspect-ratio: 16 / 9;
+  }
+  .arena-usage__art {
+    display: block;
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+    object-position: 50% 25%;
   }
   .arena-usage__list small {
     font-variant-numeric: tabular-nums;
