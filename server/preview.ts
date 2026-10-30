@@ -24,6 +24,7 @@ import {
   OUR_NOTES_STAGE_NAMES,
 } from "@haneoka/cassiopeia-plugin-our-notes";
 import {
+  sonolusClientVersion,
   createOurNotesSonolusItemLabels,
   localizeSonolusDocument as localizeSonolusItemLabels,
   parseReleaseChartDataId,
@@ -1322,7 +1323,8 @@ function sonolusJson(req: IncomingMessage, res: ServerResponse, status: number, 
     "Cache-Control": cache,
     "Content-Length": Buffer.byteLength(body),
     "Content-Type": "application/json; charset=utf-8",
-    "Sonolus-Version": "1.1.4",
+    "Sonolus-Version": sonolusClientVersion(req.headers["user-agent"]),
+    Vary: "User-Agent",
   });
   res.end(req.method === "HEAD" ? undefined : body);
 }
@@ -1846,7 +1848,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         "Cache-Control": projected.cacheControl,
         "Content-Length": projected.body.byteLength,
         "Content-Type": projected.contentType,
-        "Sonolus-Version": "1.1.4",
+        "Sonolus-Version": sonolusClientVersion(req.headers["user-agent"]),
+        Vary: "User-Agent",
       };
       if (projected.etag) headers.ETag = projected.etag;
       res.writeHead(projected.status, headers);
@@ -1875,7 +1878,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     }
     sendFile(req, res, file, repository ? "public, max-age=31536000, immutable" : "public, max-age=600", {
       "Access-Control-Allow-Origin": "*",
-      "Sonolus-Version": "1.1.4",
+      "Sonolus-Version": sonolusClientVersion(req.headers["user-agent"]),
+      Vary: "User-Agent",
     });
     return;
   }

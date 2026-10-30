@@ -572,3 +572,18 @@ chat catalog, changed reward counts and candidate manifest. To publish, retain
 those exact inputs and add each receipt's `candidateReleaseId` and
 `candidateManifestSha256`; set `publish=true`. A changed parent requires a new
 dry-run. Publication reuses the existing conditional current-pointer update.
+
+## Sonolus toolchain updates
+
+The daily `sonolus-toolchain-update.yml` workflow checks npm's `latest` tag and
+opens a review PR. Its output also reports newer packages on `beta`. A manual
+run can select `release_tag: beta` for an announced client release and
+`server_only: true` to update the server independently of the engine compiler.
+Locally, use `SONOLUS_NPM_TAG=beta SONOLUS_SERVER_ONLY=true node
+scripts/sonolus-toolchain-update.mjs apply`, then `pnpm install`.
+
+Workspace, adapter and engine pins are checked separately. The updater preserves
+newer explicit pins when `latest` trails a selected beta release. Compiler
+updates with exact local patches require patch migration before manifests change.
+The server response version comes from the adapter's core package; compiled
+engine and presentation assets are published separately by `sonolus.yml`.

@@ -5,6 +5,7 @@
 // Effects/Dependencies: 依赖外部转换与 core；引擎编译和 worker-assets 由脚本生成，不在入口保证已就绪。
 export * from "@haneoka/cassiopeia-plugin-sonolus";
 export * from "./runtime/index.js";
+export { SONOLUS_VERSION, SONOLUS_SUPPORTED_VERSIONS, sonolusClientVersion } from "./protocol.js";
 export {
   createOurNotesSonolusItemLabels,
   encodeSonolusLocalizedText,

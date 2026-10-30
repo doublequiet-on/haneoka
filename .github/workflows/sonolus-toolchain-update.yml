@@ -17,7 +17,17 @@ on:
   schedule:
     # Daily, offset from Renovate's schedule so PRs never race.
     - cron: "37 9 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: npm release tag
+        type: choice
+        options: [latest, beta]
+        default: latest
+      server_only:
+        description: Update server packages without changing the engine compiler
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -63,6 +73,9 @@ jobs:
 
       - name: Apply toolchain updates
         id: updates
+        env:
+          SONOLUS_NPM_TAG: ${{ inputs.release_tag || 'latest' }}
+          SONOLUS_SERVER_ONLY: ${{ inputs.server_only || 'false' }}
         run: |
           node scripts/sonolus-toolchain-update.mjs apply
           if git -C .dependencies/sonolus-our-notes diff --quiet; then
@@ -103,7 +116,7 @@ jobs:
 
       - name: Report the declared Sonolus app version
         run: |
-          node --input-type=module -e "console.log('Sonolus-Version will advertise:', (await import('@sonolus/core')).version.sonolus)"
+          node --input-type=module -e "import { createRequire } from 'node:module'; const core = createRequire(new URL('./packages/sonolus/package.json', import.meta.url))('@sonolus/core'); console.log('Sonolus-Version will advertise:', core.sonolusVersion ?? core.version.sonolus)"
 
       - name: Open or update the toolchain PR
         uses: peter-evans/create-pull-request@v8
@@ -117,9 +130,10 @@ jobs:
             sonolus-toolchain-update workflow. Merging rebuilds and republishes
             the Sonolus engine payload (engine + server + particle data).
 
-            The engine repository bump was pushed to
-            haneoka-gakuen/sonolus-our-notes main and the external
-            repository lock now pins that commit.
+            Selected npm tag: ${{ inputs.release_tag || 'latest' }}.
+            Server-only update: ${{ inputs.server_only || 'false' }}.
+            Engine changes, when present, are pushed to sonolus-our-notes
+            main and pinned by the updated submodule.
           commit-message: "chore(sonolus): bump @sonolus toolchain"
           labels: dependencies
           add-paths: |

@@ -30,3 +30,16 @@ timeline remains available to older engines. Sprites, particle channels, and
 draw order are preserved; the final particle cache includes this producer and
 its engine contract. Loop endpoints exclude the next cycle to prevent double
 drawing at the seam.
+
+## Client versions
+
+The Worker and Node preview share `sonolusClientVersion`. Requests from
+Sonolus 1.1.4 retain their version header; Sonolus 1.1.5 and requests without
+a recognized client use the version declared by the adapter's `@sonolus/core`.
+Both clients consume the existing engine v13 and resource schemas. The Worker
+sets the negotiated header after reading its shared payload cache and returns
+`Vary: User-Agent`.
+
+Add older clients to `SONOLUS_SUPPORTED_VERSIONS` only after checking their
+server and asset schemas. A client requiring different engine or item formats
+needs its own payload and route projection.

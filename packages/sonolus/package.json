@@ -21,6 +21,8 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
+    "dist/protocol.d.ts",
+    "dist/protocol.d.ts.map",
     "dist/convert",
     "dist/runtime",
     "dist/shared",
@@ -43,7 +45,7 @@
   "dependencies": {
     "@haneoka/cassiopeia-plugin-sonolus": "workspace:*",
     "@haneoka/sonolus-core": "^0.1.0",
-    "@sonolus/core": "^7.15.4"
+    "@sonolus/core": "^7.16.0"
   },
   "devDependencies": {
     "@haneoka/cassiopeia": "workspace:*",

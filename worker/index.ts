@@ -22,7 +22,6 @@ import { refreshCommunityRanking, COMMUNITY_RANKING_CRON } from "./community-ran
 import { handleCommunityBootstrap } from "./community-bootstrap";
 import { withRequestWork } from "./request-work";
 import { handleCommunityMediaQueue, reconcileCommunityMedia } from "./community-media";
-import { version } from "@sonolus/core";
 import { sonolusShareRedirectTarget } from "./sonolus-share";
 export { CommunityMediaContainer } from "./community-media-container";
 export { OfficialRankingCollector } from "./official-ranking-collector";
@@ -110,6 +109,8 @@ import {
 } from "../src/lib/resource-route";
 import { temporaryPublicRedirectTarget } from "../src/lib/temporary-public-routing";
 import {
+  SONOLUS_VERSION,
+  sonolusClientVersion,
   createOurNotesSonolusItemLabels,
   encodeSonolusLocalizedText,
   sonolusSongCategoryTitle,
@@ -322,10 +323,6 @@ const RELEASE_REGISTRY_CACHE_TTL = 86_400;
 const RELEASE_REGISTRY_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=604800";
 const SOURCE_CACHE_TTL = 86_400;
 const MEDIA_CACHE_TTL = 7 * 86_400;
-// Single version source: @sonolus/core releases declare the Sonolus app
-// version they target, and the worker advertises the same value so clients
-// never see the server trail an app update.
-const SONOLUS_VERSION = version.sonolus;
 const CAS_PREFIX = "cas/v1/sha256";
 const RESOURCE_SERVER_CACHE_TTL_MS = 15_000;
 const RESOURCE_SERVER_CACHE_LIMIT = 128;
@@ -3974,7 +3971,17 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
   const gameClient = await handleGameClient(env, ctx, request, url);
   if (gameClient) return gameClient;
   const sonolus = await handleSonolus(env, ctx, request, url.pathname);
-  if (sonolus) return sonolus;
+  if (sonolus) {
+    const headers = new Headers(sonolus.headers);
+    headers.set("Sonolus-Version", sonolusClientVersion(request.headers.get("User-Agent")));
+    headers.append("Vary", "User-Agent");
+    return new Response(sonolus.body, {
+      status: sonolus.status,
+      statusText: sonolus.statusText,
+      headers,
+      encodeBody: headers.has("Content-Encoding") ? "manual" : "automatic",
+    });
+  }
   const apiDiscovery = await handleApiDiscovery(request, env.ASSETS);
   if (apiDiscovery) return apiDiscovery;
   const publicGame = await handlePublicGameApi(request);
@@ -4101,7 +4108,7 @@ function internalErrorResponse(request: Request, error: unknown): Response {
   if (url.pathname === "/sonolus" || url.pathname.startsWith("/sonolus/")) {
     return new Response(JSON.stringify({ message: "Internal server error" }), {
       status: 500,
-      headers: { ...SONOLUS_JSON_HEADERS, "Cache-Control": "no-store", "X-Request-Id": id },
+      headers: { ...SONOLUS_JSON_HEADERS, "Sonolus-Version": sonolusClientVersion(request.headers.get("User-Agent")), Vary: "User-Agent", "Cache-Control": "no-store", "X-Request-Id": id },
     });
   }
   return errorResponse(request, 500, "internal_error", "Internal server error", id);

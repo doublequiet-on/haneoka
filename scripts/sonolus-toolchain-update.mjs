@@ -5,7 +5,9 @@
 // see the server as an old-version server.
 //
 //   check  print available updates, exit 1 when any exist (CI gate)
-//   apply  rewrite pnpm-workspace.yaml catalog + engine package.json pins
+//   apply  rewrite workspace, adapter and optional engine package pins
+// SONOLUS_NPM_TAG=beta selects preview releases; SONOLUS_SERVER_ONLY=true
+// keeps engine manifests and compiler patches unchanged.
 //
 // The engine's package.json lives in the externally locked
 // sonolus-our-notes repository; committing, pushing, and updating
@@ -18,6 +20,10 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workspaceFile = join(repositoryRoot, "pnpm-workspace.yaml");
+const adapterPackageFile = join(repositoryRoot, "packages", "sonolus", "package.json");
+const tag = process.env.SONOLUS_NPM_TAG ?? "latest";
+if (!["latest", "beta"].includes(tag)) throw new Error("SONOLUS_NPM_TAG must be latest or beta");
+const serverOnly = process.env.SONOLUS_SERVER_ONLY === "true";
 const enginePackageFile = join(repositoryRoot, ".dependencies", "sonolus-our-notes", "package.json");
 const engineWorkspaceFile = join(repositoryRoot, ".dependencies", "sonolus-our-notes", "pnpm-workspace.yaml");
 
@@ -37,24 +43,33 @@ if (mode !== "check" && mode !== "apply") {
   console.error(`Unknown mode "${mode}". Use "check" or "apply".`);
   process.exitCode = 2;
 } else {
-  main();
+  await main();
 }
 
 async function main() {
-  const current = { ...readCatalogPins(), ...readEnginePins() };
+  const targets = [
+    ...(serverOnly ? [] : [{ target: "workspace", pins: readCatalogPins(), packages: catalogPackages }]),
+    { target: "adapter", pins: readPackagePins(adapterPackageFile), packages: ["@sonolus/core"] },
+    ...(serverOnly ? [] : [{ target: "engine", pins: readPackagePins(enginePackageFile), packages: enginePackages }]),
+  ];
   const updates = [];
-  for (const pkg of [...new Set([...catalogPackages, ...enginePackages])]) {
+  for (const pkg of [...new Set(targets.flatMap((entry) => entry.packages))]) {
     const latest = await latestVersion(pkg);
-    const pinned = current[pkg];
-    if (pinned === undefined) throw new Error(`${pkg} is not pinned in the workspace or engine manifests`);
-    if (latest !== pinned) updates.push({ pkg, from: pinned, to: latest });
+    for (const { target, pins, packages } of targets) {
+      if (!packages.includes(pkg)) continue;
+      const pinned = pins[pkg];
+      if (pinned === undefined) throw new Error(`${pkg} is not pinned in ${target}`);
+      if (compareVersions(latest, pinned) > 0) updates.push({ target, pkg, from: pinned, to: latest });
+    }
   }
   if (updates.length === 0) {
-    console.log("Sonolus toolchain is up to date.");
+    console.log(`Sonolus toolchain is up to date for npm tag ${tag}${serverOnly ? " (server only)" : ""}.`);
     return;
   }
-  for (const { pkg, from, to } of updates) console.log(`${pkg}: ${from} -> ${to}`);
-  const compilerUpdate = updates.find(({ pkg }) => pkg === "@sonolus/sonolus.js-compiler");
+  for (const { target, pkg, from, to } of updates) console.log(`${target} ${pkg}: ${from} -> ${to}`);
+  const compilerUpdate = updates.find(
+    ({ target, pkg }) => target === "engine" && pkg === "@sonolus/sonolus.js-compiler",
+  );
   const compilerPatches = [workspaceFile, engineWorkspaceFile].flatMap(readCompilerPatches);
   if (compilerUpdate && compilerPatches.length) {
     throw new Error(
@@ -67,23 +82,36 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const catalogUpdates = new Map(updates.filter((u) => catalogPackages.includes(u.pkg)).map((u) => [u.pkg, u.to]));
-  const engineUpdates = new Map(updates.filter((u) => enginePackages.includes(u.pkg)).map((u) => [u.pkg, u.to]));
+  const updatesFor = (target) =>
+    new Map(updates.filter((entry) => entry.target === target).map((entry) => [entry.pkg, entry.to]));
+  const catalogUpdates = updatesFor("workspace");
+  const adapterUpdates = updatesFor("adapter");
+  const engineUpdates = updatesFor("engine");
   if (catalogUpdates.size) rewriteCatalog(catalogUpdates);
-  if (engineUpdates.size) rewriteEnginePackage(engineUpdates);
-  console.log(
-    `Updated ${[...catalogUpdates.keys()].join(", ") || "nothing"} in pnpm-workspace.yaml and ` +
-      `${[...engineUpdates.keys()].join(", ") || "nothing"} in the engine manifest; ` +
-      `run pnpm install and update the engine submodule pin.`,
-  );
+  if (adapterUpdates.size) rewritePackage(adapterPackageFile, adapterUpdates);
+  if (engineUpdates.size) rewritePackage(enginePackageFile, engineUpdates);
+  console.log("Updated toolchain manifests; refresh lockfiles and pin any updated engine commit.");
 }
 
 async function latestVersion(pkg) {
   const response = await fetch(`https://registry.npmjs.org/${pkg}`);
   if (!response.ok) throw new Error(`npm registry lookup failed for ${pkg}: HTTP ${response.status}`);
-  const latest = (await response.json())["dist-tags"]?.latest;
-  if (typeof latest !== "string") throw new Error(`npm registry has no latest tag for ${pkg}`);
+  const tags = (await response.json())["dist-tags"];
+  const latest = tags?.[tag];
+  if (typeof latest !== "string") throw new Error(`npm registry has no ${tag} tag for ${pkg}`);
+  if (tag === "latest" && typeof tags.beta === "string" && compareVersions(tags.beta, latest) > 0)
+    console.log(`${pkg}: preview ${tags.beta} is available under npm tag beta`);
   return latest;
+}
+
+function compareVersions(left, right) {
+  const parts = (value) => {
+    if (!/^\d+\.\d+\.\d+$/u.test(value)) throw new Error(`Expected an exact release version: ${value}`);
+    return value.split(".").map(Number);
+  };
+  const a = parts(left);
+  const b = parts(right);
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 }
 
 function readCatalogPins() {
@@ -97,13 +125,13 @@ function readCatalogPins() {
   return pins;
 }
 
-function readEnginePins() {
-  const manifest = JSON.parse(readFileSync(enginePackageFile, "utf8"));
+function readPackagePins(file) {
+  const manifest = JSON.parse(readFileSync(file, "utf8"));
   const pins = {};
   for (const section of ["dependencies", "devDependencies"]) {
     for (const pkg of enginePackages) {
       const value = manifest[section]?.[pkg];
-      if (typeof value === "string") pins[pkg] = value;
+      if (typeof value === "string") pins[pkg] = value.replace(/^\^/u, "");
     }
   }
   return pins;
@@ -120,14 +148,15 @@ function rewriteCatalog(updates) {
   writeFileSync(workspaceFile, rewritten.join("\n"));
 }
 
-function rewriteEnginePackage(updates) {
-  const manifest = JSON.parse(readFileSync(enginePackageFile, "utf8"));
+function rewritePackage(file, updates) {
+  const manifest = JSON.parse(readFileSync(file, "utf8"));
   for (const section of ["dependencies", "devDependencies"]) {
     for (const [pkg, version] of updates) {
-      if (manifest[section]?.[pkg] !== undefined) manifest[section][pkg] = version;
+      if (manifest[section]?.[pkg] !== undefined)
+        manifest[section][pkg] = manifest[section][pkg].startsWith("^") ? `^${version}` : version;
     }
   }
-  writeFileSync(enginePackageFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function readLines(path) {
@@ -151,7 +180,7 @@ function readCompilerPatches(file) {
     if (leading <= indentation) break;
     body.push(line);
   }
-  return [...body.join("\n").matchAll(
-    /(["']?)@sonolus\/sonolus\.js-compiler@(\d+\.\d+\.\d+)\1\s*:\s*\S/gu,
-  )].map((match) => ({ version: match[2], file }));
+  return [...body.join("\n").matchAll(/(["']?)@sonolus\/sonolus\.js-compiler@(\d+\.\d+\.\d+)\1\s*:\s*\S/gu)].map(
+    (match) => ({ version: match[2], file }),
+  );
 }

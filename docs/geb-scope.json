@@ -170,6 +170,7 @@
     "packages/chart-editor/src/model.ts",
     "packages/sonolus-core/src/index.ts",
     "packages/sonolus/src/index.ts",
+    "packages/sonolus/src/protocol.ts",
     "packages/ui/src/index.ts",
     "packages/community-media/worker.ts",
     "packages/community-media/server.mjs",
