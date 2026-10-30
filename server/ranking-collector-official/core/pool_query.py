@@ -56,6 +56,8 @@ def query(job):
             if response is None:
                 if authentication_failed(receipt):
                     return {'ok': False, 'kind': 'authentication'}
+                if receipt.get('status') is None:
+                    return {'ok': False, 'kind': 'auth_uncertain'}
                 return {'ok': False, 'kind': 'upstream', 'retryAfterSeconds': retry_delay(receipt, 60)}
             from google.protobuf import json_format
             body = json_format.MessageToDict(response, preserving_proto_field_name=True)
@@ -72,6 +74,8 @@ def query(job):
             receipt = error.receipt
             return {'ok': False, 'kind': 'authentication' if authenticated and authentication_failed(receipt) else 'catalog_unavailable',
                 'retryAfterSeconds': retry_delay(receipt, 60)}
+        except Exception:
+            return {'ok': False, 'kind': 'auth_uncertain' if authenticated else 'query_failed'}
 
 
 if __name__ == '__main__':

@@ -198,15 +198,18 @@ export class AccountPool {
       if (next > timestamp) fail("cooldown", Math.ceil((next - timestamp) / 1000));
       const config = this.unseal(row), token = randomUUID();
       this.db.prepare("UPDATE game_query_region SET next_request_at=? WHERE region=?").run(timestamp + policy.interval_ms, region);
-      this.db.prepare(`UPDATE game_query_account SET lease_token=?,lease_until=?,last_used_at=?,request_count=request_count+1 WHERE id=?`).run(token, timestamp + 60000, timestamp, row.id);
+      this.db.prepare(`UPDATE game_query_account SET state='auth_required',lease_token=?,lease_until=?,last_used_at=?,request_count=request_count+1 WHERE id=?`)
+        .run(token, timestamp + 60000, timestamp, row.id);
+      this.db.prepare("UPDATE game_query_pool_state SET blocked_account=?,blocked_generation=?,blocked_kind='auth_uncertain' WHERE region=?")
+        .run(row.id, row.generation, region);
       return { row, config, token };
     });
   }
   finish(lease, outcome) {
     return this.transaction(() => {
       const { row, token } = lease, timestamp = now();
-      const blocked = ["authentication", "device_conflict", "version"].includes(outcome.kind);
-      const state = outcome.ok ? "ready" : outcome.kind === "authentication" ? "auth_required" : blocked ? outcome.kind : "cooldown";
+      const blocked = ["authentication", "auth_uncertain", "device_conflict", "version"].includes(outcome.kind);
+      const state = outcome.ok ? "ready" : ["authentication", "auth_uncertain"].includes(outcome.kind) ? "auth_required" : blocked ? outcome.kind : "cooldown";
       const result = this.db.prepare(`UPDATE game_query_account SET state=?,last_error=?,last_success_at=CASE WHEN ? THEN ? ELSE last_success_at END,
         failure_count=failure_count+?,lease_token=NULL,lease_until=0,next_request_at=?,updated_at=? WHERE id=? AND lease_token=? AND generation=?`)
         .run(state, outcome.ok ? null : outcome.kind, outcome.ok ? 1 : 0, timestamp, outcome.ok ? 0 : 1,
@@ -214,6 +217,8 @@ export class AccountPool {
       if (result.changes !== 1) fail("session_changed");
       if (blocked) this.db.prepare(`UPDATE game_query_pool_state SET blocked_account=?,blocked_generation=?,blocked_kind=? WHERE region=?`)
         .run(row.id, row.generation, outcome.kind, row.region);
+      else this.db.prepare(`UPDATE game_query_pool_state SET blocked_account=NULL,blocked_generation=NULL,blocked_kind=NULL
+        WHERE region=? AND blocked_account=? AND blocked_generation=?`).run(row.region, row.id, row.generation);
       if (!outcome.ok) this.db.prepare("UPDATE game_query_region SET next_request_at=MAX(next_request_at,?) WHERE region=?")
         .run(timestamp + Math.max(10000, outcome.retryAfterSeconds * 1000 || 60000), row.region);
     });
@@ -232,12 +237,12 @@ export class AccountPool {
         child.on("error", () => resolveResult({ ok: false, kind: "runtime_unavailable" }));
         child.on("close", () => {
           try { resolveResult(JSON.parse(Buffer.concat(chunks).toString())); }
-          catch { resolveResult({ ok: false, kind: "query_interrupted" }); }
+          catch { resolveResult({ ok: false, kind: "auth_uncertain" }); }
         });
         child.stdin.on("error", () => {});
         child.stdin.end(JSON.stringify({ region, kind, id, config: lease.config, proxy }));
       });
-    } finally { this.finish(lease, outcome || { ok: false, kind: "query_interrupted" }); }
+    } finally { this.finish(lease, outcome || { ok: false, kind: "auth_uncertain" }); }
     if (!outcome.ok) fail(outcome.kind, outcome.retryAfterSeconds);
     privateWrite(output, outcome.result);
     return { ...outcome.result.meta, accountId: lease.row.id, players: outcome.result.data.players.length, saved: true };
