@@ -116,7 +116,7 @@ function toDate(value: DateInput): Date | null {
 
 interface Resolved extends DatePreferences {
   locale: string;
-  timeZone?: string;
+  timeZone: string | undefined;
   /** Instants show the zone label; fixed-zone calendar values do not. */
   instant: boolean;
   time: boolean;
