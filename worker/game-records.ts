@@ -338,6 +338,7 @@ const normalizeTrackedEvent = (value: unknown, region: GameRecordsRegion, respon
   const id = decimalId(event.eventId);
   if (!id) throw new RequestFailure(502, "upstream");
   const points = asObject(event.pointRanking);
+  const total = asObject(event.totalRanking);
   return {
     region,
     fetchedAtMs: headerEpochMillis(response.headers, "X-Fetched-At") ?? epochMillis(event.lastFetchedAt),
@@ -352,6 +353,8 @@ const normalizeTrackedEvent = (value: unknown, region: GameRecordsRegion, respon
           ? points.enabled
           : event.rankingDisabled !== true && event.collectStatus !== "disabled",
       pointRankingStatus: textOrNull(points.collectStatus) || textOrNull(event.collectStatus) || "unknown",
+      totalRankingEnabled: total.rankingEnabled === true,
+      totalRankingStatus: textOrNull(total.collectStatus) || "unknown",
       challenges: asArray(event.challengeRankings).flatMap((value) => {
         const challenge = asObject(value);
         const challengeId = decimalId(challenge.challengeMusicId);
@@ -942,7 +945,8 @@ export async function handleGameRecordsApi(
     `^${GAME_RECORDS_API_PREFIX}/([^/]+)/events/([^/]+)/challenges/([^/]+)/ranking$`,
   ).exec(url.pathname);
   const pointRanking = new RegExp(`^${GAME_RECORDS_API_PREFIX}/([^/]+)/events/([^/]+)/latest$`).exec(url.pathname);
-  const eventRoute = currentEvent || challengeRanking || pointRanking;
+  const totalRanking = new RegExp(`^${GAME_RECORDS_API_PREFIX}/([^/]+)/events/([^/]+)/total/latest$`).exec(url.pathname);
+  const eventRoute = currentEvent || challengeRanking || pointRanking || totalRanking;
   if (eventRoute) {
     const region = eventRoute[1]!;
     if (!isRegion(region)) return errorResponse(request, 404, "not_found");
@@ -970,6 +974,14 @@ export async function handleGameRecordsApi(
     const eventId = decimalId(eventRoute[2]);
     const challengeId = challengeRanking ? decimalId(challengeRanking[3]) : null;
     if (!eventId || (challengeRanking && !challengeId)) return errorResponse(request, 400, "invalid_request");
+    if (totalRanking)
+      return serveCached(request, ctx, async () => {
+        const upstream = await upstreamJson(`${RANKING_ORIGIN}/api/v1/${region}/events/${eventId}/challenge-total-ranking`);
+        if (upstream.response.headers.get("X-Position-Source") !== "responseOrder")
+          throw new RequestFailure(502, "upstream");
+        const { musicId: _musicId, ...ranking } = normalizeRanking(upstream.value, region, 0, upstream.response, true);
+        return { body: JSON.stringify({ ...ranking, eventId } satisfies EventRankingDto) };
+      });
     return serveCached(request, ctx, async () => {
       const path = challengeRanking ? `challenges/${challengeId}/ranking` : "latest";
       const sourceUrl = `${RANKING_ORIGIN}/api/v1/${region}/events/${eventId}/${path}`;
