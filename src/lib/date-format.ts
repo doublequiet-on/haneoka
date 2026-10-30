@@ -75,7 +75,7 @@ export function setDatePreferences(change: Partial<DatePreferences>) {
   } catch {
     // Private mode: the choice lasts for this page view.
   }
-  window.dispatchEvent(new CustomEvent(DATE_FORMAT_EVENT, { detail: preferences }));
+  (globalThis as typeof globalThis & EventTarget).dispatchEvent(new CustomEvent(DATE_FORMAT_EVENT, { detail: preferences }));
 }
 
 export interface DateFormatOptions {
