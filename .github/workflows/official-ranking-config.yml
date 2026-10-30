@@ -1,0 +1,75 @@
+name: Configure official ranking credentials
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: Region with a verified official account and Master configuration
+        required: true
+        type: choice
+        options: [jp, tw, en, kr]
+        default: jp
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: cloudflare-production-publish
+  cancel-in-progress: false
+jobs:
+  configure:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Prepare the selected protected configuration
+        env:
+          RANKING_REGION: ${{ inputs.region }}
+          RANKING_CONFIG: ${{ inputs.region == 'jp' && secrets.OFFICIAL_RANKING_JP_CONFIG || inputs.region == 'tw' && secrets.OFFICIAL_RANKING_TW_CONFIG || inputs.region == 'en' && secrets.OFFICIAL_RANKING_EN_CONFIG || inputs.region == 'kr' && secrets.OFFICIAL_RANKING_KR_CONFIG }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import path from "node:path";
+          const region = process.env.RANKING_REGION;
+          const raw = process.env.RANKING_CONFIG;
+          if (!["jp", "tw", "en", "kr"].includes(region) || !raw || Buffer.byteLength(raw, "utf8") > 5120)
+            throw new Error("Selected official ranking configuration is missing");
+          let config;
+          try { config = JSON.parse(raw); }
+          catch { throw new Error("Selected official ranking configuration is invalid"); }
+          if (config?.credentials?.region !== (region === "tw" ? "hk" : region) ||
+              typeof config.clientVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(config.clientVersion) ||
+              !config.masterConfig || typeof config.masterConfig !== "object" ||
+              Array.isArray(config.masterConfig) ||
+              !Object.keys(config.masterConfig).length)
+            throw new Error("Selected official ranking configuration does not match the region");
+          const version = fs.readFileSync("pnpm-workspace.yaml", "utf8").match(/^\s+wrangler:\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
+          if (!version) throw new Error("The locked Wrangler version is missing");
+          fs.appendFileSync(process.env.GITHUB_ENV, `HANEOKA_WRANGLER_VERSION=${version}\n`);
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "official-ranking-secrets.json"),
+            JSON.stringify({ [`OFFICIAL_RANKING_${region.toUpperCase()}_CONFIG`]: raw }),
+            { mode: 0o600, flag: "wx" });
+          NODE
+      - name: Verify the production Worker exists
+        run: npm exec --yes --package="wrangler@$HANEOKA_WRANGLER_VERSION" -- wrangler secret list --config wrangler.jsonc > /dev/null
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+      - name: Update the production Worker secret
+        run: npm exec --yes --package="wrangler@$HANEOKA_WRANGLER_VERSION" -- wrangler secret bulk "$RUNNER_TEMP/official-ranking-secrets.json" --config wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+      - name: Publish the verified Worker configuration
+        run: gh workflow run deploy-cloudflare.yml --ref main -f worker_only=true -f apply_d1_migrations=true
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Remove the temporary secret file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/official-ranking-secrets.json"

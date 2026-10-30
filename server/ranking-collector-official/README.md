@@ -4,7 +4,7 @@
 
 ## Cloudflare 云端模式
 
-云端入口是 `cloud.py`，镜像定义为本目录的 `Dockerfile`，构建上下文也为本目录。镜像只复制代码、协议描述和固定依赖，使用非 root 用户运行；运行时不需要 Linux 常驻主机或本机读取 API。默认不启用任何区服，生产切换由两个独立配置控制：
+云端入口是 `cloud.py`，镜像定义为本目录的 `Dockerfile`，构建上下文也为本目录。镜像只复制代码、协议描述和固定依赖，使用非 root 用户运行；运行时不需要 Linux 常驻主机或本机读取 API。仓库配置启用日服采集、保持官方读取关闭，生产切换由两个独立配置控制：
 
 - `OFFICIAL_RANKING_ENABLED_REGIONS`：实际采集区服，逗号分隔，例如 `jp,tw`。
 - `OFFICIAL_RANKING_READ_REGIONS`：网站读取官方自采的区服，逗号分隔。先完成采集验收，再逐服启用读取；移除区服可切回原网站来源，保留自采历史。
@@ -20,6 +20,8 @@
 ```
 
 `credentials` 使用本地模式的完整凭据文档；`masterConfig` 使用下文的同服 Master 配置。两者的真实值仅通过 secret 管理入口提供，不写入 `vars`、镜像或仓库。繁中 `credentials.region` 使用 `hk`，网站及调度仍使用 `tw`。缺少配置的区服不发出游戏请求。
+
+将实际榜单 RPC 和 Master 解码均已验证的完整配置存为同名 GitHub Actions secret，再手动运行 `official-ranking-config.yml` 并选择区服。工作流使用锁定的 Wrangler 版本，先确认生产 Worker 存在，通过权限为 0600 的临时文件更新 Worker secret，随后触发既有 Worker-only 发布；配置内容不进入命令参数、日志或构建附件。区服采集开关仍以 `wrangler.jsonc` 为准，只有成功观测验收后才开启网站读取。
 
 单次任务最多约两分钟，每榜请求前先持久确认 `attempt` 检查点，响应后提交独立观测；Worker 确认落库后才请求下一榜。HTTP 401/403、gRPC 7/16，以及 gRPC 2 且解码后的消息精确为 `authentication failed` 时，持久暂停当前凭据代际；HTTP 429、gRPC 8 保存冷却期限。回调网络失败使用同一载荷最多重试三次，仍未确认则中止本轮，不重发游戏请求。容器在已确认请求检查点、尚未确认观测时中断，会保留 `auth_uncertain` 暂停状态，更新真实凭据代际后恢复；重启不能清除暂停。
 
