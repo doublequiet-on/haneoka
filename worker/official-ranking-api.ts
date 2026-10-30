@@ -101,6 +101,21 @@ function officialCard(value: unknown): SongRankingCardDto {
   };
 }
 
+function officialProfileCard(value: unknown): SongRankingRowDto["profileCard"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const card = object(value);
+  const thumbnailUrls = (Array.isArray(card.thumbnail_url) ? card.thumbnail_url : []).flatMap((source) => {
+    if (typeof source !== "string") return [];
+    try {
+      const url = new URL(source);
+      return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? [url.href] : [];
+    } catch {
+      return [];
+    }
+  });
+  return { name: text(card.name), slot: integer(card.slot), thumbnailUrls };
+}
+
 export function officialEventRanking(observation: OfficialObservation, now = Date.now()): EventRankingDto {
   const rows: SongRankingRowDto[] = (observation.players ?? []).map((entry, index) => {
     const player = object(entry.player_data), favorite = object(player.favorite_member_card), deck = object(entry.high_score_deck);
@@ -122,7 +137,7 @@ export function officialEventRanking(observation: OfficialObservation, now = Dat
       deckId: positiveInteger(deck.id),
       deckName: text(deck.name),
       totalPower: positiveInteger(deck.total_power),
-      profileCard: null,
+      profileCard: officialProfileCard(player.profile_card),
       cards: Array.isArray(deck.cards) ? deck.cards.slice(0, 5).map(officialCard).sort((left, right) => left.slot - right.slot) : [],
     };
   });
