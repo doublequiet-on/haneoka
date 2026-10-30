@@ -1491,7 +1491,10 @@
         "top": "Back to top",
         "previous": "Previous 100",
         "next": "Next 100",
-        "points": "Arena pt"
+        "points": "Arena pt",
+        "playerId": "Player ID",
+        "find": "Find",
+        "notFound": "Not in the top {count}"
       }
     }
   },

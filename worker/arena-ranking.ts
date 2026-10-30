@@ -1,10 +1,11 @@
 // L3 — GEB
-// Input: Region, Arena season, league band, rank window or tier thresholds, and provider bindings.
-// Output: Normalized Arena league rankings and per-tier populations.
+// Input: Region, Arena season, league band, rank window, tier thresholds or profile ID, and provider bindings.
+// Output: Normalized Arena league rankings, per-tier populations and profile lookups.
 // Pos: [Map](L2.md); Arena read adapter beside song rankings, preferring official collector windows.
 // Effects/Dependencies: Reads official D1/R2 windows when enabled, else the Moenotes open API; edge cache only.
 import type {
   ArenaPopulationDto,
+  ArenaSearchDto,
   ArenaRankingDto,
   ArenaRankingRowDto,
   GameRecordsRegion,
@@ -23,6 +24,9 @@ const REGIONS: readonly GameRecordsRegion[] = ["jp", "tw", "en", "kr"];
 const WINDOW = 100;
 const RANKING_TTL = 60;
 const POPULATION_TTL = 1800;
+const SEARCH_TTL = 300;
+/** Ranks scanned by profile-ID search: 20 windows. */
+const SEARCH_DEPTH = 2000;
 
 class ArenaFailure extends Error {
   readonly status: number;
@@ -329,6 +333,46 @@ async function cached(
   return waited ?? json(request, { error: { kind: "pending", retryAfter: 10 } }, 202, 0, 10);
 }
 
+/** The top SEARCH_DEPTH ranks of one board, shared by every profile-ID search for five minutes. */
+async function searchIndex(
+  ctx: ExecutionContext,
+  env: ArenaRankingBindings,
+  region: GameRecordsRegion,
+  seasonId: string,
+  bandId: string,
+): Promise<{ searchedTo: number; observedAtMs: number; rows: ArenaRankingRowDto[] }> {
+  const cache = (caches as unknown as { default: Cache }).default;
+  const key = new Request(
+    `https://haneoka.org${PREFIX}/${region}/arena/seasons/${seasonId}/leagues/${bandId}/search-index`,
+  );
+  const hit = await cache.match(key).catch(() => undefined);
+  if (hit) return hit.json();
+  const slot = limiter(4);
+  const first = await arenaWindow(env, region, seasonId, bandId, 1);
+  const maxRank = first.maxRank;
+  const count = Math.min(SEARCH_DEPTH, maxRank ?? first.rows.length) / WINDOW;
+  const windows = [
+    first,
+    ...(await Promise.all(
+      Array.from({ length: Math.max(0, Math.ceil(count) - 1) }, (_, index) =>
+        slot(() => arenaWindow(env, region, seasonId, bandId, (index + 1) * WINDOW + 1)),
+      ),
+    )),
+  ];
+  const rows = windows.flatMap((window) => window.rows);
+  const index = {
+    searchedTo: Math.min(SEARCH_DEPTH, maxRank ?? rows.length),
+    observedAtMs: windows[0]?.observedAtMs ?? Date.now(),
+    rows,
+  };
+  ctx.waitUntil(
+    cache
+      .put(key, new Response(JSON.stringify(index), { headers: { "Cache-Control": `public, max-age=${SEARCH_TTL}` } }))
+      .catch(() => undefined),
+  );
+  return index;
+}
+
 /**
  * `GET /api/v1/game/records/{region}/arena/seasons/{seasonId}/leagues/{bandId}/ranking?start=1`
  * returns ranks start…start+99; `…/population?thresholds=0,10,…` returns the players at or above
@@ -341,7 +385,7 @@ export async function handleArenaRankingApi(
   env: ArenaRankingBindings,
 ): Promise<Response | null> {
   const route = new RegExp(
-    `^${PREFIX}/([a-z]+)/arena/seasons/([1-9][0-9]{0,9})/leagues/([1-9][0-9]{0,9})/(ranking|population)$`,
+    `^${PREFIX}/([a-z]+)/arena/seasons/([1-9][0-9]{0,9})/leagues/([1-9][0-9]{0,9})/(ranking|population|search)$`,
     "u",
   ).exec(url.pathname);
   if (!route) return null;
@@ -352,6 +396,23 @@ export async function handleArenaRankingApi(
     bandId = route[3]!,
     operation = route[4];
   if (!REGIONS.includes(region)) return json(request, { error: { kind: "not_found" } }, 404);
+  if (operation === "search") {
+    const profileId = url.searchParams.get("profileId") ?? "";
+    if (!/^[1-9][0-9]{0,18}$/u.test(profileId) || [...url.searchParams.keys()].some((key) => key !== "profileId"))
+      return json(request, { error: { kind: "invalid_request" } }, 400);
+    return cached(request, ctx, SEARCH_TTL, async () => {
+      const index = await searchIndex(ctx, env, region, seasonId, bandId);
+      return {
+        region,
+        seasonId,
+        bandId,
+        profileId,
+        searchedTo: index.searchedTo,
+        observedAtMs: index.observedAtMs,
+        row: index.rows.find((row) => row.profileId === profileId) ?? null,
+      } satisfies ArenaSearchDto;
+    });
+  }
   if (operation === "ranking") {
     const start = url.searchParams.get("start") ?? "1";
     if (

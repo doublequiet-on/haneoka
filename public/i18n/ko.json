@@ -1491,7 +1491,10 @@
         "top": "맨 위로",
         "previous": "이전 100명",
         "next": "다음 100명",
-        "points": "아레나 pt"
+        "points": "아레나 pt",
+        "playerId": "플레이어 ID",
+        "find": "찾기",
+        "notFound": "상위 {count}위 안에 없음"
       }
     }
   },

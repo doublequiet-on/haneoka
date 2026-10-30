@@ -1491,7 +1491,10 @@
         "top": "回到榜首",
         "previous": "上 100 名",
         "next": "下 100 名",
-        "points": "竞技场 pt"
+        "points": "竞技场 pt",
+        "playerId": "玩家 ID",
+        "find": "查找",
+        "notFound": "前 {count} 名中未找到"
       }
     }
   },

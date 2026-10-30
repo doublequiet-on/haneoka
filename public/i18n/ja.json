@@ -1491,7 +1491,10 @@
         "top": "トップへ",
         "previous": "前の100人",
         "next": "次の100人",
-        "points": "アリーナpt"
+        "points": "アリーナpt",
+        "playerId": "プレイヤーID",
+        "find": "検索",
+        "notFound": "上位{count}位内に見つかりません"
       }
     }
   },

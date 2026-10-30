@@ -173,6 +173,12 @@
   .arena-wide {
     grid-column: 1 / -1;
   }
+  .arena-start {
+    grid-column: 1;
+  }
+  .arena-end {
+    grid-column: 2;
+  }
 
   /* Current condition */
   .arena-condition__head {
@@ -407,13 +413,27 @@
     justify-content: space-between;
     gap: 8px 16px;
   }
+  .arena-ranking__search {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
   .arena-ranking__jump {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 8px;
   }
   .arena-ranking__jump .field {
     inline-size: 168px;
+  }
+  .arena-ranking__jump .button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  arena-ranking [data-target="true"] {
+    border-radius: var(--md-sys-shape-corner-medium);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
   }
   .arena-ranking__window {
     font-variant-numeric: tabular-nums;
@@ -517,6 +537,10 @@
     .arena-grid {
       grid-template-columns: minmax(0, 1fr);
     }
+    .arena-start,
+    .arena-end {
+      grid-column: 1;
+    }
     .arena-usage {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -585,6 +609,7 @@
     .arena-usage__list {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
+    .arena-ranking__search,
     .arena-ranking__jump {
       flex: 1 1 100%;
     }

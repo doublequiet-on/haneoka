@@ -37,7 +37,6 @@ import { emptyState, errorState, loadingState } from "./ui/state";
 import { LazyImages } from "./ui/lazy-images";
 import { icon, gameGlyph } from "./ui/icon";
 import { filterChip, iconButton, rovingKeydown, segmented } from "./ui/controls";
-import { arenaTier } from "./arena-ranking";
 import "./arena-ranking";
 import "../styles/settings.css";
 import "../styles/arena.css";
@@ -302,10 +301,12 @@ export class ArenaWorkspace extends LitElement {
         : clientText(this.locale, `catalog.songs.liveTypes.${key}`);
   }
   private attribute(value: number, size = 24) {
-    const source = this.marks[`sp_icon_live_music_type_${value}.png`];
-    const image =
+    const color = ["", "Red", "Blue", "Green", "Yellow", "Purple"][value];
+    const url = (source: string | undefined) =>
       source &&
       `/runtime/${this.server}/${source.replace(/^runtime\//u, "")}?release=${this.catalog!.identity.releaseId}`;
+    const fallback = color ? url(this.marks[`CardType-${color}.png`]) : "";
+    const image = url(this.marks[`sp_icon_live_music_type_${value}.png`]) || fallback;
     return image
       ? html`
           <img
@@ -314,7 +315,11 @@ export class ArenaWorkspace extends LitElement {
             width=${size}
             height=${size}
             alt=""
-            @error=${(event: Event) => ((event.currentTarget as HTMLElement).hidden = true)}
+            @error=${(event: Event) => {
+              const element = event.currentTarget as HTMLImageElement;
+              if (fallback && element.getAttribute("src") !== fallback) element.src = fallback;
+              else element.hidden = true;
+            }}
           />
         `
       : html`
@@ -620,7 +625,7 @@ export class ArenaWorkspace extends LitElement {
     const { rule, next } = this.ruleNow(season, league);
     const shown = rule ?? next[0];
     return html`
-      <section class="surface stack arena-condition">
+      <section class="surface stack arena-condition arena-start">
         <header class="arena-condition__head">
           ${
             league.image
@@ -700,7 +705,7 @@ export class ArenaWorkspace extends LitElement {
   private renderEntry(season: ArenaSeason, league: ArenaLeague) {
     const songs = league.songs.filter((song) => Number(song.arenaPublishedAt) <= this.now).length;
     return html`
-      <section class="surface stack">
+      <section class="surface stack arena-end">
         ${heading(this.t("entry"), "details")}
         <dl class="spec-list spec-list--split">
           <div>
@@ -748,7 +753,7 @@ export class ArenaWorkspace extends LitElement {
     const percent = (value: number) =>
       new Intl.NumberFormat(this.locale, { style: "percent", maximumFractionDigits: 1 }).format(value / (total || 1));
     return html`
-      <section class="surface stack">
+      <section class="surface stack arena-start">
         ${heading(this.t("population"), "characters", total != null ? { count: total.toLocaleString(this.locale) } : {})}
         ${
           population === "error"
@@ -890,7 +895,8 @@ export class ArenaWorkspace extends LitElement {
         ${
           started
             ? html`
-                <section class="surface stack">
+                ${this.renderPopulation(league)}
+                <section class="surface stack arena-end">
                   <div class="row row--between">
                     ${heading(this.t("top10"), "rewards")}
                     <button class="button button--text" type="button" @click=${() => this.select({ tab: "ranking" })}>
@@ -899,7 +905,6 @@ export class ArenaWorkspace extends LitElement {
                   </div>
                   ${this.rankingElement(season, league, 10)}
                 </section>
-                ${this.renderPopulation(league)}
               `
             : nothing
         }

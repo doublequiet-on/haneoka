@@ -11,7 +11,14 @@ import { playerProfileHref } from "../lib/player-profile-route";
 import { navigationDocumentUrl } from "../lib/document-url";
 import { RequestScope } from "../lib/request-scope";
 import type { ArenaRank } from "../lib/arena";
-import type { ArenaRankingDto, ArenaRankingRowDto, GameRecordsErrorDto, GameRecordsRegion } from "../lib/game-records";
+import type {
+  ArenaRankingDto,
+  ArenaRankingRowDto,
+  ArenaSearchDto,
+  GameRecordsErrorDto,
+  GameRecordsRegion,
+} from "../lib/game-records";
+import { snackbar } from "../lib/snackbar";
 import { iconButton } from "./ui/controls";
 import { icon } from "./ui/icon";
 import { emptyState, errorState } from "./ui/state";
@@ -43,6 +50,8 @@ export class ArenaRanking extends GameRecordsCardsElement {
     phase: { state: true },
     data: { state: true },
     failure: { state: true },
+    target: { state: true },
+    searching: { state: true },
   };
   declare seasonId: number;
   declare bandId: number;
@@ -55,6 +64,9 @@ export class ArenaRanking extends GameRecordsCardsElement {
   declare private phase: "loading" | "ready" | "error";
   declare private data: ArenaRankingDto | null;
   declare private failure: GameRecordsErrorDto["error"] | null;
+  /** The rank to scroll to and mark once its window has loaded. */
+  declare private target: number;
+  declare private searching: boolean;
   private requests = new RequestScope();
 
   constructor() {
@@ -71,6 +83,8 @@ export class ArenaRanking extends GameRecordsCardsElement {
     this.phase = "loading";
     this.data = null;
     this.failure = null;
+    this.target = 0;
+    this.searching = false;
   }
 
   set catalogs(value: GameRecordsCardsElement["cardCatalogs"]) {
@@ -123,6 +137,12 @@ export class ArenaRanking extends GameRecordsCardsElement {
       this.phase = "error";
     }
     this.dispatchEvent(new CustomEvent("arena-ranking-rows", { detail: this.data, bubbles: true }));
+    if (this.target) {
+      const rank = this.target;
+      void this.updateComplete.then(() =>
+        this.querySelector<HTMLElement>(`[data-rank="${rank}"]`)?.scrollIntoView({ block: "center" }),
+      );
+    }
   }
 
   refresh() {
@@ -131,13 +151,33 @@ export class ArenaRanking extends GameRecordsCardsElement {
 
   private jump(rank: number) {
     const maximum = this.data?.maxRank ?? Number.MAX_SAFE_INTEGER;
-    this.start = Math.max(
-      1,
-      Math.min(Math.floor((Math.max(1, Math.min(rank, maximum)) - 1) / WINDOW) * WINDOW + 1, maximum),
-    );
-    void this.updateComplete.then(() =>
-      this.querySelector<HTMLElement>(`[data-rank="${rank}"]`)?.scrollIntoView({ block: "center" }),
-    );
+    const target = Math.max(1, Math.min(rank, maximum));
+    const start = Math.floor((target - 1) / WINDOW) * WINDOW + 1;
+    this.target = target;
+    if (start !== this.start) this.start = start;
+    else
+      void this.updateComplete.then(() =>
+        this.querySelector<HTMLElement>(`[data-rank="${target}"]`)?.scrollIntoView({ block: "center" }),
+      );
+  }
+
+  /** Finds a player by profile ID among the board's top ranks and opens their window. */
+  private async search(profileId: string) {
+    this.searching = true;
+    try {
+      const result = await fetchJson<ArenaSearchDto>(
+        `/api/v1/game/records/${this.region}/arena/seasons/${this.seasonId}/leagues/${this.bandId}/search?profileId=${profileId}`,
+      );
+      if (result.row) this.jump(result.row.rank);
+      else
+        snackbar(
+          this.t("notFound", "Not in the top {count}", { count: result.searchedTo.toLocaleString(this.locale) }),
+        );
+    } catch {
+      snackbar(this.label("error", "Ranking unavailable"));
+    } finally {
+      this.searching = false;
+    }
   }
 
   private renderRow(row: ArenaRankingRowDto, observedAt: number) {
@@ -158,7 +198,7 @@ export class ArenaRanking extends GameRecordsCardsElement {
       </small>
     `;
     return html`
-      <li class="song-ranking__entry" data-rank=${row.rank}>
+      <li class="song-ranking__entry" data-rank=${row.rank} data-target=${String(row.rank === this.target)}>
         <div class="song-ranking__row arena-ranking__row">
           <span class="song-ranking__rank" aria-label=${`${this.label("rank", "Rank")} ${row.rank}`}>${row.rank}</span>
           <span class="song-ranking__avatar">
@@ -237,20 +277,54 @@ export class ArenaRanking extends GameRecordsCardsElement {
     const maximum = data?.maxRank ?? null;
     return html`
       <div class="arena-ranking__controls">
-        <form
-          class="arena-ranking__jump"
-          @submit=${(event: SubmitEvent) => {
+        <div class="arena-ranking__search">
+          <form
+            class="arena-ranking__jump"
+            @submit=${(event: SubmitEvent) => {
             event.preventDefault();
             const value = Number(new FormData(event.currentTarget as HTMLFormElement).get("rank"));
             if (Number.isSafeInteger(value) && value > 0) this.jump(value);
           }}
-        >
-          <label class="field field--compact">
-            <span>${this.t("jump", "Go to rank")}</span>
-            <input name="rank" type="number" inputmode="numeric" min="1" max=${maximum ?? nothing} step="1" required />
-          </label>
-          <button class="button button--tonal" type="submit">${icon("arrow_forward")}${this.t("go", "Go")}</button>
-        </form>
+          >
+            <label class="field">
+              <input
+                name="rank"
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max=${maximum ?? nothing}
+                step="1"
+                required
+                placeholder=${this.t("jump", "Go to rank")}
+                aria-label=${this.t("jump", "Go to rank")}
+              />
+            </label>
+            <button class="button button--tonal" type="submit">${icon("arrow_forward")}${this.t("go", "Go")}</button>
+          </form>
+          <form
+            class="arena-ranking__jump"
+            @submit=${(event: SubmitEvent) => {
+            event.preventDefault();
+            const value = String(new FormData(event.currentTarget as HTMLFormElement).get("profileId") ?? "").trim();
+            if (/^[1-9][0-9]{0,18}$/u.test(value)) void this.search(value);
+          }}
+          >
+            <label class="field">
+              <input
+                name="profileId"
+                type="text"
+                inputmode="numeric"
+                pattern="[1-9][0-9]{0,18}"
+                required
+                placeholder=${this.t("playerId", "Player ID")}
+                aria-label=${this.t("playerId", "Player ID")}
+              />
+            </label>
+            <button class="button button--tonal" type="submit" ?disabled=${this.searching}>
+              ${icon("search")}${this.t("find", "Find")}
+            </button>
+          </form>
+        </div>
         <span class="arena-ranking__window md-body-medium">
           ${this.t("window", "{start}–{end}", { start: this.start.toLocaleString(this.locale), end: Math.min(this.start + WINDOW - 1, maximum ?? Infinity).toLocaleString(this.locale) })}
           ${

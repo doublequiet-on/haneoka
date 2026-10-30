@@ -80,6 +80,17 @@ export interface ArenaRankingDto extends Omit<GameRankingDto, "rows"> {
   rows: ArenaRankingRowDto[];
 }
 
+/** A player found by profile ID among the board's top `searchedTo` ranks; `row` is null when absent. */
+export interface ArenaSearchDto {
+  region: GameRecordsRegion;
+  seasonId: string;
+  bandId: string;
+  profileId: string;
+  searchedTo: number;
+  observedAtMs: number;
+  row: ArenaRankingRowDto | null;
+}
+
 /** Players per rank tier, found by locating each tier's lowest point threshold on the board. */
 export interface ArenaPopulationDto {
   region: GameRecordsRegion;
