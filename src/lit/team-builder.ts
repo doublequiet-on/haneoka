@@ -975,7 +975,10 @@ export class TeamBuilder extends LitElement {
     const add = (field: string, key: string, fallback: string) =>
       issues.push({ field, message: this.t(key, fallback) });
     if (this.tab === "arena") issues.push(...this.arena.issues());
-    if (!this.engineCards().members.length) add("tb-cards", "needCardsShort", "Choose cards");
+    const candidateCards = this.engineCards();
+    if (!candidateCards.members.length) add("tb-cards", "needCardsShort", "Choose cards");
+    else if (new Set(candidateCards.members.flatMap(row => this.master!.members.get(row.cardId)?.characterId ?? [])).size < 5)
+      add("tb-cards", "fiveCharactersRequired", "Add cards for at least five different characters.");
     if (s.goal === "event" && s.manualEventEnabled && this.master) {
       const issue = resolveManualEvent(this.master, s.manualEvent).issue;
       if (issue) add("tb-manual-" + issue, "manualEvent.need." + issue, "Complete the manual event conditions");
@@ -1058,7 +1061,7 @@ export class TeamBuilder extends LitElement {
       ...s.bindings.map(([member]) => member),
       ...(s.leader === null ? [] : [s.leader]),
     ]);
-    const cards = this.engineCards(),
+    const cards = candidateCards,
       members = new Set(cards.members.map((row) => row.cardId)),
       snaps = new Set(cards.snaps.map((row) => row.cardId));
     const characters = [...fixed].map((id) => this.master?.members.get(id)?.characterId);

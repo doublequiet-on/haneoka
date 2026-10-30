@@ -87,6 +87,7 @@ export function gekisoSamplingAdvanced(host: TeamBuilder): TemplateResult | type
 
 export function comboBonusControl(host: TeamBuilder): TemplateResult | typeof nothing {
   if (!host.hasComboSongs()) return nothing;
+  const s = host.searchSettings;
   return html`
     <md-outlined-text-field
       id="tb-combo"
@@ -97,9 +98,9 @@ export function comboBonusControl(host: TeamBuilder): TemplateResult | typeof no
       inputmode="numeric"
       label=${host.t("minComboBonus", "Minimum base COMBO BONUS")}
       prefix-text="×"
-      .value=${live(host.settings.minComboBonus === 1 ? "" : String(host.settings.minComboBonus))}
+      .value=${live(s.minComboBonus === 1 ? "" : String(s.minComboBonus))}
       placeholder=${host.t("unlimitedCombo", "No minimum")}
-      ?error=${host.submitted && (!Number.isInteger(host.settings.minComboBonus) || host.settings.minComboBonus < 1)}
+      ?error=${host.submitted && (!Number.isInteger(s.minComboBonus) || s.minComboBonus < 1)}
       @change=${(event: Event) => host.updateSettings({ minComboBonus: (event.target as HTMLInputElement).value === "" ? 1 : Number((event.target as HTMLInputElement).value) })}
     ></md-outlined-text-field>
   `;
