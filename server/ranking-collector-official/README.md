@@ -29,6 +29,8 @@
 
 读取接口为同域 `/api/v2/game/records/{region}`，目录、最新榜单、历史和状态路径见 [INTERFACES.md](INTERFACES.md)。GET 只读已保存的数据，不触发游戏请求，也不刷新观测时间。容器重启后的进度及历史来自 Durable Object、D1 和私有 R2，不依赖容器文件系统。
 
+云端失败的 `status.lastFailure` 保存固定阶段、错误类别及可用的 HTTP/gRPC 状态码；容器日志使用相同安全字段。异常原文、凭据、回调令牌和协议正文不进入这些诊断。
+
 容器可在安装了 Docker 的环境构建：
 
 ```sh

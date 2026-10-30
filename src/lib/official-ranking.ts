@@ -53,6 +53,13 @@ export interface OfficialCollectorJob {
   deadlineMs: number;
 }
 
+export interface OfficialCollectorFailure {
+  stage: string;
+  code: string;
+  httpStatus?: number;
+  grpcStatus?: string;
+}
+
 export type OfficialCollectorUpdate = {
   contract: "haneoka:official-ranking-update/1";
   region: GameRecordsRegion;
@@ -62,5 +69,5 @@ export type OfficialCollectorUpdate = {
   | { type: "catalog"; catalog: OfficialCatalog }
   | { type: "attempt"; snapshotId: string }
   | { type: "observation"; observation: OfficialObservation }
-  | { type: "complete"; status: "ok" | "failed" | "auth_paused" | "rate_limited"; retryAfterSeconds?: number }
+  | { type: "complete"; status: "ok" | "failed" | "auth_paused" | "rate_limited"; retryAfterSeconds?: number; failure?: OfficialCollectorFailure }
 );

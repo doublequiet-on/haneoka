@@ -5,7 +5,7 @@
 // Effects/Dependencies: Starts isolated containers, persists DO state and writes D1/R2; credentials stay server-side.
 import { Container } from "@cloudflare/containers";
 import type { GameRecordsRegion } from "../src/lib/game-records";
-import type { OfficialCatalog, OfficialCollectorJob, OfficialCollectorUpdate, OfficialObservation } from "../src/lib/official-ranking";
+import type { OfficialCatalog, OfficialCollectorFailure, OfficialCollectorJob, OfficialCollectorUpdate, OfficialObservation } from "../src/lib/official-ranking";
 import { officialDigest, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
 
 export const OFFICIAL_RANKING_REGIONS = ["jp", "tw", "en", "kr"] as const;
@@ -50,6 +50,7 @@ interface CollectorState {
   lastRunAtMs: number | null;
   failures: number;
   blockedGeneration: string | null;
+  lastFailure?: OfficialCollectorFailure | null;
   run: CollectorRun | null;
 }
 
@@ -83,6 +84,16 @@ function authRejected(observation: OfficialObservation): boolean {
     || observation.grpcStatus === "2" && observation.error === "authentication_failed";
 }
 function limited(observation: OfficialObservation): boolean { return observation.httpStatus === 429 || observation.grpcStatus === "8"; }
+function validateFailure(value: unknown): asserts value is OfficialCollectorFailure {
+  const failure = object(value);
+  if (!["container", "catalog", "catalog_version", "catalog_server_list", "catalog_manifest", "catalog_event", "catalog_challenges", "catalog_parameters",
+    "catalog_callback", "version", "board", "attempt_callback", "observation_callback", "complete_callback"].includes(String(failure.stage))
+    || !["Error", "TimeoutError", "SSLError", "SSLCertVerificationError", "OSError", "URLError", "gaierror", "ValueError", "RuntimeError", "VersionError",
+      "CatalogRequestError", "CallbackError", "ImportError", "ModuleNotFoundError", "FileNotFoundError", "PermissionError", "JSONDecodeError",
+      "ConnectionError", "ConnectionRefusedError", "ConnectionResetError", "ProtocolError", "H2Error", "http_error", "container_fetch_failed"].includes(String(failure.code))
+    || failure.httpStatus !== undefined && (typeof failure.httpStatus !== "number" || !Number.isInteger(failure.httpStatus) || failure.httpStatus < 100 || failure.httpStatus > 599)
+    || failure.grpcStatus !== undefined && (typeof failure.grpcStatus !== "string" || !/^[0-9]{1,3}$/u.test(failure.grpcStatus))) throw new Error("invalid_failure");
+}
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 }
@@ -252,6 +263,7 @@ export class OfficialRankingCollector extends Container<Env> {
       readEnabled: officialRegionEnabled(this.env.OFFICIAL_RANKING_READ_REGIONS, region),
       samplingIntervalSeconds: INTERVAL_MS / 1000, lastSuccessfulObservationAtMs: state.lastSuccessfulObservationAtMs,
       ageMs: age, stale: age === null || age < 0 || age > 600_000, pollAfterSeconds: unavailable ? 300 : 30,
+      lastFailure: state.lastFailure ?? null,
       nextAttemptAtMs: unavailable || state.blockedGeneration ? null : state.nextAtMs || null, catalogProvider: "official-master" };
   }
 
@@ -277,6 +289,7 @@ export class OfficialRankingCollector extends Container<Env> {
       state.run = { id: runId, token, generation: config.generation, startedAtMs: now, deadlineMs: now + JOB_MS,
         pendingAttempt: null, resolvedAttempt: false, complete: false, catalog: null, checkpoints: {} };
       state.status = "collecting";
+      state.lastFailure = null;
       state.blockedGeneration = null;
       state.lastRunAtMs = now;
       state.nextAtMs = now + INTERVAL_MS;
@@ -289,19 +302,23 @@ export class OfficialRankingCollector extends Container<Env> {
         callbackUrl: `${CALLBACK_ORIGIN}/api/internal/official-rankings/${region}/${runId}`, callbackToken: token, deadlineMs: now + JOB_MS };
     });
     if (!job) return;
+    let failure: OfficialCollectorFailure | null = null;
     try {
       const serviceToken = await this.ctx.storage.get<string>("containerToken");
       const response = await this.containerFetch("http://container/collect", { method: "POST",
         headers: { Authorization: `Bearer ${serviceToken}`, "Content-Type": "application/json" },
         body: JSON.stringify(job), signal: AbortSignal.timeout(JOB_MS + 15_000) });
+      if (!response.ok) failure = { stage: "container", code: "http_error", httpStatus: response.status };
       await response.body?.cancel();
-    } catch {
-      console.warn(JSON.stringify({ event: "official_ranking_container_failed", region }));
+    } catch (error) {
+      failure = { stage: "container", code: error instanceof Error && error.name === "TimeoutError" ? "TimeoutError" : "container_fetch_failed" };
     }
+    if (failure) console.warn(JSON.stringify({ event: "official_ranking_container_failed", region, ...failure }));
     await this.serialized(async () => {
       const state = await this.stateFor(region);
       if (!state.run || state.run.id !== job.runId || state.run.complete) return;
       state.run.complete = true;
+      state.lastFailure = failure ?? { stage: "container", code: "container_fetch_failed" };
       state.failures += 1;
       state.nextAtMs = Math.max(state.nextAtMs, Date.now() + Math.min(3_600_000, INTERVAL_MS * 2 ** Math.min(4, state.failures - 1)));
       if (state.run.pendingAttempt && !state.run.resolvedAttempt && !state.blockedGeneration) {
@@ -375,7 +392,11 @@ export class OfficialRankingCollector extends Container<Env> {
           await this.ctx.storage.put("collectorState", state);
         } else if (update.type === "complete") {
           if (run.pendingAttempt || !["ok", "failed", "auth_paused", "rate_limited"].includes(update.status)) return json({ error: "attempt_pending" }, 409);
+          if (update.failure !== undefined) validateFailure(update.failure);
           run.complete = true;
+          state.lastFailure = update.failure ? { stage: update.failure.stage, code: update.failure.code,
+            ...(update.failure.httpStatus !== undefined ? { httpStatus: update.failure.httpStatus } : {}),
+            ...(update.failure.grpcStatus !== undefined ? { grpcStatus: update.failure.grpcStatus } : {}) } : null;
           state.status = state.blockedGeneration ? state.status : state.status === "rate_limited" ? "rate_limited" : update.status;
           state.failures = update.status === "ok" ? 0 : state.failures + 1;
           if (update.status === "auth_paused") state.blockedGeneration = run.generation;

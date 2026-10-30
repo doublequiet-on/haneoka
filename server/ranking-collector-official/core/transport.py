@@ -23,6 +23,7 @@ class VersionError(RuntimeError):
         headers={k.lower():v for k,v in receipt.get('headers',{}).items()}
         trailers={k.lower():v for k,v in receipt.get('trailers',{}).items()}
         self.receipt={'status':receipt.get('status'),'grpc_status':receipt.get('grpc_status'),
+                      'error_type':receipt.get('error_type'),
                       'headers':{'retry-after':headers.get('retry-after') or trailers.get('retry-after','')}}
         super().__init__('Anonymous Version failed: HTTP=%s gRPC=%s' %
                          (self.receipt['status'],self.receipt['grpc_status']))

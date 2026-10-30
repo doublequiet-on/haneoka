@@ -11,7 +11,7 @@ import time
 import uuid
 from types import SimpleNamespace
 from urllib.request import build_opener, ProxyHandler, HTTPRedirectHandler, Request
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from regions import region_config, select_api_origin
 
@@ -19,6 +19,7 @@ TABLES = ('MasterEvent', 'MasterChallengeMusic', 'MasterParameter')
 
 class CatalogRequestError(RuntimeError):
     def __init__(self, stage, receipt):
+        self.stage=stage
         self.receipt=receipt
         super().__init__('catalog %s: HTTP=%s gRPC=%s' %
                          (stage,receipt.get('status'),receipt.get('grpc_status')))
@@ -139,6 +140,9 @@ class OfficialCatalog:
                 receipt={'status':error.code,'headers':{'retry-after':error.headers.get('Retry-After','')}}
                 error.close()
                 raise CatalogRequestError(name,receipt) from None
+            except (OSError, URLError) as error:
+                reason=error.reason if isinstance(error,URLError) else error
+                raise CatalogRequestError(name,{'error_type':type(reason).__name__}) from None
             if len(raw)>limit:raise ValueError('Master download too large')
             return raw
         # Recheck manifest each discovery; table blobs are reused only after digest verification.

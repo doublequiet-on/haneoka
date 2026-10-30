@@ -27,6 +27,25 @@ class CallbackError(RuntimeError):
     pass
 
 
+def failure_info(stage, error, receipt=None):
+    receipt=receipt or {}
+    names={'TimeoutError','SSLError','SSLCertVerificationError','OSError','URLError','gaierror',
+           'ValueError','RuntimeError','VersionError','CatalogRequestError','CallbackError',
+           'ImportError','ModuleNotFoundError','FileNotFoundError','PermissionError','JSONDecodeError',
+           'ConnectionError','ConnectionRefusedError','ConnectionResetError','ProtocolError','H2Error'}
+    code=receipt.get('error_type') or type(error).__name__
+    result={'stage':stage,'code':code if code in names else 'Error'}
+    status=receipt.get('status')
+    if type(status) is int and 100<=status<=599:result['httpStatus']=status
+    grpc=str(receipt.get('grpc_status',''))
+    if re.fullmatch(r'[0-9]{1,3}',grpc):result['grpcStatus']=grpc
+    return result
+
+
+def report_failure(region, failure):
+    print(json.dumps(dict(event='official_ranking_job_failed',region=region,**failure)),flush=True)
+
+
 def callback_url(job, origin):
     value = job['callbackUrl']
     url, allowed = urlsplit(value), urlsplit(origin)
@@ -118,6 +137,8 @@ def run_job(job, origin):
     configured = region_config(region)
     final_status = 'ok'
     retry_after = None
+    failure = None
+    stage = 'catalog'
     with tempfile.TemporaryDirectory(prefix='official-ranking-') as temporary:
         root = Path(temporary)
         os.chmod(root, 0o700)
@@ -130,6 +151,7 @@ def run_job(job, origin):
         try:
             catalog = OfficialCatalog(master_config, root, '', job['clientVersion'], deadline=deadline,
                                       region=region, api_origin=auth['origin'])()
+            stage = 'catalog_callback'
             updates.send('catalog', catalog=catalog)
             boards = targets(catalog, int(time.time() * 1000))
             if boards:
@@ -137,6 +159,7 @@ def run_job(job, origin):
                     output=root/'receipts', client_version=job['clientVersion'], proxy='', connect_ip=None,
                     credentials=credentials, credential_identity=identity, stop_file=None, deadline=deadline,
                     api_origin=auth['origin']))
+                stage = 'version'
                 sampler.version()
                 if (catalog['masterVersion'] != sampler.master_version
                         or catalog.get('resourceVersion') != sampler.resource_version
@@ -147,13 +170,16 @@ def run_job(job, origin):
                         continue
                     if time.time() >= deadline:
                         final_status = 'failed'
+                        failure = failure_info('board',TimeoutError())
                         break
                     snapshot = uuid.uuid4().hex
+                    stage = 'attempt_callback'
                     updates.send('attempt', snapshotId=snapshot)
                     event = catalog['event']
                     observation = dict(snapshotId=snapshot, region=region, eventId=event['id'], kind=kind,
                                        challengeId=challenge, observedAtMs=int(time.time()*1000))
                     receipt = None
+                    stage = 'board'
                     try:
                         window_end = event['endAtMs'] if kind == 'total' else next(
                             row['endAtMs'] for row in event['challenges'] if row['id'] == challenge)
@@ -189,21 +215,35 @@ def run_job(job, origin):
                             retry_after = retry_delay(receipt, 300)
                             observation['retryAfterSeconds'] = retry_after
                         final_status = status
+                        failure = failure_info(stage,error,receipt)
                     finally:
                         sampler.args.deadline = deadline
+                    stage = 'observation_callback'
                     updates.send('observation', observation=observation)
                     if final_status in ('auth_paused', 'rate_limited'):
                         break
-        except CallbackError:
+        except CallbackError as error:
+            report_failure(region,failure_info(stage,error))
             raise
         except (CatalogRequestError, VersionError) as error:
             final_status = failure_status(error.receipt, authenticated=False)
+            catalog_stages={'version':'catalog_version','server-list':'catalog_server_list',
+                'MasterManifest.json':'catalog_manifest','MasterEvent.bin':'catalog_event',
+                'MasterChallengeMusic.bin':'catalog_challenges','MasterParameter.bin':'catalog_parameters'}
+            failure = failure_info(catalog_stages.get(getattr(error,'stage',None),stage),error,error.receipt)
             if final_status == 'rate_limited':
                 retry_after = retry_delay(error.receipt, 300)
-        except Exception:
+        except Exception as error:
             final_status = 'failed'
+            failure = failure_info(stage,error)
         fields = {'status': final_status}
+        if failure is not None:
+            fields['failure']=failure
+            report_failure(region,failure)
         if retry_after is not None:
             fields['retryAfterSeconds'] = retry_after
-        updates.send('complete', **fields)
+        try:updates.send('complete', **fields)
+        except CallbackError as error:
+            report_failure(region,failure_info('complete_callback',error))
+            raise
     return {'runId': job['runId'], 'status': final_status}

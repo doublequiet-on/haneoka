@@ -16,7 +16,7 @@
 
 | GET 路径 | 返回 |
 | --- | --- |
-| `/status` | `haneoka:ranking-status/1`；region、serverTimeMs、collectorStatus、samplingIntervalSeconds、lastSuccessfulObservationAtMs、ageMs、stale、pollAfterSeconds、catalogProvider；云端另含 collectionEnabled、readEnabled |
+| `/status` | `haneoka:ranking-status/1`；region、serverTimeMs、collectorStatus、samplingIntervalSeconds、lastSuccessfulObservationAtMs、ageMs、stale、pollAfterSeconds、catalogProvider；云端另含 collectionEnabled、readEnabled、lastFailure |
 | `/events/current` | 官方主数据投影；没有当前活动时event=null |
 | `/events/{eventId}/challenges/{challengeId}/latest` | 指定单曲最后成功观测 |
 | `/events/{eventId}/total/latest` | 四曲总榜最后成功观测 |
@@ -33,6 +33,8 @@
 云端模式在独立 Cloudflare Container 中运行 `cloud.py`，入口为带服务令牌的 `POST /collect`。共享任务合同见 `src/lib/official-ranking.ts`：`haneoka:official-ranking-job/1` 提供固定区服、runId、凭据代际、客户端版本、私有配置、截止时间与单次回调令牌。每轮最长约120秒，`GET /health` 仅供就绪检查。
 
 云端不写本地 SQLite 历史。`haneoka:official-ranking-update/1` 回调依次提交 `catalog`、`attempt`、`observation`、`complete`；每个 `attempt` 在发送认证请求前等待持久确认，每个观测在继续下一请求前等待持久确认。回调失败中断任务，HTTP/gRPC 认证拒绝和限流立即停止后续请求。Worker 依据 snapshotId 幂等保存观测，以原 received_at 生成 observedAtMs，官方玩家结构保留 snake_case 及 int64 字符串，归一化由网站适配层负责。
+
+`complete.failure` 与公开 `status.lastFailure` 使用 `{stage, code, httpStatus?, grpcStatus?}`；无失败时省略回调字段，公开字段为 null。阶段与错误类别采用固定白名单，HTTP/gRPC 仅保留数字状态，不保存异常原文、请求头、配置或玩家数据。容器启动或 HTTP 请求失败由 Worker 记录为 `container` 阶段。
 
 区域 Durable Object 持久保存调度、当前凭据代际、在途检查点与暂停/冷却；D1 保存历史索引，私有 R2 保存不可变正文。容器临时目录及完成任务缓存只用于本轮执行，不是恢复或读接口的依据。Worker 重新读取同一观测不会修改时间或生成新游标。
 

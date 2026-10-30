@@ -12,7 +12,7 @@ import sys
 import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parent/'core'))
-from cloud_job import CallbackError, callback_url, run_job, validate_job
+from cloud_job import CallbackError, callback_url, failure_info, report_failure, run_job, validate_job
 
 
 def serve():
@@ -80,7 +80,8 @@ def serve():
                 self.reply(200, result)
             except CallbackError:
                 self.reply(502, {'error': 'callback_unavailable'})
-            except Exception:
+            except Exception as error:
+                report_failure(job['region'],failure_info('container',error))
                 self.reply(500, {'error': 'collection_failed'})
             finally:
                 lock.release()
