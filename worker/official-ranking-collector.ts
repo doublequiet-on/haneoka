@@ -8,7 +8,7 @@ import type { GameRecordsRegion } from "../src/lib/game-records";
 import { OFFICIAL_API_ORIGINS as REGION_ORIGINS, parseOfficialCollectorConfiguration, selectOfficialCollectorAccount,
   type OfficialCollectorAccount, type OfficialCollectorAccountHealth, type OfficialCollectorPool,
   type OfficialArenaObservation, type OfficialArenaPopulationObservation, type OfficialArenaProgress, type OfficialCatalog, type OfficialCollectorFailure, type OfficialCollectorJob, type OfficialCollectorUpdate, type OfficialObservation } from "../src/lib/official-ranking";
-import { officialDigest, readOfficialArenaMetadata, saveOfficialArenaObservation, saveOfficialArenaPopulation, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
+import { officialDigest, readOfficialArenaMetadata, readOfficialArenaPopulation, saveOfficialArenaObservation, saveOfficialArenaPopulation, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
 
 export const OFFICIAL_RANKING_REGIONS = ["jp", "tw", "en", "kr"] as const;
 export type OfficialCollectorConfigurationBindings = Partial<Pick<Env,
@@ -77,6 +77,8 @@ function canonical(value: unknown): string {
 function validRegion(value: unknown): value is GameRecordsRegion {
   return OFFICIAL_RANKING_REGIONS.some((region) => region === value);
 }
+const sameThresholds = (left: readonly number[] | undefined, right: readonly number[] | undefined) =>
+  left !== undefined && right !== undefined && left.length === right.length && left.every((value, index) => value === right[index]);
 function decimal(value: unknown): value is string { return typeof value === "string" && /^[1-9][0-9]{0,18}$/u.test(value); }
 function millis(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function retryMs(value: unknown): number {
@@ -164,6 +166,14 @@ function validateCatalog(value: unknown, region: GameRecordsRegion): asserts val
       || arena.endAtMs <= arena.startAtMs || arena.rankingEndAtMs < arena.endAtMs || !Array.isArray(arena.bandIds)
       || arena.bandIds.length > 20 || !arena.bandIds.every(decimal) || new Set(arena.bandIds).size !== arena.bandIds.length) {
       throw new Error("invalid_catalog");
+    }
+    if (arena.thresholdsByBand !== undefined) {
+      const thresholds = object(arena.thresholdsByBand);
+      for (const [bandId, values] of Object.entries(thresholds)) {
+        if (!arena.bandIds.includes(bandId) || !Array.isArray(values) || values.length > 128
+          || values.some((value: unknown, index: number) => typeof value !== "number" || !Number.isSafeInteger(value)
+            || value < 0 || index > 0 && value <= (values[index - 1] as number))) throw new Error("invalid_catalog");
+      }
     }
   }
   if (catalog.event === null) return;
@@ -305,10 +315,12 @@ export class OfficialRankingCollector extends Container<Env> {
   }
 
   async requestArenaWindows(region: GameRecordsRegion, seasonId: string, bandId: string,
-    starts: number[]): Promise<{ kind: string; retryAfter: number | null }> {
+    starts: number[], thresholds: number[] = []): Promise<{ kind: string; retryAfter: number | null }> {
     return this.serialized(async () => {
       if (!decimal(seasonId) || !decimal(bandId) || !Array.isArray(starts) || starts.length > 20
-        || starts.some((start) => !Number.isSafeInteger(start) || start < 1 || (start - 1) % 100 !== 0)) {
+        || starts.some((start) => !Number.isSafeInteger(start) || start < 1 || (start - 1) % 100 !== 0)
+        || !Array.isArray(thresholds) || thresholds.length > 32
+        || thresholds.some((value, index) => !Number.isSafeInteger(value) || value < 0 || index > 0 && value <= thresholds[index - 1]!)) {
         return { kind: "invalid_request", retryAfter: null };
       }
       const state = await this.stateFor(region), now = Date.now();
@@ -324,6 +336,12 @@ export class OfficialRankingCollector extends Container<Env> {
       const arena = state.arenaCatalog === undefined ? state.run?.catalog?.arena : state.arenaCatalog;
       if (!arena || seasonId !== arena.seasonId || !arena.bandIds.includes(bandId)
         || now < arena.startAtMs || now >= arena.rankingEndAtMs) return { kind: "inactive", retryAfter: null };
+      if (!starts.length && arena.thresholdsByBand?.[bandId]?.length === 0) return { kind: "inactive", retryAfter: null };
+      if (thresholds.length) {
+        const known = arena.thresholdsByBand?.[bandId];
+        if (!known) return { kind: "unavailable", retryAfter: null };
+        if (thresholds.some((value) => value !== 0 && !known.includes(value))) return { kind: "invalid_request", retryAfter: null };
+      }
       const metadata = starts.length ? await readOfficialArenaMetadata(this.env, region, seasonId, bandId) : null;
       if (starts.some((start) => start > 1 && (metadata?.maxRank == null || start > metadata.maxRank)))
         return { kind: "unavailable", retryAfter: null };
@@ -606,16 +624,44 @@ export class OfficialRankingCollector extends Container<Env> {
           if (run.pendingAttempt) return json({ error: "attempt_pending" }, 409);
           await saveOfficialCatalog(this.env, update.catalog);
           run.catalog = update.catalog;
-          const arena = update.catalog.arena;
-          if (state.arenaCatalog?.seasonId !== arena?.seasonId) state.arenaWarmupRuns = 0;
-          state.arenaCatalog = arena ?? null;
-          state.arenaProgress = Object.fromEntries(Object.entries(state.arenaProgress ?? {})
-            .filter(([, progress]) => arena?.seasonId === progress.seasonId && arena.bandIds.includes(progress.bandId)));
-          state.arenaInterests = (state.arenaInterests ?? []).filter((entry) => arena?.seasonId === entry.seasonId
-            && arena.bandIds.includes(entry.bandId) && Date.now() < arena.rankingEndAtMs
-            && Date.now() - entry.requestedAtMs < ARENA_INTEREST_TTL_MS);
-          const activeBands = new Set(arena?.bandIds.map((id) => `${arena.seasonId}:${id}`));
-          state.arenaPopulationAt = Object.fromEntries(Object.entries(state.arenaPopulationAt ?? {}).filter(([key]) => activeBands.has(key)));
+          if (update.catalog.arena !== undefined) {
+            const arena = update.catalog.arena, previous = state.arenaCatalog;
+            const sameSeason = arena?.seasonId === previous?.seasonId;
+            if (!arena || !sameSeason || arena?.bandIds.length !== previous?.bandIds.length
+              || arena?.bandIds.some((id) => !previous?.bandIds.includes(id))) state.arenaWarmupRuns = 0;
+            const activeBands = new Set(arena?.bandIds.map((id) => `${arena.seasonId}:${id}`));
+            state.arenaPopulationAt = Object.fromEntries(Object.entries(state.arenaPopulationAt ?? {}).filter(([key]) => activeBands.has(key)));
+            state.arenaProgress = Object.fromEntries(Object.entries(state.arenaProgress ?? {})
+              .filter(([, progress]) => arena?.seasonId === progress.seasonId && arena.bandIds.includes(progress.bandId)));
+            const signatures: Record<string, number[]> = {};
+            for (const bandId of arena?.bandIds ?? []) {
+              const key = `${arena!.seasonId}:${bandId}`;
+              const before = sameSeason ? previous?.thresholdsByBand?.[bandId] : undefined;
+              const next = arena!.thresholdsByBand?.[bandId] ?? before;
+              if (!next) continue;
+              if (!before && state.arenaPopulationAt[key] === undefined) state.arenaWarmupRuns = 0;
+              signatures[bandId] = next;
+              const progress = state.arenaProgress[key];
+              if (progress && !sameThresholds(progress.thresholds, next)) {
+                delete state.arenaProgress[key];
+                state.arenaWarmupRuns = 0;
+              }
+              if (before && !sameThresholds(before, next)) {
+                delete state.arenaPopulationAt[key];
+                state.arenaWarmupRuns = 0;
+              } else if (!before && state.arenaPopulationAt[key] !== undefined) {
+                const population = await readOfficialArenaPopulation(this.env, region, arena!.seasonId, bandId);
+                if (!sameThresholds(population?.atLeast.map((row) => row.threshold), next)) {
+                  delete state.arenaPopulationAt[key];
+                  state.arenaWarmupRuns = 0;
+                }
+              }
+            }
+            state.arenaCatalog = arena ? { ...arena, ...(Object.keys(signatures).length ? { thresholdsByBand: signatures } : {}) } : null;
+            state.arenaInterests = (state.arenaInterests ?? []).filter((entry) => arena?.seasonId === entry.seasonId
+              && arena.bandIds.includes(entry.bandId) && Date.now() < arena.rankingEndAtMs
+              && Date.now() - entry.requestedAtMs < ARENA_INTEREST_TTL_MS);
+          }
           run.checkpoints[checkpoint] = updateHash;
           await this.ctx.storage.put("collectorState", state);
         } else if (update.type === "attempt") {
@@ -689,6 +735,8 @@ export class OfficialRankingCollector extends Container<Env> {
           const arena = run.catalog?.arena, progress = update.progress;
           if (!/^[a-f0-9]{32}$/u.test(update.checkpointId) || run.pendingAttempt || !arena
             || progress.seasonId !== arena.seasonId || !arena.bandIds.includes(progress.bandId)) return json({ error: "board_mismatch" }, 409);
+          const expected = arena.thresholdsByBand?.[progress.bandId];
+          if (expected && !sameThresholds(expected, progress.thresholds)) return json({ error: "board_mismatch" }, 409);
           state.arenaProgress ??= {};
           state.arenaProgress[`${progress.seasonId}:${progress.bandId}`] = {
             seasonId: progress.seasonId, bandId: progress.bandId, thresholds: progress.thresholds,
@@ -704,6 +752,8 @@ export class OfficialRankingCollector extends Container<Env> {
             || !arena.bandIds.includes(update.observation.bandId) || update.observation.observedAtMs < run.startedAtMs) {
             return json({ error: "board_mismatch" }, 409);
           }
+          const expected = arena.thresholdsByBand?.[update.observation.bandId];
+          if (expected && !sameThresholds(expected, update.observation.atLeast.map((row) => row.threshold))) return json({ error: "board_mismatch" }, 409);
           await saveOfficialArenaPopulation(this.env, update.observation);
           state.arenaPopulationAt ??= {};
           state.arenaPopulationAt[`${update.observation.seasonId}:${update.observation.bandId}`] = update.observation.observedAtMs;
@@ -721,8 +771,9 @@ export class OfficialRankingCollector extends Container<Env> {
           if (update.status === "auth_paused") this.pauseRun(state, "auth_paused", update.failure ? permissionRejected(update.failure) : false);
           if (update.status === "rate_limited") state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.retryAfterSeconds));
           if (update.status === "failed") state.nextAtMs = Math.max(state.nextAtMs, Date.now() + Math.min(3_600_000, INTERVAL_MS * 2 ** Math.min(4, state.failures - 1)));
-          const arena = state.arenaCatalog;
-          const cold = arena && Date.now() < arena.rankingEndAtMs && arena.bandIds.some((id) => !state.arenaPopulationAt?.[`${arena.seasonId}:${id}`]);
+          const arena = run.catalog?.arena === undefined ? null : state.arenaCatalog;
+          const cold = arena && Date.now() < arena.rankingEndAtMs && arena.bandIds.some((id) => arena.thresholdsByBand?.[id]?.length !== 0
+            && !state.arenaPopulationAt?.[`${arena.seasonId}:${id}`]);
           if (update.status === "ok" && cold && (state.arenaWarmupRuns ?? 0) < 20) {
             state.arenaWarmupRuns = (state.arenaWarmupRuns ?? 0) + 1;
             this.expediteArena(state);

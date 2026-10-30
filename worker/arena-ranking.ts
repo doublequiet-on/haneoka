@@ -11,7 +11,7 @@ import type {
   GameRecordsRegion,
   SongRankingCardDto,
 } from "../src/lib/game-records";
-import { readOfficialArenaLatest, readOfficialArenaMetadata, readOfficialArenaPopulation, readOfficialArenaSearchMatch, readOfficialArenaSearchWindows, type OfficialRankingStoreBindings } from "./official-ranking-store";
+import { readOfficialArenaLatest, readOfficialArenaMetadata, readOfficialArenaPopulation, readOfficialArenaSearchMatch, readOfficialArenaSearchWindows, readOfficialCatalog, type OfficialRankingStoreBindings } from "./official-ranking-store";
 
 export interface ArenaRankingBindings extends OfficialRankingStoreBindings {
   OFFICIAL_RANKING_COLLECTOR?: Env["OFFICIAL_RANKING_COLLECTOR"];
@@ -144,9 +144,13 @@ async function population(env: ArenaRankingBindings, region: GameRecordsRegion, 
   bandId: string, thresholds: number[]): Promise<ArenaPopulationDto> {
   const source = await readOfficialArenaPopulation(env, region, seasonId, bandId);
   if (!source) return pending();
+  const catalog = await readOfficialCatalog(env, region);
+  const expected = catalog?.arena?.seasonId === seasonId ? catalog.arena.thresholdsByBand?.[bandId] : undefined;
+  if (expected && !expected.length) throw new ArenaFailure(503, "inactive");
+  if (expected && (expected.length !== source.atLeast.length || expected.some((value, index) => source.atLeast[index]?.threshold !== value))) return pending();
   const counts = new Map(source.atLeast.map((row) => [row.threshold, row.count]));
   counts.set(0, source.maxRank);
-  if (thresholds.some((threshold) => !counts.has(threshold))) throw new ArenaFailure(503, "unavailable");
+  if (thresholds.some((threshold) => !counts.has(threshold))) return pending();
   const now = Date.now();
   return { region, seasonId, bandId, provider: "official", snapshotId: source.snapshotId,
     observedAtMs: source.observedAtMs, fetchedAtMs: source.observedAtMs, serverTimeMs: now,
@@ -234,7 +238,8 @@ export async function handleArenaRankingApi(request: Request, _ctx: ExecutionCon
       try {
         const collector = env.OFFICIAL_RANKING_COLLECTOR?.getByName(region);
         if (!collector) throw new Error("collector_unavailable");
-        const demand = await collector.requestArenaWindows(region, seasonId, bandId, failure.windows);
+        const thresholds = operation === "population" ? (url.searchParams.get("thresholds") ?? "").split(",").map(Number) : [];
+        const demand = await collector.requestArenaWindows(region, seasonId, bandId, failure.windows, thresholds);
         failure = new ArenaFailure(503, demand.kind, demand.retryAfter);
       } catch { failure = new ArenaFailure(503, "unavailable"); }
     }

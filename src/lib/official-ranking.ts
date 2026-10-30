@@ -135,6 +135,7 @@ export interface OfficialCatalog {
     endAtMs: number;
     rankingEndAtMs: number;
     bandIds: string[];
+    thresholdsByBand?: Record<string, number[]>;
   } | null;
 }
 
