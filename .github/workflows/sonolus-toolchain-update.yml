@@ -63,6 +63,7 @@ jobs:
         run: node scripts/external-repositories.mjs checkout
 
       - name: Track the engine repository's main branch
+        if: ${{ !inputs.server_only }}
         # The lock checks out a detached commit; the bump must land on main so
         # the refreshed lock stays on the locked branch.
         run: |
