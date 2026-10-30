@@ -538,7 +538,6 @@ export class EventTracker extends LitElement {
             ${totalReadable ? html`
               <song-ranking
                 embedded
-                summary
                 .locale=${this.locale}
                 .server=${this.sourceServer()}
                 .region=${this.region}
