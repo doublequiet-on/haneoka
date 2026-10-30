@@ -348,11 +348,11 @@ export class OfficialRankingCollector extends Container<Env> {
       catch { state.status = "invalid_config"; await this.persist(state, false); return; }
       if (!pool) { state.status = "not_configured"; await this.persist(state, false); return; }
       this.synchronizePool(state, pool);
-      if (state.callbackProtocolVersion !== 1 && state.status === "failed" && state.run?.complete
+      if (state.callbackProtocolVersion !== 2 && ["failed", "invalid_config", "not_configured"].includes(state.status) && state.run?.complete
         && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration && !state.permissionPause && !state.legacyPermissionBlock
         && state.lastFailure?.stage === "catalog_callback" && state.lastFailure.code === "CallbackError"
         && state.lastFailure.httpStatus === 403) {
-        state.callbackProtocolVersion = 1;
+        state.callbackProtocolVersion = 2;
         state.failures = 0;
         state.nextAtMs = Date.now();
         const health = this.runHealth(state);
