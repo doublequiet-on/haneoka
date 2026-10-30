@@ -38,6 +38,17 @@
 
 区域 Durable Object 持久保存调度、当前凭据代际、在途检查点与暂停/冷却；D1 保存历史索引，私有 R2 保存不可变正文。容器临时目录及完成任务缓存只用于本轮执行，不是恢复或读接口的依据。Worker 重新读取同一观测不会修改时间或生成新游标。
 
+区服 secret 向后兼容单账号结构，并接受 `haneoka:official-ranking-account-pool/1`：
+`{contract,region,selectedAccountId?,accounts:[{id,label?,source?,enabled,state,pauseReason?,clientVersion,credentials,masterConfig}]}`。
+`credentials` 为原有同服、固定 origin 的凭据文档；池内 ID 和别名不参与真实身份或认证代摘要。
+同一真实身份不能重复登记。仅 ready 且启用的 entry 可调度；池的暂停状态不因重新部署、
+更换池内 ID 或切换单号／池格式清除。403/7 权限暂停和429/8冷却覆盖全区，401/16及明确
+authentication_failed暂停该认证代；整轮持有选中身份租约，失败请求不跨账号重放。
+
+公开 `status.pool` 为 `{accounts,enabled,ready,paused,coolingDown,leased}` 六个数量；
+不包含账号 ID、别名、真实玩家身份、认证摘要或凭据。任务／回调仍沿用 job/1 和 update/1，
+容器只接收本轮已选择的单个账号配置。
+
 云端沿用上表 v2 路径，公开格式使用网站 DTO：`events/current` 返回 `EventTrackerDto`，榜单 `latest` 返回 `EventRankingDto`，包含 `provider=official`、`snapshotId`、`observedAtMs`、`serverTimeMs` 和归一化 `rows`；`history?after=` 返回独立数字游标、成功观测的 `ranking` 或失败元数据。原始 `players` 和协议扩展字段只保存在私有 R2，不直接公开。localhost API 继续返回原始 `haneoka:ranking-observation/2`，两者不共享正文合同。云端 `status` 附逐榜最后尝试、最后成功、连续失败和开放缺口，不能用全局成功代替逐榜健康。
 
 云端缺少目录或成功观测时保留 HTTP 503 pending。采集未启用、未配置或配置无效时，错误附 collectorStatus，retryAfter 为 null；状态查询的 nextAttemptAtMs 为 null、pollAfterSeconds 为300。采集可用时保留原轮询提示，提示间隔不代表已经排队或必定产生新数据。

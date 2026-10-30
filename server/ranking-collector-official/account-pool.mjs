@@ -178,16 +178,20 @@ export class AccountPool {
     return { region, exported: true, accountId: row.id };
   }
   exportPool(region, output) {
-    const selected = this.selected(region);
+    if (!roots[region]) fail("invalid_region");
+    const state = this.db.prepare("SELECT * FROM game_query_pool_state WHERE region=?").get(region);
     const rows = this.db.prepare(`SELECT a.*,b.origin FROM game_query_account a JOIN game_query_account_binding b ON b.account_id=a.id
       WHERE a.region=? ORDER BY a.created_at,a.id`).all(region);
+    if (!rows.length) fail("no_available_account");
     if (rows.some((row) => row.lease_until > now())) fail("account_busy");
     const accounts = rows.map((row) => ({ id: row.id, label: row.label, source: row.source, enabled: row.enabled === 1,
-      state: row.state, lastSuccessAtMs: row.last_success_at, ...this.unseal(row) }));
-    const config = { contract: "haneoka:official-ranking-account-pool/1", region, selectedAccountId: selected.id, accounts };
+      state: row.state, ...(state?.blocked_account === row.id && state.blocked_kind ? { pauseReason: state.blocked_kind } : {}),
+      lastSuccessAtMs: row.last_success_at, ...this.unseal(row) }));
+    const selectedAccountId = rows.some((row) => row.id === state?.selected_account) ? state.selected_account : undefined;
+    const config = { contract: "haneoka:official-ranking-account-pool/1", region, ...(selectedAccountId ? { selectedAccountId } : {}), accounts };
     if (Buffer.byteLength(JSON.stringify(config)) > 5120) fail("configuration_too_large");
     privateWrite(output, config);
-    return { region, exported: true, accounts: accounts.length, selectedAccountId: selected.id };
+    return { region, exported: true, accounts: accounts.length, selectedAccountId: selectedAccountId ?? null };
   }
   lease(region) {
     return this.transaction(() => {

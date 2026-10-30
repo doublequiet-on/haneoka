@@ -5,7 +5,9 @@
 // Effects/Dependencies: Starts isolated containers, persists DO state and writes D1/R2; credentials stay server-side.
 import { Container } from "@cloudflare/containers";
 import type { GameRecordsRegion } from "../src/lib/game-records";
-import type { OfficialArenaObservation, OfficialCatalog, OfficialCollectorFailure, OfficialCollectorJob, OfficialCollectorUpdate, OfficialObservation } from "../src/lib/official-ranking";
+import { OFFICIAL_API_ORIGINS as REGION_ORIGINS, parseOfficialCollectorConfiguration, selectOfficialCollectorAccount,
+  type OfficialCollectorAccount, type OfficialCollectorAccountHealth, type OfficialCollectorPool,
+  type OfficialArenaObservation, type OfficialCatalog, type OfficialCollectorFailure, type OfficialCollectorJob, type OfficialCollectorUpdate, type OfficialObservation } from "../src/lib/official-ranking";
 import { officialDigest, saveOfficialArenaObservation, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
 
 export const OFFICIAL_RANKING_REGIONS = ["jp", "tw", "en", "kr"] as const;
@@ -16,24 +18,15 @@ const INTERVAL_MS = 300_000;
 const JOB_MS = 120_000;
 const MAX_UPDATE_BYTES = 8 * 1024 * 1024;
 const CALLBACK_ORIGIN = "https://haneoka.org";
-const REGION_ORIGINS: Record<GameRecordsRegion, readonly string[]> = {
-  jp: ["https://api.bang-dream-on.jp"],
-  tw: ["https://l12-prod-hk-all-gs-sirius.gamerfusiontech.com", "https://l14-prod-hk-all-gs-sirius.gamerfusiontech.com"],
-  en: ["https://l14-prod-va-all-gs-sirius.bilibiligame.net", "https://l17-prod-va-all-gs-sirius.bilibiligame.net"],
-  kr: ["https://l14-prod-kr-all-gs-sirius.bilibiligame.net", "https://l17-prod-kr-all-gs-sirius.bilibiligame.net"],
-};
 
 type JsonObject = Record<string, unknown>;
-interface CollectorConfig {
-  clientVersion: string;
-  credentials: JsonObject;
-  masterConfig: JsonObject;
-  generation: string;
-}
 interface CollectorRun {
   id: string;
   token: string;
   generation: string;
+  accountIdentity?: string;
+  authGeneration?: string;
+  apiOrigin?: string;
   startedAtMs: number;
   deadlineMs: number;
   pendingAttempt: string | null;
@@ -51,6 +44,9 @@ interface CollectorState {
   failures: number;
   blockedGeneration: string | null;
   callbackProtocolVersion?: number;
+  accounts?: Record<string, OfficialCollectorAccountHealth>;
+  permissionPause?: { identity: string; authGeneration: string } | null;
+  legacyPermissionBlock?: string | null;
   lastFailure?: OfficialCollectorFailure | null;
   run: CollectorRun | null;
 }
@@ -85,6 +81,9 @@ function authRejected(observation: Pick<OfficialObservation, "httpStatus" | "grp
     || observation.grpcStatus === "2" && observation.error === "authentication_failed";
 }
 function limited(observation: Pick<OfficialObservation, "httpStatus" | "grpcStatus">): boolean { return observation.httpStatus === 429 || observation.grpcStatus === "8"; }
+function permissionRejected(value: { httpStatus?: number | null; grpcStatus?: string | null }): boolean {
+  return value.httpStatus === 403 || value.grpcStatus === "7";
+}
 function validateFailure(value: unknown): asserts value is OfficialCollectorFailure {
   const failure = object(value);
   if (!["container", "catalog", "catalog_version", "catalog_server_list", "catalog_manifest", "catalog_event", "catalog_challenges", "catalog_parameters",
@@ -128,27 +127,10 @@ async function sameToken(actual: string, expected: string): Promise<boolean> {
   return crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(actual));
 }
 
-async function configFor(env: OfficialCollectorConfigurationBindings, region: GameRecordsRegion): Promise<CollectorConfig | null> {
+async function configFor(env: OfficialCollectorConfigurationBindings, region: GameRecordsRegion): Promise<OfficialCollectorPool | null> {
   const secret = env[`OFFICIAL_RANKING_${region.toUpperCase()}_CONFIG` as "OFFICIAL_RANKING_JP_CONFIG"];
   if (!secret?.trim()) return null;
-  if (secret.length > 131_072) throw new Error("invalid_collector_config");
-  const config = object(JSON.parse(secret));
-  const credentials = object(config.credentials);
-  const auth = object(credentials.credentials);
-  const expectedRegion = region === "tw" ? "hk" : region;
-  if (credentials.region !== expectedRegion || typeof credentials.origin !== "string" || !REGION_ORIGINS[region].includes(credentials.origin)
-    || typeof auth.player_id !== "string" || !auth.player_id || typeof auth.credential !== "string" || !auth.credential
-    || typeof config.clientVersion !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+$/u.test(config.clientVersion)) {
-    throw new Error("invalid_collector_config");
-  }
-  const deviceId = auth.device_id || null;
-  const bid = region === "jp" ? undefined : auth.bid || undefined;
-  if (deviceId !== null && typeof deviceId !== "string" || bid !== undefined && typeof bid !== "string" || region === "jp" && auth.bid) {
-    throw new Error("invalid_collector_config");
-  }
-  const authentication = { player_id: auth.player_id, credential: auth.credential, device_id: deviceId, ...(bid ? { bid } : {}) };
-  return { clientVersion: config.clientVersion, credentials, masterConfig: object(config.masterConfig),
-    generation: await officialDigest(canonical({ region, origin: credentials.origin, auth: authentication })) };
+  return parseOfficialCollectorConfiguration(secret, region);
 }
 
 export async function officialCollectorAvailability(
@@ -281,6 +263,78 @@ export class OfficialRankingCollector extends Container<Env> {
     else await this.scheduleNextAlarm();
   }
 
+  private synchronizePool(state: CollectorState, pool: OfficialCollectorPool): void {
+    const legacyGeneration = state.legacyPermissionBlock ?? (state.accounts === undefined ? state.blockedGeneration : null);
+    const accounts = state.accounts ??= {};
+    for (const config of pool.accounts) {
+      const health = accounts[config.identity] ??= { blocked: {}, lastUsedAtMs: 0,
+        lastSuccessAtMs: null, cooldownUntilMs: 0, leaseUntilMs: 0, failures: 0 };
+      if (config.initialPause) health.blocked[config.authGeneration] = config.initialPause;
+      if (config.permissionPaused) state.permissionPause = { identity: config.identity, authGeneration: config.authGeneration };
+    }
+    const run = state.run;
+    if (run && !run.accountIdentity) {
+      const config = pool.accounts.find((account) => account.generation === run.generation);
+      if (config) { run.accountIdentity = config.identity; run.authGeneration = config.authGeneration; run.apiOrigin = String(config.credentials.origin); }
+    }
+    const blocked = pool.accounts.find((account) => account.generation === state.blockedGeneration);
+    if (blocked) accounts[blocked.identity]!.blocked[blocked.authGeneration] = state.status === "auth_uncertain" ? "auth_uncertain" : "auth_paused";
+    if (legacyGeneration) {
+      const legacy = pool.accounts.find((account) => account.legacyGenerations.includes(legacyGeneration));
+      if (legacy) {
+        accounts[legacy.identity]!.blocked[legacy.authGeneration] = state.status === "auth_uncertain" ? "auth_uncertain" : "auth_paused";
+        state.permissionPause = { identity: legacy.identity, authGeneration: legacy.authGeneration };
+        state.legacyPermissionBlock = null;
+      } else state.legacyPermissionBlock = legacyGeneration;
+    }
+    if (state.permissionPause) {
+      const repaired = pool.accounts.find((account) => account.enabled && account.ready && account.identity === state.permissionPause?.identity
+        && account.authGeneration !== state.permissionPause.authGeneration);
+      if (repaired) state.permissionPause = null;
+    }
+  }
+
+  private runHealth(state: CollectorState): OfficialCollectorAccountHealth | null {
+    return state.run?.accountIdentity ? state.accounts?.[state.run.accountIdentity] ?? null : null;
+  }
+
+  private pauseRun(state: CollectorState, kind: "auth_paused" | "auth_uncertain", permission = false): void {
+    const run = state.run;
+    if (!run) return;
+    state.blockedGeneration = run.generation;
+    state.status = kind;
+    const health = this.runHealth(state);
+    if (health && run.authGeneration) health.blocked[run.authGeneration] = kind;
+    if (permission && run.accountIdentity && run.authGeneration) state.permissionPause = { identity: run.accountIdentity, authGeneration: run.authGeneration };
+  }
+
+  private expireRun(state: CollectorState): boolean {
+    const run = state.run;
+    if (!run || run.complete) return false;
+    if (Date.now() <= run.deadlineMs + 15_000) return true;
+    if (run.pendingAttempt && !run.resolvedAttempt) this.pauseRun(state, "auth_uncertain");
+    run.complete = true;
+    const health = this.runHealth(state);
+    if (health) health.leaseUntilMs = 0;
+    return false;
+  }
+
+  private accountFor(state: CollectorState, pool: OfficialCollectorPool): OfficialCollectorAccount | null {
+    if (state.permissionPause || state.legacyPermissionBlock) return null;
+    return selectOfficialCollectorAccount(pool, state.accounts ?? {}, Date.now());
+  }
+
+  private async unavailablePool(state: CollectorState, pool: OfficialCollectorPool): Promise<void> {
+    const times = pool.accounts.filter((account) => account.enabled && account.ready
+      && !state.accounts?.[account.identity]?.blocked[account.authGeneration])
+      .map((account) => Math.max(state.accounts?.[account.identity]?.cooldownUntilMs ?? 0, state.accounts?.[account.identity]?.leaseUntilMs ?? 0))
+      .filter((time) => time > Date.now());
+    if (state.permissionPause || state.legacyPermissionBlock || pool.accounts.some((account) => state.accounts?.[account.identity]?.blocked[account.authGeneration])) state.status = "auth_paused";
+    else state.status = "no_available_account";
+    if (times.length && !state.permissionPause && !state.legacyPermissionBlock) state.nextAtMs = Math.max(state.nextAtMs, Math.min(...times));
+    await this.persist(state, times.length > 0 && !state.permissionPause && !state.legacyPermissionBlock);
+  }
+
   async ensureScheduled(region: GameRecordsRegion): Promise<void> {
     await this.serialized(async () => {
       const state = await this.stateFor(region);
@@ -289,14 +343,11 @@ export class OfficialRankingCollector extends Container<Env> {
         await this.persist(state, false);
         return;
       }
-      let config: CollectorConfig | null;
-      try { config = await configFor(this.env, region); }
+      let pool: OfficialCollectorPool | null;
+      try { pool = await configFor(this.env, region); }
       catch { state.status = "invalid_config"; await this.persist(state, false); return; }
-      if (!config) { state.status = "not_configured"; await this.persist(state, false); return; }
-      if (state.blockedGeneration === config.generation) {
-        if (!["auth_paused", "auth_uncertain"].includes(state.status)) state.status = "auth_paused";
-        await this.persist(state, false); return;
-      }
+      if (!pool) { state.status = "not_configured"; await this.persist(state, false); return; }
+      this.synchronizePool(state, pool);
       if (state.callbackProtocolVersion !== 1 && state.status === "failed" && state.run?.complete
         && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration
         && state.lastFailure?.stage === "catalog_callback" && state.lastFailure.code === "CallbackError"
@@ -311,53 +362,62 @@ export class OfficialRankingCollector extends Container<Env> {
         state.failures = 0;
         state.nextAtMs = Date.now();
       }
-      if (state.run && !state.run.complete && Date.now() <= state.run.deadlineMs + 15_000) return;
-      if (state.run && !state.run.complete && state.run.pendingAttempt && !state.run.resolvedAttempt) {
-        state.blockedGeneration = state.run.generation;
-        state.status = "auth_uncertain";
-        if (state.blockedGeneration === config.generation) { await this.persist(state, false); return; }
-      }
+      if (this.expireRun(state)) return;
+      if (!this.accountFor(state, pool)) { await this.unavailablePool(state, pool); return; }
       state.blockedGeneration = null;
-      if (state.run && !state.run.complete) state.run.complete = true;
       await this.persist(state);
     });
   }
 
   async status(region: GameRecordsRegion): Promise<Record<string, unknown>> {
-    const state = await this.stateFor(region);
+    const state = structuredClone(await this.stateFor(region));
     const unavailable = await officialCollectorAvailability(this.env, region);
+    let pool: OfficialCollectorPool | null = null;
+    try { pool = await configFor(this.env, region); } catch { /* Availability reports invalid configuration. */ }
+    if (pool) this.synchronizePool(state, pool);
     const now = Date.now();
     const age = state.lastSuccessfulObservationAtMs === null ? null : now - state.lastSuccessfulObservationAtMs;
+    const accounts = pool?.accounts ?? [];
+    const ready = (account: OfficialCollectorAccount): boolean => account.enabled && account.ready
+      && !state.accounts?.[account.identity]?.blocked[account.authGeneration];
+    const canSchedule = !state.permissionPause && !state.legacyPermissionBlock && accounts.some(ready);
+    const counts = { accounts: accounts.length, enabled: accounts.filter((account) => account.enabled).length,
+      ready: state.permissionPause || state.legacyPermissionBlock ? 0 : accounts.filter((account) => ready(account)
+        && (state.accounts?.[account.identity]?.cooldownUntilMs ?? 0) <= now && (state.accounts?.[account.identity]?.leaseUntilMs ?? 0) <= now).length,
+      paused: accounts.filter((account) => Boolean(state.accounts?.[account.identity]?.blocked[account.authGeneration]) || !account.enabled || !account.ready).length,
+      coolingDown: accounts.filter((account) => (state.accounts?.[account.identity]?.cooldownUntilMs ?? 0) > now).length,
+      leased: accounts.filter((account) => (state.accounts?.[account.identity]?.leaseUntilMs ?? 0) > now).length };
     return { contract: "haneoka:ranking-status/1", region, serverTimeMs: now, collectorStatus: unavailable ?? state.status,
       collectionEnabled: officialRegionEnabled(this.env.OFFICIAL_RANKING_ENABLED_REGIONS, region),
       readEnabled: officialRegionEnabled(this.env.OFFICIAL_RANKING_READ_REGIONS, region),
       samplingIntervalSeconds: INTERVAL_MS / 1000, lastSuccessfulObservationAtMs: state.lastSuccessfulObservationAtMs,
       ageMs: age, stale: age === null || age < 0 || age > 600_000, pollAfterSeconds: unavailable ? 300 : 30,
       lastFailure: state.lastFailure ?? null,
-      nextAttemptAtMs: unavailable || state.blockedGeneration ? null : state.nextAtMs || null, catalogProvider: "official-master" };
+      pool: counts,
+      nextAttemptAtMs: unavailable || !canSchedule ? null : state.nextAtMs || null, catalogProvider: "official-master" };
   }
 
   async collectDue(region: GameRecordsRegion): Promise<void> {
     const job = await this.serialized(async (): Promise<OfficialCollectorJob | null> => {
       const state = await this.stateFor(region);
       if (!officialRegionEnabled(this.env.OFFICIAL_RANKING_ENABLED_REGIONS, region)) { state.status = "disabled"; await this.persist(state, false); return null; }
-      let config: CollectorConfig | null;
-      try { config = await configFor(this.env, region); }
+      let pool: OfficialCollectorPool | null;
+      try { pool = await configFor(this.env, region); }
       catch { state.status = "invalid_config"; await this.persist(state, false); return null; }
-      if (!config) { state.status = "not_configured"; await this.persist(state, false); return null; }
-      if (state.blockedGeneration === config.generation) { await this.persist(state, false); return null; }
-      if (state.run && !state.run.complete) {
-        if (Date.now() <= state.run.deadlineMs + 15_000) { state.nextAtMs = state.run.deadlineMs + 15_000; await this.persist(state); return null; }
-        if (state.run.pendingAttempt && !state.run.resolvedAttempt) { state.status = "auth_uncertain"; state.blockedGeneration = state.run.generation;
-          if (state.blockedGeneration === config.generation) { await this.persist(state, false); return null; }
-        }
-      }
+      if (!pool) { state.status = "not_configured"; await this.persist(state, false); return null; }
+      this.synchronizePool(state, pool);
+      if (this.expireRun(state)) { state.nextAtMs = Math.max(state.nextAtMs, (state.run?.deadlineMs ?? 0) + 15_000); await this.persist(state); return null; }
+      const config = this.accountFor(state, pool);
+      if (!config) { await this.unavailablePool(state, pool); return null; }
       if (state.nextAtMs > Date.now() + 1000) { await this.persist(state); return null; }
       const now = Date.now();
       const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
       const runId = crypto.randomUUID().replaceAll("-", "");
-      state.run = { id: runId, token, generation: config.generation, startedAtMs: now, deadlineMs: now + JOB_MS,
+      state.run = { id: runId, token, generation: config.generation, accountIdentity: config.identity,
+        authGeneration: config.authGeneration, apiOrigin: String(config.credentials.origin), startedAtMs: now, deadlineMs: now + JOB_MS,
         pendingAttempt: null, resolvedAttempt: false, complete: false, catalog: null, checkpoints: {} };
+      const health = this.runHealth(state);
+      if (health) { health.lastUsedAtMs = now; health.leaseUntilMs = now + JOB_MS + 15_000; }
       state.status = "collecting";
       state.lastFailure = null;
       state.blockedGeneration = null;
@@ -391,11 +451,13 @@ export class OfficialRankingCollector extends Container<Env> {
       state.lastFailure = failure ?? { stage: "container", code: "container_fetch_failed" };
       state.failures += 1;
       state.nextAtMs = Math.max(state.nextAtMs, Date.now() + Math.min(3_600_000, INTERVAL_MS * 2 ** Math.min(4, state.failures - 1)));
+      const health = this.runHealth(state);
+      if (health) { health.leaseUntilMs = 0; health.failures += 1; health.cooldownUntilMs = state.nextAtMs; }
       if (state.run.pendingAttempt && !state.run.resolvedAttempt && !state.blockedGeneration) {
-        state.status = "auth_uncertain"; state.blockedGeneration = job.credentialGeneration;
+        this.pauseRun(state, "auth_uncertain");
       }
       else if (!state.blockedGeneration && state.status !== "rate_limited") state.status = "failed";
-      await this.persist(state, !state.blockedGeneration);
+      await this.persist(state, !state.permissionPause && !state.legacyPermissionBlock);
     });
   }
 
@@ -413,6 +475,10 @@ export class OfficialRankingCollector extends Container<Env> {
       const run = state.run;
       if (!run || run.id !== runId || update.contract !== "haneoka:official-ranking-update/1"
         || update.region !== region || update.runId !== runId || update.credentialGeneration !== run.generation) return json({ error: "run_mismatch" }, 409);
+      if (!run.accountIdentity) {
+        try { const pool = await configFor(this.env, region); if (pool) this.synchronizePool(state, pool); }
+        catch { return json({ error: "invalid_config" }, 409); }
+      }
       let checkpoint: string;
       if (update.type === "catalog" || update.type === "complete") checkpoint = update.type;
       else if (update.type === "attempt") checkpoint = `attempt:${update.snapshotId}`;
@@ -432,6 +498,7 @@ export class OfficialRankingCollector extends Container<Env> {
       try {
         if (update.type === "catalog") {
           validateCatalog(update.catalog, region);
+          if (run.apiOrigin && update.catalog.apiOrigin !== run.apiOrigin) return json({ error: "catalog_origin_mismatch" }, 409);
           if (run.pendingAttempt) return json({ error: "attempt_pending" }, 409);
           await saveOfficialCatalog(this.env, update.catalog);
           run.catalog = update.catalog;
@@ -453,13 +520,22 @@ export class OfficialRankingCollector extends Container<Env> {
             return json({ error: "board_mismatch" }, 409);
           }
           run.resolvedAttempt = true;
-          if (authRejected(update.observation)) { state.blockedGeneration = run.generation; state.status = "auth_paused"; }
-          if (limited(update.observation)) { state.status = "rate_limited"; state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.observation.retryAfterSeconds)); }
+          if (authRejected(update.observation)) this.pauseRun(state, "auth_paused", permissionRejected(update.observation));
+          if (limited(update.observation)) {
+            state.status = "rate_limited";
+            state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.observation.retryAfterSeconds));
+            const health = this.runHealth(state);
+            if (health) health.cooldownUntilMs = state.nextAtMs;
+          }
           await this.ctx.storage.put("collectorState", state);
           await saveOfficialObservation(this.env, update.observation);
           run.pendingAttempt = null;
           run.checkpoints[checkpoint] = updateHash;
-          if (!update.observation.error) state.lastSuccessfulObservationAtMs = Math.max(state.lastSuccessfulObservationAtMs ?? 0, update.observation.observedAtMs);
+          if (!update.observation.error) {
+            state.lastSuccessfulObservationAtMs = Math.max(state.lastSuccessfulObservationAtMs ?? 0, update.observation.observedAtMs);
+            const health = this.runHealth(state);
+            if (health) health.lastSuccessAtMs = Math.max(health.lastSuccessAtMs ?? 0, update.observation.observedAtMs);
+          }
           await this.ctx.storage.put("collectorState", state);
         } else if (update.type === "arena-observation") {
           validateArenaObservation(update.observation, region);
@@ -470,13 +546,22 @@ export class OfficialRankingCollector extends Container<Env> {
             return json({ error: "board_mismatch" }, 409);
           }
           run.resolvedAttempt = true;
-          if (authRejected(update.observation)) { state.blockedGeneration = run.generation; state.status = "auth_paused"; }
-          if (limited(update.observation)) { state.status = "rate_limited"; state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.observation.retryAfterSeconds)); }
+          if (authRejected(update.observation)) this.pauseRun(state, "auth_paused", permissionRejected(update.observation));
+          if (limited(update.observation)) {
+            state.status = "rate_limited";
+            state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.observation.retryAfterSeconds));
+            const health = this.runHealth(state);
+            if (health) health.cooldownUntilMs = state.nextAtMs;
+          }
           await this.ctx.storage.put("collectorState", state);
           await saveOfficialArenaObservation(this.env, update.observation);
           run.pendingAttempt = null;
           run.checkpoints[checkpoint] = updateHash;
-          if (!update.observation.error) state.lastSuccessfulObservationAtMs = Math.max(state.lastSuccessfulObservationAtMs ?? 0, update.observation.observedAtMs);
+          if (!update.observation.error) {
+            state.lastSuccessfulObservationAtMs = Math.max(state.lastSuccessfulObservationAtMs ?? 0, update.observation.observedAtMs);
+            const health = this.runHealth(state);
+            if (health) health.lastSuccessAtMs = Math.max(health.lastSuccessAtMs ?? 0, update.observation.observedAtMs);
+          }
           await this.ctx.storage.put("collectorState", state);
         } else if (update.type === "complete") {
           if (run.pendingAttempt || !["ok", "failed", "auth_paused", "rate_limited"].includes(update.status)) return json({ error: "attempt_pending" }, 409);
@@ -487,11 +572,17 @@ export class OfficialRankingCollector extends Container<Env> {
             ...(update.failure.grpcStatus !== undefined ? { grpcStatus: update.failure.grpcStatus } : {}) } : null;
           state.status = state.blockedGeneration ? state.status : state.status === "rate_limited" ? "rate_limited" : update.status;
           state.failures = update.status === "ok" ? 0 : state.failures + 1;
-          if (update.status === "auth_paused") state.blockedGeneration = run.generation;
+          if (update.status === "auth_paused") this.pauseRun(state, "auth_paused", update.failure ? permissionRejected(update.failure) : false);
           if (update.status === "rate_limited") state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.retryAfterSeconds));
           if (update.status === "failed") state.nextAtMs = Math.max(state.nextAtMs, Date.now() + Math.min(3_600_000, INTERVAL_MS * 2 ** Math.min(4, state.failures - 1)));
+          const health = this.runHealth(state);
+          if (health) {
+            health.leaseUntilMs = 0;
+            health.failures = update.status === "ok" ? 0 : health.failures + 1;
+            if (update.status === "failed" || update.status === "rate_limited") health.cooldownUntilMs = Math.max(health.cooldownUntilMs, state.nextAtMs);
+          }
           run.checkpoints[checkpoint] = updateHash;
-          await this.persist(state, !state.blockedGeneration);
+          await this.persist(state, !state.permissionPause && !state.legacyPermissionBlock);
         } else return json({ error: "invalid_update" }, 400);
       } catch (error) {
         console.warn(JSON.stringify({ event: "official_ranking_checkpoint_failed", region, error: error instanceof Error ? error.name : "Error" }));

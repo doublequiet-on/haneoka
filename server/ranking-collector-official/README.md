@@ -21,6 +21,19 @@
 
 `credentials` 使用本地模式的完整凭据文档；`masterConfig` 使用下文的同服 Master 配置。两者的真实值仅通过 secret 管理入口提供，不写入 `vars`、镜像或仓库。繁中 `credentials.region` 使用 `hk`，网站及调度仍使用 `tw`。缺少配置的区服不发出游戏请求。
 
+同一个区服 secret 也接受 `account-pool.mjs export-pool` 输出的
+`haneoka:official-ranking-account-pool/1`。区域 Durable Object 从 `accounts` 中选择
+已启用且为 ready 的身份，优先使用 `selectedAccountId`；其余符合条件的身份按最近使用
+时间选择。全部账号暂停的有效配置仍可发布，此时停止采集。每轮只把所选账号的配置交给
+现有 Python Container，整轮独占租约和请求检查点保存在 Durable Object。
+
+账号健康按区服和真实玩家身份保存，认证暂停按认证字段的摘要记录；改变池内 ID、别名、
+选中账号或同服 API 别名不会清除相同认证的暂停。HTTP 401、gRPC 16、gRPC 2 的
+`authentication failed` 暂停当前认证代，下一采样周期可选择其他已有 ready 身份；
+当前失败请求不会换号重放。HTTP 403、gRPC 7 持久暂停全区，需原身份的真实认证更新；
+HTTP 429、gRPC 8 的冷却覆盖全区账号。旧单账号暂停向池状态迁移时保留暂停，无法关联
+的旧拒绝保持全区暂停。公开 status 只给账号数量、ready／暂停／冷却／租用数量。
+
 将实际榜单 RPC 和 Master 解码均已验证的完整配置存为同名 GitHub Actions secret，再手动运行 `official-ranking-config.yml` 并选择区服。工作流使用锁定的 Wrangler 版本，先确认生产 Worker 存在，通过权限为 0600 的临时文件更新 Worker secret，随后触发既有 Worker-only 发布；配置内容不进入命令参数、日志或构建附件。区服采集开关仍以 `wrangler.jsonc` 为准，只有成功观测验收后才开启网站读取。
 
 单次任务最多约两分钟，每榜请求前先持久确认 `attempt` 检查点，响应后提交独立观测；Worker 确认落库后才请求下一榜。HTTP 401/403、gRPC 7/16，以及 gRPC 2 且解码后的消息精确为 `authentication failed` 时，持久暂停当前凭据代际；HTTP 429、gRPC 8 保存冷却期限。回调网络失败使用同一载荷最多重试三次，仍未确认则中止本轮，不重发游戏请求。容器在已确认请求检查点、尚未确认观测时中断，会保留 `auth_uncertain` 暂停状态，更新真实凭据代际后恢复；重启不能清除暂停。
@@ -66,14 +79,15 @@ origin、状态、计数和查询回执，公开榜单正文写入指定文件�
 
 每区显式选择一个账号；每次查询持有 60 秒独占租约，使用原表的区域预算和凭据代际
 更新条件。租约取得后先持久保存未确认状态，进程中断保留 `auth_uncertain`。
-认证或设备拒绝持久暂停该区查询，切换账号、启用账号、修改别名或 Master
+认证、权限或设备拒绝持久暂停该区查询，切换账号、启用账号、修改别名或 Master
 配置不能解除暂停；同账号真实认证字段更新后恢复。查询不会在失败后换号重放。
 过期租约仍由凭据代际与随机租约令牌校验结果归属。输出配置和结果不覆盖已有文件。
 
 `export` 导出已验证账号的旧版单账号配置；`export-pool` 导出
 `haneoka:official-ranking-account-pool/1`，包含 `region`、`selectedAccountId` 和
 `accounts`。每个 entry 包含 `id`、`label`、`source`、`enabled`、`state`、
-`lastSuccessAtMs` 与完整 `clientVersion`、`credentials`、`masterConfig`。
+`lastSuccessAtMs`、可选 `pauseReason` 与完整 `clientVersion`、`credentials`、`masterConfig`。
+全部账号暂停时仍可导出；已知权限／认证暂停随配置保留，缺少旧暂停原因时保守暂停全区。
 导出总大小限制为 5120 bytes，文件权限为 0600，用现有 GitHub secret → Cloudflare
 secret 流程传递。云采集使用现有 Durable Object 与 Container；交接后停止本地对同一
 身份发起查询，账号密码、SDK token 和游戏凭据不进入浏览器、日志或仓库。

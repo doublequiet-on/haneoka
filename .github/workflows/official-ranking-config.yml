@@ -34,19 +34,13 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from "node:fs";
           import path from "node:path";
+          import { parseOfficialCollectorConfiguration } from "./src/lib/official-ranking.ts";
           const region = process.env.RANKING_REGION;
           const raw = process.env.RANKING_CONFIG;
           if (!["jp", "tw", "en", "kr"].includes(region) || !raw || Buffer.byteLength(raw, "utf8") > 5120)
             throw new Error("Selected official ranking configuration is missing");
-          let config;
-          try { config = JSON.parse(raw); }
+          try { await parseOfficialCollectorConfiguration(raw, region); }
           catch { throw new Error("Selected official ranking configuration is invalid"); }
-          if (config?.credentials?.region !== (region === "tw" ? "hk" : region) ||
-              typeof config.clientVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(config.clientVersion) ||
-              !config.masterConfig || typeof config.masterConfig !== "object" ||
-              Array.isArray(config.masterConfig) ||
-              !Object.keys(config.masterConfig).length)
-            throw new Error("Selected official ranking configuration does not match the region");
           const version = fs.readFileSync("pnpm-workspace.yaml", "utf8").match(/^\s+wrangler:\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
           if (!version) throw new Error("The locked Wrangler version is missing");
           fs.appendFileSync(process.env.GITHUB_ENV, `HANEOKA_WRANGLER_VERSION=${version}\n`);
