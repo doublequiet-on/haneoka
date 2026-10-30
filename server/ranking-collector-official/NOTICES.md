@@ -12,4 +12,5 @@ Haneoka 工具源码沿用随包 LICENSE（MPL-2.0）。游戏协议和第三方
 
 构建器只收录固定源码清单和校验过的七个依赖包，不收录客户端用户名、CDN 密码、解码参数、游戏账号凭据、数据库、运行日志、玩家正文或虚拟环境。MANIFEST.json 记录全部组成文件摘要。实服验收与候选包构建分别记录；此工具不加入网站部署。
 
-- core/intl-descriptors.pb 来自既有国际服 Sirius 1.0.3 协议子集及国际服 1.1.0 总榜验证，SHA256 为 23971ce32a7d1bbb94d7f044ffc2cb8b5fb47a2b0d95fa0f4d6df219d3b18d4d；不属于 Haneoka MPL 授权。沿用已验证 players 字段，my_rank / my_score 不用于输出。
+- core/intl-descriptors.pb 来自既有国际服 Sirius 1.0.3 协议子集，补入只读 ArenaRanking 请求、响应和 ArenaRankingEntry，SHA256 为 2c0fd5de69765a544861a6e63da43f28e679da53c50f52e612b72fee2182147a；不属于 Haneoka MPL 授权。原总榜 players 已经国际服 1.1.0 验证；my_rank / my_score 不用于输出。
+- ArenaRanking 字段与日服 1.1.0/10065、国际服 1.1.0/v86 原始程序集的请求／响应访问器一致，并经四服 season1/band1 第1–100位置实测。繁中另验证101–200位置；各响应均100行，返回 max_rank。段位阈值来自同服已校验 MasterArenaRank._lp；人口按实际位置计数，rank 仅保留原始显示值。

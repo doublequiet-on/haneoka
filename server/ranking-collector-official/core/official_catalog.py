@@ -1,4 +1,4 @@
-"""L3: server/L2.md; official Master acquisition and regional event projection."""
+"""L3: server/L2.md; verified official Master acquisition and regional event/Arena projections."""
 from datetime import datetime, timezone, timedelta
 import gzip
 import base64
@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from regions import region_config, select_api_origin
 
 TABLES = ('MasterEvent', 'MasterChallengeMusic', 'MasterParameter')
+ARENA_TABLES = ('MasterArenaSeason', 'MasterArenaLeague', 'MasterArenaRank')
 
 class CatalogRequestError(RuntimeError):
     def __init__(self, stage, receipt):
@@ -40,7 +41,33 @@ def date(value):
     return int(datetime.strptime(value, '%Y/%m/%d %H:%M:%S').replace(
         tzinfo=timezone(timedelta(hours=9))).timestamp()*1000)
 
-def project(tables, version, now_ms, region='jp',resource_version=None,api_origin=None):
+def project_arena(tables, now_ms):
+    from lifecycle import identifier
+    seasons = []
+    for row in tables['MasterArenaSeason']['_allData']:
+        start, end, ranking_end = date(row['_startAt']), date(row['_endAt']), date(row['_rankingCountEndAt'])
+        if not start < end <= ranking_end:
+            raise ValueError('invalid Arena season window')
+        if start <= now_ms < ranking_end:
+            seasons.append((start, end, ranking_end, row))
+    if not seasons:
+        return None
+    if len(seasons) != 1:
+        raise ValueError('ambiguous Arena season')
+    start, end, ranking_end, season = seasons[0]
+    bands = sorted({identifier(row['_bandId']) for row in tables['MasterArenaLeague']['_allData']
+        if not row['_startAt'] or date(row['_startAt']) <= now_ms}, key=int)
+    if not bands:
+        return None
+    thresholds = {band: sorted({int(row['_lp']) for row in tables['MasterArenaRank']['_allData']
+        if identifier(row['_bandId']) == band and (not row['_startAt'] or date(row['_startAt']) <= now_ms)}) for band in bands}
+    if any(any(value < 0 for value in values) or len(values) > 32 for values in thresholds.values()):
+        raise ValueError('invalid Arena thresholds')
+    return dict(seasonId=identifier(season['_id']), startAtMs=start, endAtMs=end,
+                rankingEndAtMs=ranking_end, bandIds=bands, thresholdsByBand=thresholds)
+
+
+def project(tables, version, now_ms, region='jp',resource_version=None,api_origin=None,include_arena=False):
     from lifecycle import identifier
     events=tables['MasterEvent']['_allData']; songs=tables['MasterChallengeMusic']['_allData']
     params=[r for r in tables['MasterParameter']['_allData'] if r['_id']=='event_ranking_aggregation_time']
@@ -62,6 +89,8 @@ def project(tables, version, now_ms, region='jp',resource_version=None,api_origi
     result=dict(region=region,catalogSource='official-master',masterVersion=version,resourceVersion=resource_version,
                 apiOrigin=select_api_origin(region,api_origin),
                 catalogObservedAtMs=now_ms,fetchedAtMs=None,stale=False,event=None)
+    if include_arena:
+        result['arena'] = project_arena(tables, now_ms)
     if not selected:return result
     start,end,e=selected[0];eid=identifier(e['_id']);challenges=[];seen=set()
     for key in ('_isMusicRankingDisabled','_isTotalMusicRankingDisabled'):
@@ -87,7 +116,7 @@ def project(tables, version, now_ms, region='jp',resource_version=None,api_origi
     return result
 
 class OfficialCatalog:
-    def __init__(self, config_file, output, proxy, client_version, stop_file=None, deadline=None, region='jp',api_origin=None):
+    def __init__(self, config_file, output, proxy, client_version, stop_file=None, deadline=None, region='jp',api_origin=None,include_arena=False):
         from lifecycle import normalize_proxy
         self.config_file=Path(config_file);self.output=Path(output)/'master';self.proxy=normalize_proxy(proxy)
         self.client_version=client_version
@@ -95,6 +124,8 @@ class OfficialCatalog:
         self.region_config=region_config(region)
         self.api_origin=select_api_origin(region,api_origin)
         self.stop_file=stop_file;self.deadline=deadline
+        self.include_arena = include_arena
+        self.last_request = None
 
     def __call__(self):
         if not self.config_file.is_file():raise ValueError('official Master configuration is missing')
@@ -135,7 +166,17 @@ class OfficialCatalog:
             sampler.check_control()
             request=Request(master_root+'/'+version+'/'+name,headers=headers)
             try:
-                with opener.open(request,timeout=20) as response: raw=response.read(limit+1)
+                timeout = min(20, max(.1, self.deadline - time.time())) if self.deadline else 20
+                with opener.open(request,timeout=timeout) as response:
+                    chunks, size = [], 0
+                    while size <= limit:
+                        sampler.check_control()
+                        chunk = response.read1(min(65536, limit + 1 - size))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        size += len(chunk)
+                    raw = b''.join(chunks)
             except HTTPError as error:
                 receipt={'status':error.code,'headers':{'retry-after':error.headers.get('Retry-After','')}}
                 error.close()
@@ -150,7 +191,7 @@ class OfficialCatalog:
         if manifest.get('version')!=version:raise ValueError('Master manifest version mismatch')
         tables={};digests={}
         cipher=RijndaelCbc(bytes.fromhex(crypto['key']),bytes.fromhex(crypto['iv']),Pkcs7Padding(32),block_size=32)
-        for table in TABLES:
+        for table in TABLES + (ARENA_TABLES if self.include_arena else ()):
             sampler.check_control()
             rows=[r for r in manifest['files'] if r['name']==table+'.bin']
             if len(rows)!=1:raise ValueError('Master table missing or duplicated')
@@ -170,7 +211,8 @@ class OfficialCatalog:
             if not isinstance(tables[table].get('_allData'),list):raise ValueError('invalid Master table')
             if not cached:atomic_write(path,raw)
             digests[table]=digest
-        result=project(tables,version,int(time.time()*1000),self.region,sampler.resource_version,self.api_origin);result['tableHashes']=digests
+        result=project(tables,version,int(time.time()*1000),self.region,sampler.resource_version,self.api_origin,self.include_arena);result['tableHashes']=digests
+        self.last_request = sampler.last_request
         atomic_write(directory/'catalog.json',json.dumps(result).encode('utf-8'))
         return result
 

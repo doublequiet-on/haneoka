@@ -8,7 +8,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent
 FILES = ('collector.py', 'account-pool.mjs', 'setup.py', 'requirements.txt', 'build-requirements.txt',
          'README.md', 'INTERFACES.md', 'NOTICES.md', 'LICENSE', 'LICENSE.py3rijndael.txt',
-         'build.py', 'core/history.py', 'core/lifecycle.py', 'core/sample.py',
+         'build.py', 'core/history.py', 'core/lifecycle.py', 'core/sample.py', 'core/arena.py',
          'core/continuous.py', 'core/status.py', 'core/api.py', 'core/transport.py',
          'core/regions.py', 'core/intl-descriptors.pb', 'core/official_catalog.py', 'core/http2.py', 'core/process_lock.py', 'core/total-descriptors.pb', 'core/pool_query.py')
 DISTRIBUTIONS = {

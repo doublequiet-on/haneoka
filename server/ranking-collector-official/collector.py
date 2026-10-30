@@ -46,13 +46,13 @@ def doctor():
     from transport import pool_from_file
     pool = pool_from_file(descriptor)
     for name in ('app.masterdata.VersionResponse', 'app.event.GetChallengeMusicRankingResponse',
-                 'app.event.GetChallengeMusicTotalRankingResponse'):
+                 'app.event.GetChallengeMusicTotalRankingResponse', 'app.arena.ArenaRankingResponse'):
         pool.FindMessageTypeByName(name)
     intl=ROOT/'core'/'intl-descriptors.pb'
-    if hashlib.sha256(intl.read_bytes()).hexdigest()!='23971ce32a7d1bbb94d7f044ffc2cb8b5fb47a2b0d95fa0f4d6df219d3b18d4d':
+    if hashlib.sha256(intl.read_bytes()).hexdigest()!='2c0fd5de69765a544861a6e63da43f28e679da53c50f52e612b72fee2182147a':
         raise ValueError('Bundled international descriptor checksum mismatch')
     intl_pool=pool_from_file(intl)
-    for name in ('app.playerlogin.GetServerListResponse','app.event.GetChallengeMusicRankingResponse','app.event.GetChallengeMusicTotalRankingResponse'):
+    for name in ('app.playerlogin.GetServerListResponse','app.event.GetChallengeMusicRankingResponse','app.event.GetChallengeMusicTotalRankingResponse','app.arena.ArenaRankingResponse'):
         intl_pool.FindMessageTypeByName(name)
     manifest = ROOT / 'MANIFEST.json'
     if manifest.exists():

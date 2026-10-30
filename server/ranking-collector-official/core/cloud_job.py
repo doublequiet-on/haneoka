@@ -21,6 +21,7 @@ from lifecycle import authentication_failed, read_credentials, targets, retry_de
 from official_catalog import OfficialCatalog, CatalogRequestError, NoRedirect
 from regions import region_config
 from transport import Sampler, VersionError
+from arena import ArenaCollector, ArenaStopped
 
 
 class CallbackError(RuntimeError):
@@ -135,6 +136,9 @@ def validate_job(job):
         raise ValueError('invalid job deadline')
     if not isinstance(job.get('credentials'), dict) or not isinstance(job.get('masterConfig'), dict):
         raise ValueError('private configuration missing')
+    capabilities = job.get('capabilities', [])
+    if not isinstance(capabilities, list) or len(capabilities) > 16 or any(not isinstance(value, str) for value in capabilities):
+        raise ValueError('invalid capabilities')
 
 
 def run_job(job, origin):
@@ -146,6 +150,8 @@ def run_job(job, origin):
     retry_after = None
     failure = None
     stage = 'catalog'
+    arena_collector = None
+    include_arena = 'arena-ranking-v1' in job.get('capabilities', [])
     with tempfile.TemporaryDirectory(prefix='official-ranking-') as temporary:
         root = Path(temporary)
         os.chmod(root, 0o700)
@@ -154,30 +160,40 @@ def run_job(job, origin):
         private_json(credentials, job['credentials'])
         private_json(master_config, job['masterConfig'])
         identity, _, auth = read_credentials(credentials, region)
-        deadline = job['deadlineMs'] / 1000 - 2
+        deadline = job['deadlineMs'] / 1000 - (12 if include_arena else 2)
         try:
-            catalog = OfficialCatalog(master_config, root, '', job['clientVersion'], deadline=deadline,
-                                      region=region, api_origin=auth['origin'])()
+            provider = OfficialCatalog(master_config, root, '', job['clientVersion'], deadline=deadline,
+                                      region=region, api_origin=auth['origin'], include_arena=include_arena)
+            catalog = provider()
             stage = 'catalog_callback'
             updates.send('catalog', catalog=catalog)
             boards = targets(catalog, int(time.time() * 1000))
-            if boards:
+            arena_active = include_arena and catalog.get('arena') is not None
+            if boards or arena_active:
                 sampler = Sampler(SimpleNamespace(region=region, descriptors=Path(__file__).parent/configured.descriptor,
                     output=root/'receipts', client_version=job['clientVersion'], proxy='', connect_ip=None,
                     credentials=credentials, credential_identity=identity, stop_file=None, deadline=deadline,
                     api_origin=auth['origin']))
+                if include_arena:
+                    sampler.last_request = provider.last_request
                 stage = 'version'
                 sampler.version()
                 if (catalog['masterVersion'] != sampler.master_version
                         or catalog.get('resourceVersion') != sampler.resource_version
                         or catalog['apiOrigin'] != sampler.origin):
                     raise RuntimeError('catalog version changed')
+                if arena_active:
+                    arena_collector = ArenaCollector(job, catalog, sampler, updates, deadline,
+                        failure_status, failure_info, retry_delay)
+                    stage = 'arena_board'
+                    arena_collector.top()
                 for kind, challenge in boards:
                     if (kind, challenge) not in targets(catalog, int(time.time() * 1000)):
                         continue
                     if time.time() >= deadline:
-                        final_status = 'failed'
-                        failure = failure_info('board',TimeoutError())
+                        if not include_arena:
+                            final_status = 'failed'
+                            failure = failure_info('board',TimeoutError())
                         break
                     snapshot = uuid.uuid4().hex
                     stage = 'attempt_callback'
@@ -229,15 +245,22 @@ def run_job(job, origin):
                     updates.send('observation', observation=observation)
                     if final_status in ('auth_paused', 'rate_limited'):
                         break
+                if arena_collector and final_status not in ('auth_paused', 'rate_limited'):
+                    stage = 'arena_population_callback'
+                    arena_collector.population()
+        except ArenaStopped as error:
+            final_status, failure, retry_after = error.status, error.failure, error.retry_after
         except CallbackError as error:
-            error.failure=failure_info(stage,error,error.receipt)
+            error.failure=failure_info(arena_collector.stage if arena_collector and stage.startswith('arena_') else stage,error,error.receipt)
             report_failure(region,error.failure)
             raise
         except (CatalogRequestError, VersionError) as error:
             final_status = failure_status(error.receipt, authenticated=False)
             catalog_stages={'version':'catalog_version','server-list':'catalog_server_list',
                 'MasterManifest.json':'catalog_manifest','MasterEvent.bin':'catalog_event',
-                'MasterChallengeMusic.bin':'catalog_challenges','MasterParameter.bin':'catalog_parameters'}
+                'MasterChallengeMusic.bin':'catalog_challenges','MasterParameter.bin':'catalog_parameters',
+                'MasterArenaSeason.bin':'catalog_arena_season','MasterArenaLeague.bin':'catalog_arena_league',
+                'MasterArenaRank.bin':'catalog_arena_rank'}
             failure = failure_info(catalog_stages.get(getattr(error,'stage',None),stage),error,error.receipt)
             if final_status == 'rate_limited':
                 retry_after = retry_delay(error.receipt, 300)

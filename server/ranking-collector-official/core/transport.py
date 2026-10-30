@@ -15,7 +15,8 @@ from regions import select_api_origin
 VERSION = '/app.masterdata.MasterdataService/Version'
 SERVERS = '/app.playerlogin.PlayerLoginService/GetServerList'
 ANONYMOUS = {VERSION, SERVERS}
-ALLOWED = {VERSION, SERVERS, '/app.event.EventService/GetChallengeMusicRanking', '/app.event.EventService/GetChallengeMusicTotalRanking'}
+ALLOWED = {VERSION, SERVERS, '/app.event.EventService/GetChallengeMusicRanking', '/app.event.EventService/GetChallengeMusicTotalRanking',
+           '/app.arena.ArenaService/ArenaRanking'}
 
 
 class VersionError(RuntimeError):
