@@ -75,7 +75,9 @@ class Updates:
     def send(self, kind, **fields):
         raw = json.dumps(dict(self.base, type=kind, **fields), ensure_ascii=False).encode()
         request = Request(self.url, data=raw, method='POST', headers={
-            'Content-Type': 'application/json', 'Authorization': 'Bearer ' + self.token})
+            'Content-Type': 'application/json', 'Accept': 'application/json',
+            'User-Agent': 'Haneoka-Official-Ranking-Collector/1.0 (+https://haneoka.org)',
+            'Authorization': 'Bearer ' + self.token})
         receipt = None
         for attempt in range(3):
             remaining = self.deadline - time.time()
