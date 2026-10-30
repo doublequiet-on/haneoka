@@ -279,7 +279,7 @@
     display: grid;
     grid-template-columns: 32px minmax(72px, 112px) minmax(0, 1fr) 64px 48px;
     align-items: center;
-    gap: 8px;
+    gap: 4px 8px;
     min-block-size: 36px;
   }
   .arena-population__name {
@@ -304,6 +304,29 @@
     block-size: 100%;
     border-radius: inherit;
     background: var(--md-sys-color-primary);
+  }
+  .arena-population__divisions {
+    display: grid;
+    grid-column: 2 / -1;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .arena-population__divisions > span {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    min-inline-size: 0;
+    padding: 2px 8px;
+    border-radius: var(--md-sys-shape-corner-small);
+    background: var(--md-sys-color-surface-container);
+    font: var(--md-sys-typescale-label-small-weight) var(--md-sys-typescale-label-small-size) /
+      var(--md-sys-typescale-label-small-line-height) var(--app-font);
+  }
+  .arena-population__divisions > span > span {
+    overflow: hidden;
+    color: var(--md-sys-color-on-surface-variant);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .arena-population strong {
     text-align: end;
@@ -351,7 +374,7 @@
 
   /* Leaderboard */
   .arena-ranking__row {
-    grid-template-columns: 44px 40px minmax(100px, 1fr) minmax(96px, auto) minmax(64px, auto) minmax(220px, 280px);
+    grid-template-columns: 44px 40px minmax(100px, 1fr) minmax(96px, auto) minmax(64px, auto) minmax(300px, 380px);
   }
   .arena-ranking__list--compact .arena-ranking__row {
     grid-template-columns: 32px 36px minmax(0, 1fr) minmax(88px, auto) 56px;
@@ -468,9 +491,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .arena-ranking__row .song-ranking__deck-preview {
-    max-inline-size: 360px;
-  }
   @container arena (max-width: 1099px) {
     .arena-leagues {
       grid-auto-flow: column;
@@ -483,7 +503,8 @@
       grid-template-columns: 44px 36px minmax(0, 1fr) minmax(88px, auto) minmax(56px, auto);
     }
     .arena-ranking__row .song-ranking__deck-preview {
-      grid-column: 1 / -1;
+      grid-column: 2 / -1;
+      max-inline-size: 640px;
     }
   }
   @container arena (max-width: 839px) {
@@ -507,10 +528,37 @@
     .arena-condition__rule {
       grid-template-columns: minmax(0, 1fr);
     }
-    .arena-ranking__row,
-    .arena-ranking__list--compact .arena-ranking__row {
+    .arena-ranking__row {
       grid-template-columns: 36px 32px minmax(0, 1fr) minmax(56px, auto);
       row-gap: 4px;
+    }
+    .arena-ranking__list--compact .arena-ranking__row {
+      grid-template-columns: 24px 28px minmax(0, 1fr) auto auto;
+      gap: 6px;
+    }
+    .arena-ranking__list--compact .arena-ranking__row .song-ranking__player-copy {
+      grid-column: 3;
+      grid-row: 1;
+    }
+    .arena-ranking__list--compact .arena-ranking__row .arena-ranking__tier {
+      grid-column: 4;
+      grid-row: 1;
+    }
+    .arena-ranking__list--compact .arena-ranking__row .song-ranking__score {
+      grid-column: 5;
+      grid-row: 1;
+    }
+    .arena-ranking__list--compact .song-ranking__player-stats {
+      display: none;
+    }
+    .arena-ranking__list--compact .song-ranking__player-copy {
+      align-content: center;
+    }
+    .arena-ranking__list--compact .song-ranking__player-copy strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .arena-ranking__row .arena-ranking__tier {
       grid-column: 3;
@@ -526,6 +574,7 @@
     }
     .arena-ranking__row .song-ranking__deck-preview {
       grid-row: 3;
+      grid-column: 1 / -1;
     }
     .arena-usage__list {
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -541,6 +590,14 @@
     }
     .arena-population__share {
       display: none;
+    }
+    .arena-population__divisions {
+      grid-column: 1 / -1;
+    }
+    .arena-population__divisions > span {
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
     }
   }
 }

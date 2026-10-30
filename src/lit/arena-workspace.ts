@@ -444,12 +444,12 @@ export class ArenaWorkspace extends LitElement {
   }
 
   /* ---------- live data ---------- */
+  /** Every open division's lowest points, ascending; the population is counted per division. */
   private thresholds(league: ArenaLeague) {
-    const tiers = new Map<number, number>();
+    const points = new Map<number, ArenaRank>();
     for (const rank of league.ranks)
-      if (!rank.startAt || rank.startAt <= this.now)
-        tiers.set(rank.rank, Math.min(tiers.get(rank.rank) ?? Infinity, rank.points));
-    return [...tiers].sort((a, b) => a[1] - b[1]);
+      if ((!rank.startAt || rank.startAt <= this.now) && !points.has(rank.points)) points.set(rank.points, rank);
+    return [...points].sort((a, b) => a[0] - b[0]);
   }
   private loadPopulation() {
     const season = this.season();
@@ -461,24 +461,28 @@ export class ArenaWorkspace extends LitElement {
     )
       return;
     const league = this.league(season);
-    const thresholds = this.thresholds(league).map(([, points]) => points);
+    const thresholds = this.thresholds(league).map(([points]) => points);
     const key = `${this.region}/${season.seasonId}/${league.bandId}/${thresholds.join(",")}`;
     if (key === this.populationKey) return;
     this.populationKey = key;
     this.populationRequest?.abort();
     const request = (this.populationRequest = new AbortController());
     this.population = "loading";
-    fetchJson<ArenaPopulationDto>(
-      `/api/v1/game/records/${this.region}/arena/seasons/${season.seasonId}/leagues/${league.bandId}/population?thresholds=${thresholds.join(",")}`,
-      { signal: request.signal },
-    ).then(
-      (value) => {
-        if (!request.signal.aborted) this.population = value;
-      },
-      () => {
-        if (!request.signal.aborted) this.population = "error";
-      },
-    );
+    const url = `/api/v1/game/records/${this.region}/arena/seasons/${season.seasonId}/leagues/${league.bandId}/population?thresholds=${thresholds.join(",")}`;
+    /** A cold count finishes on the server; 202 asks to read it back shortly. */
+    const attempt = async (tries: number): Promise<void> => {
+      const response = await fetch(url, { signal: request.signal, headers: { accept: "application/json" } });
+      if (response.status === 202 && tries > 1) {
+        await new Promise((resolve) => setTimeout(resolve, (Number(response.headers.get("Retry-After")) || 10) * 1000));
+        return attempt(tries - 1);
+      }
+      if (!response.ok) throw new Error(String(response.status));
+      const value = (await response.json()) as ArenaPopulationDto;
+      if (!request.signal.aborted) this.population = value;
+    };
+    attempt(12).catch(() => {
+      if (!request.signal.aborted) this.population = "error";
+    });
   }
 
   /* ---------- hero ---------- */
@@ -718,12 +722,22 @@ export class ArenaWorkspace extends LitElement {
       </section>
     `;
   }
+  /** Each rank's players with its divisions' counts beneath, highest rank first. */
   private renderPopulation(league: ArenaLeague) {
     const population = this.population;
-    const thresholds = this.thresholds(league);
     const data = typeof population === "object" && population ? population : null;
     const total = data?.maxRank ?? data?.tiers.reduce((sum, tier) => sum + tier.count, 0) ?? null;
-    const largest = Math.max(1, ...(data?.tiers.map((tier) => tier.count) ?? [1]));
+    const count = (points: number) => data?.tiers.find((tier) => tier.threshold === points)?.count;
+    const tiers = new Map<number, ArenaRank[]>();
+    for (const [, rank] of this.thresholds(league)) tiers.set(rank.rank, [...(tiers.get(rank.rank) ?? []), rank]);
+    const groups = [...tiers].reverse().map(([tier, divisions]) => {
+      const counts = divisions.map((division) => count(division.points));
+      const sum = counts.every((value) => value != null) ? counts.reduce<number>((a, b) => a + b!, 0) : null;
+      return { tier, divisions: [...divisions].reverse(), counts: [...counts].reverse(), sum };
+    });
+    const largest = Math.max(1, ...groups.map((group) => group.sum ?? 0));
+    const percent = (value: number) =>
+      new Intl.NumberFormat(this.locale, { style: "percent", maximumFractionDigits: 1 }).format(value / (total || 1));
     return html`
       <section class="surface stack">
         ${heading(this.t("population"), "characters", total != null ? { count: total.toLocaleString(this.locale) } : {})}
@@ -734,28 +748,46 @@ export class ArenaWorkspace extends LitElement {
               `
             : html`
                 <ol class="arena-population" aria-busy=${String(population === "loading")}>
-                  ${[...thresholds].reverse().map(([rank, points]) => {
-                    const count = data?.tiers.find((tier) => tier.threshold === points)?.count;
-                    const sample = league.ranks.find((entry) => entry.rank === rank)!;
-                    return html`
+                  ${groups.map(
+                    (group) => html`
                       <li>
-                        ${this.rankIcon(rank, 32)}
+                        ${this.rankIcon(group.tier, 32)}
                         <span class="arena-population__name">
-                          ${this.tierName(sample)}
-                          <small>${points.toLocaleString(this.locale)}+</small>
+                          ${this.tierName(group.divisions[0]!)}
+                          <small>${group.divisions.at(-1)!.points.toLocaleString(this.locale)}+</small>
                         </span>
                         <span class="arena-population__bar">
                           <span
-                            style=${`inline-size:${count == null ? 0 : Math.max(1, (count / largest) * 100)}%`}
+                            style=${`inline-size:${group.sum == null ? 0 : Math.max(1, (group.sum / largest) * 100)}%`}
                           ></span>
                         </span>
-                        <strong>${count == null ? "—" : count.toLocaleString(this.locale)}</strong>
+                        <strong>${group.sum == null ? "—" : group.sum.toLocaleString(this.locale)}</strong>
                         <small class="arena-population__share">
-                          ${count == null || !total ? "" : new Intl.NumberFormat(this.locale, { style: "percent", maximumFractionDigits: 1 }).format(count / total)}
+                          ${group.sum == null || !total ? "" : percent(group.sum)}
                         </small>
+                        ${
+                          group.divisions.length > 1
+                            ? html`
+                                <span class="arena-population__divisions">
+                                  ${group.divisions.map(
+                                    (division, index) => html`
+                                      <span
+                                        title=${`${this.name(division.name)} · ${division.points.toLocaleString(this.locale)}+`}
+                                      >
+                                        <span>${this.name(division.name)}</span>
+                                        <strong>
+                                          ${group.counts[index] == null ? "—" : group.counts[index]!.toLocaleString(this.locale)}
+                                        </strong>
+                                      </span>
+                                    `,
+                                  )}
+                                </span>
+                              `
+                            : nothing
+                        }
                       </li>
-                    `;
-                  })}
+                    `,
+                  )}
                 </ol>
               `
         }

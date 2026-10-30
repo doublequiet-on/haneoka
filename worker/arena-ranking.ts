@@ -187,23 +187,25 @@ async function arenaWindow(
 }
 
 /**
- * Players with at least `threshold` points: the last rank whose points reach it. Points fall with
- * rank, so the window is found by interpolating between bracketing windows, with bisection as the
- * fallback when the estimate does not shrink the bracket.
+ * Players with at least `threshold` points, and the window holding the last of them. Points fall
+ * with rank, so the window is found by interpolating between bracketing windows, with bisection as
+ * the fallback when the estimate does not shrink the bracket. `first` must start at or above the
+ * threshold and `last` bounds the search from above.
  */
 export async function countAtLeast(
   load: (start: number) => Promise<Window>,
   maxRank: number,
   threshold: number,
-): Promise<number> {
-  const last = Math.max(0, Math.ceil(maxRank / WINDOW) - 1);
+  first = 0,
+  last = Math.max(0, Math.ceil(maxRank / WINDOW) - 1),
+): Promise<{ count: number; window: number }> {
   const head = async (index: number) => (await load(index * WINDOW + 1)).rows[0]?.point ?? -1;
-  if ((await head(0)) < threshold) return 0;
-  let low = 0,
+  let low = first,
+    lowPoint = await head(first),
     high = last + 1,
-    lowPoint = await head(0),
     highPoint = -1;
-  if (last > 0) {
+  if (lowPoint < threshold) return { count: first * WINDOW, window: first };
+  if (last > first) {
     const lastPoint = await head(last);
     if (lastPoint >= threshold) {
       low = last;
@@ -233,7 +235,33 @@ export async function countAtLeast(
   }
   const window = await load(low * WINDOW + 1);
   const below = window.rows.find((row) => row.point < threshold);
-  return below ? below.rank - 1 : Math.min(maxRank, low * WINDOW + window.rows.length);
+  return { count: below ? below.rank - 1 : Math.min(maxRank, low * WINDOW + window.rows.length), window: low };
+}
+
+/**
+ * Counts for ascending thresholds: the middle one first, then each half searched only between the
+ * windows its neighbours already found.
+ */
+export async function countThresholds(
+  load: (start: number) => Promise<Window>,
+  maxRank: number,
+  thresholds: readonly number[],
+): Promise<number[]> {
+  const counts = new Array<number>(thresholds.length);
+  const last = Math.max(0, Math.ceil(maxRank / WINDOW) - 1);
+  const solve = async (from: number, to: number, first: number, upper: number): Promise<void> => {
+    if (from > to) return;
+    const middle = (from + to) >> 1;
+    const threshold = thresholds[middle]!;
+    let window = first;
+    if (threshold === 0) counts[middle] = maxRank;
+    else if (first === 0 && (await load(1)).rows[0]!.point < threshold) counts[middle] = 0;
+    else ({ count: counts[middle], window } = await countAtLeast(load, maxRank, threshold, first, upper));
+    await Promise.all([solve(from, middle - 1, window, upper), solve(middle + 1, to, first, window)]);
+  };
+  if ((await load(1)).rows.length) await solve(0, thresholds.length - 1, 0, last);
+  else counts.fill(0);
+  return counts;
 }
 
 /** At most `limit` upstream reads at a time. */
@@ -268,25 +296,37 @@ async function cached(
   ctx: ExecutionContext,
   ttl: number,
   produce: () => Promise<unknown>,
+  /** Seconds to wait before answering 202 while the computation finishes into the cache. */
+  patience = 0,
 ): Promise<Response> {
   const cache = (caches as unknown as { default: Cache }).default;
   const key = new Request(new URL(request.url).toString(), { method: "GET" });
   const hit = await cache.match(key).catch(() => undefined);
   if (hit) return request.method === "HEAD" ? new Response(null, hit) : hit;
-  try {
-    const response = json(request, await produce(), 200, ttl);
-    if (request.method === "GET") ctx.waitUntil(cache.put(key, response.clone()).catch(() => undefined));
-    return response;
-  } catch (error) {
-    const failure = error instanceof ArenaFailure ? error : new ArenaFailure(502, "upstream");
-    return json(
-      request,
-      { error: { kind: failure.kind, retryAfter: failure.retryAfter } },
-      failure.status,
-      0,
-      failure.retryAfter,
-    );
-  }
+  const pending = produce().then(
+    (body) => {
+      const response = json(request, body, 200, ttl);
+      if (request.method === "GET") ctx.waitUntil(cache.put(key, response.clone()).catch(() => undefined));
+      return response;
+    },
+    (error: unknown) => {
+      const failure = error instanceof ArenaFailure ? error : new ArenaFailure(502, "upstream");
+      return json(
+        request,
+        { error: { kind: failure.kind, retryAfter: failure.retryAfter } },
+        failure.status,
+        0,
+        failure.retryAfter,
+      );
+    },
+  );
+  if (!patience) return pending;
+  ctx.waitUntil(pending);
+  const waited = await Promise.race([
+    pending,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), patience * 1000)),
+  ]);
+  return waited ?? json(request, { error: { kind: "pending", retryAfter: 10 } }, 202, 0, 10);
 }
 
 /**
@@ -342,35 +382,39 @@ export async function handleArenaRankingApi(
   const raw = url.searchParams.get("thresholds") ?? "";
   const thresholds = raw.split(",").map(Number);
   if (
-    !/^(0|[1-9][0-9]{0,8})(,(0|[1-9][0-9]{0,8})){0,11}$/u.test(raw) ||
+    !/^(0|[1-9][0-9]{0,8})(,(0|[1-9][0-9]{0,8})){0,31}$/u.test(raw) ||
     thresholds.some((value, index) => index > 0 && value <= thresholds[index - 1]!) ||
     [...url.searchParams.keys()].some((key) => key !== "thresholds")
   )
     return json(request, { error: { kind: "invalid_request" } }, 400);
-  return cached(request, ctx, POPULATION_TTL, async () => {
-    const windows = new Map<number, Promise<Window>>();
-    const slot = limiter(3);
-    const load = (start: number) => {
-      let pending = windows.get(start);
-      if (!pending) windows.set(start, (pending = slot(() => arenaWindow(env, region, seasonId, bandId, start))));
-      return pending;
-    };
-    const top = await load(1);
-    const maxRank = top.maxRank ?? top.rows.length;
-    const atLeast = await Promise.all(
-      thresholds.map((threshold) => (threshold === 0 ? maxRank : countAtLeast(load, maxRank, threshold))),
-    );
-    return {
-      region,
-      seasonId,
-      bandId,
-      provider: top.provider,
-      observedAtMs: Date.now(),
-      maxRank: top.maxRank,
-      tiers: thresholds.map((threshold, index) => ({
-        threshold,
-        count: Math.max(0, atLeast[index]! - (atLeast[index + 1] ?? 0)),
-      })),
-    } satisfies ArenaPopulationDto;
-  });
+  return cached(
+    request,
+    ctx,
+    POPULATION_TTL,
+    async () => {
+      const windows = new Map<number, Promise<Window>>();
+      const slot = limiter(4);
+      const load = (start: number) => {
+        let pending = windows.get(start);
+        if (!pending) windows.set(start, (pending = slot(() => arenaWindow(env, region, seasonId, bandId, start))));
+        return pending;
+      };
+      const top = await load(1);
+      const maxRank = top.maxRank ?? top.rows.length;
+      const atLeast = await countThresholds(load, maxRank, thresholds);
+      return {
+        region,
+        seasonId,
+        bandId,
+        provider: top.provider,
+        observedAtMs: Date.now(),
+        maxRank: top.maxRank,
+        tiers: thresholds.map((threshold, index) => ({
+          threshold,
+          count: Math.max(0, atLeast[index]! - (atLeast[index + 1] ?? 0)),
+        })),
+      } satisfies ArenaPopulationDto;
+    },
+    20,
+  );
 }
