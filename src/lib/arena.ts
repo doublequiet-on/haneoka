@@ -3,7 +3,7 @@
 // Output: Arena data contract, explicit time windows and effective song rules.
 // Pos: [Map](L2-2.md); shared arena semantics for catalogue, calendar and API.
 // Effects/Dependencies: Pure calculations; Master civil timestamps use JST.
-export const ARENA_PROJECTION = 2;
+export const ARENA_PROJECTION = 3;
 export type ArenaText = string[];
 export type ArenaRow = Record<string, unknown>;
 export interface ArenaRule {
@@ -33,6 +33,18 @@ export interface ArenaRank {
   rank: number;
   division: number;
   points: number;
+  /** Points a player in this rank starts the next season with. */
+  resetPoints: number;
+  top: boolean;
+  /** When the rank opens; 0 when it is open from the season start. */
+  startAt: number;
+}
+/** Base points for finishing `place` of `players` in a match at `tier`. */
+export interface ArenaBasePoint {
+  tier: number;
+  players: number;
+  place: number;
+  points: number;
 }
 export interface ArenaLeague {
   id: number;
@@ -56,6 +68,8 @@ export interface ArenaSeason extends ArenaRow {
   leagues: ArenaLeague[];
   dailyRewards: ArenaReward[];
   seasonRewards: ArenaReward[];
+  /** Final ranking-position rewards; `from`/`to` are positions, `leagueId` 0 applies to every league. */
+  rankingRewards: ArenaReward[];
   events: ArenaRow[];
   exchanges: ArenaRow[];
 }
@@ -64,6 +78,9 @@ export interface ArenaCatalog {
   identity: { server: string; releaseId: string; sourceId: string };
   entries: Record<string, ArenaSeason>;
   images?: { ranks: Record<number, string>; missions: Record<number, string> };
+  basePoints?: ArenaBasePoint[];
+  /** `arena_*` rule values from MasterParameter, keyed without the prefix. */
+  parameters?: Record<string, number>;
 }
 
 export function arenaTimestamp(value: unknown): number {

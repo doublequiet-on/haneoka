@@ -5,8 +5,8 @@
 // Effects/Dependencies: Starts isolated containers, persists DO state and writes D1/R2; credentials stay server-side.
 import { Container } from "@cloudflare/containers";
 import type { GameRecordsRegion } from "../src/lib/game-records";
-import type { OfficialCatalog, OfficialCollectorFailure, OfficialCollectorJob, OfficialCollectorUpdate, OfficialObservation } from "../src/lib/official-ranking";
-import { officialDigest, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
+import type { OfficialArenaObservation, OfficialCatalog, OfficialCollectorFailure, OfficialCollectorJob, OfficialCollectorUpdate, OfficialObservation } from "../src/lib/official-ranking";
+import { officialDigest, saveOfficialArenaObservation, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
 
 export const OFFICIAL_RANKING_REGIONS = ["jp", "tw", "en", "kr"] as const;
 export type OfficialCollectorConfigurationBindings = Partial<Pick<Env,
@@ -80,11 +80,11 @@ function retryMs(value: unknown): number {
   const maximum = 8_640_000_000_000_000 - Date.now();
   return Math.max(INTERVAL_MS, Math.min(maximum, value * 1000));
 }
-function authRejected(observation: OfficialObservation): boolean {
+function authRejected(observation: Pick<OfficialObservation, "httpStatus" | "grpcStatus" | "error">): boolean {
   return observation.httpStatus === 401 || observation.httpStatus === 403 || observation.grpcStatus === "7" || observation.grpcStatus === "16"
     || observation.grpcStatus === "2" && observation.error === "authentication_failed";
 }
-function limited(observation: OfficialObservation): boolean { return observation.httpStatus === 429 || observation.grpcStatus === "8"; }
+function limited(observation: Pick<OfficialObservation, "httpStatus" | "grpcStatus">): boolean { return observation.httpStatus === 429 || observation.grpcStatus === "8"; }
 function validateFailure(value: unknown): asserts value is OfficialCollectorFailure {
   const failure = object(value);
   if (!["container", "catalog", "catalog_version", "catalog_server_list", "catalog_manifest", "catalog_event", "catalog_challenges", "catalog_parameters",
@@ -166,6 +166,14 @@ function validateCatalog(value: unknown, region: GameRecordsRegion): asserts val
     || catalog.catalogObservedAtMs > Date.now() + 60_000 || typeof catalog.masterVersion !== "string" || !catalog.masterVersion
     || !(catalog.resourceVersion === null || typeof catalog.resourceVersion === "string")
     || typeof catalog.apiOrigin !== "string" || !REGION_ORIGINS[region].includes(catalog.apiOrigin)) throw new Error("invalid_catalog");
+  if (catalog.arena != null) {
+    const arena = object(catalog.arena);
+    if (!decimal(arena.seasonId) || !millis(arena.startAtMs) || !millis(arena.endAtMs) || !millis(arena.rankingEndAtMs)
+      || arena.endAtMs <= arena.startAtMs || arena.rankingEndAtMs < arena.endAtMs || !Array.isArray(arena.bandIds)
+      || arena.bandIds.length > 20 || !arena.bandIds.every(decimal) || new Set(arena.bandIds).size !== arena.bandIds.length) {
+      throw new Error("invalid_catalog");
+    }
+  }
   if (catalog.event === null) return;
   const event = object(catalog.event);
   if (!decimal(event.id) || !millis(event.startAtMs) || !millis(event.endAtMs) || event.endAtMs <= event.startAtMs
@@ -198,6 +206,29 @@ function validateObservation(value: unknown, region: GameRecordsRegion): asserts
       if (!(typeof player.score === "string" && /^[0-9]+$/u.test(player.score) || typeof player.score === "number" && Number.isSafeInteger(player.score) && player.score >= 0)) {
         throw new Error("invalid_observation_score");
       }
+    }
+  }
+}
+
+function validateArenaObservation(value: unknown, region: GameRecordsRegion): asserts value is OfficialArenaObservation {
+  const observation = object(value);
+  const start = observation.startRank, end = observation.endRank;
+  if (observation.region !== region || typeof observation.snapshotId !== "string" || !/^[a-f0-9]{32}$/u.test(observation.snapshotId)
+    || !decimal(observation.seasonId) || !decimal(observation.bandId) || !millis(observation.observedAtMs)
+    || observation.observedAtMs > Date.now() + 60_000 || typeof start !== "number" || !Number.isSafeInteger(start) || start < 1
+    || typeof end !== "number" || !Number.isSafeInteger(end) || end < start || end - start >= 100
+    || !(observation.maxRank == null || typeof observation.maxRank === "number" && Number.isSafeInteger(observation.maxRank) && observation.maxRank >= 0)) {
+    throw new Error("invalid_observation");
+  }
+  if (observation.error !== undefined) {
+    if (typeof observation.error !== "string" || !/^[A-Za-z0-9_]{1,80}$/u.test(observation.error) || observation.players !== undefined) throw new Error("invalid_observation");
+    return;
+  }
+  if (!Array.isArray(observation.players) || observation.players.length > end - start + 1) throw new Error("invalid_observation");
+  for (const value of observation.players) {
+    const player = object(value);
+    if (!(typeof player.point === "string" && /^[0-9]+$/u.test(player.point) || typeof player.point === "number" && Number.isSafeInteger(player.point) && player.point >= 0)) {
+      throw new Error("invalid_observation_point");
     }
   }
 }
@@ -386,6 +417,7 @@ export class OfficialRankingCollector extends Container<Env> {
       if (update.type === "catalog" || update.type === "complete") checkpoint = update.type;
       else if (update.type === "attempt") checkpoint = `attempt:${update.snapshotId}`;
       else if (update.type === "observation") checkpoint = `observation:${update.observation?.snapshotId}`;
+      else if (update.type === "arena-observation") checkpoint = `arena:${update.observation?.snapshotId}`;
       else return json({ error: "invalid_update" }, 400);
       const updateHash = await officialDigest(canonical(update));
       if (run.checkpoints[checkpoint]) {
@@ -406,7 +438,7 @@ export class OfficialRankingCollector extends Container<Env> {
           run.checkpoints[checkpoint] = updateHash;
           await this.ctx.storage.put("collectorState", state);
         } else if (update.type === "attempt") {
-          if (!/^[a-f0-9]{32}$/u.test(update.snapshotId) || run.pendingAttempt || state.blockedGeneration || !run.catalog?.event) return json({ error: "attempt_pending" }, 409);
+          if (!/^[a-f0-9]{32}$/u.test(update.snapshotId) || run.pendingAttempt || state.blockedGeneration || !(run.catalog?.event || run.catalog?.arena)) return json({ error: "attempt_pending" }, 409);
           run.pendingAttempt = update.snapshotId;
           run.resolvedAttempt = false;
           run.checkpoints[checkpoint] = updateHash;
@@ -425,6 +457,23 @@ export class OfficialRankingCollector extends Container<Env> {
           if (limited(update.observation)) { state.status = "rate_limited"; state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.observation.retryAfterSeconds)); }
           await this.ctx.storage.put("collectorState", state);
           await saveOfficialObservation(this.env, update.observation);
+          run.pendingAttempt = null;
+          run.checkpoints[checkpoint] = updateHash;
+          if (!update.observation.error) state.lastSuccessfulObservationAtMs = Math.max(state.lastSuccessfulObservationAtMs ?? 0, update.observation.observedAtMs);
+          await this.ctx.storage.put("collectorState", state);
+        } else if (update.type === "arena-observation") {
+          validateArenaObservation(update.observation, region);
+          if (run.pendingAttempt !== update.observation.snapshotId) return json({ error: "attempt_mismatch" }, 409);
+          const arena = run.catalog?.arena;
+          if (!arena || update.observation.seasonId !== arena.seasonId || !arena.bandIds.includes(update.observation.bandId)
+            || update.observation.observedAtMs < run.startedAtMs) {
+            return json({ error: "board_mismatch" }, 409);
+          }
+          run.resolvedAttempt = true;
+          if (authRejected(update.observation)) { state.blockedGeneration = run.generation; state.status = "auth_paused"; }
+          if (limited(update.observation)) { state.status = "rate_limited"; state.nextAtMs = Math.max(state.nextAtMs, Date.now() + retryMs(update.observation.retryAfterSeconds)); }
+          await this.ctx.storage.put("collectorState", state);
+          await saveOfficialArenaObservation(this.env, update.observation);
           run.pendingAttempt = null;
           run.checkpoints[checkpoint] = updateHash;
           if (!update.observation.error) state.lastSuccessfulObservationAtMs = Math.max(state.lastSuccessfulObservationAtMs ?? 0, update.observation.observedAtMs);

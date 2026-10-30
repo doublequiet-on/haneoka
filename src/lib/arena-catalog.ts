@@ -21,6 +21,9 @@ export const ARENA_MASTER_TABLES = [
   "MasterArenaDailyReward",
   "MasterArenaSeasonReward",
   "MasterArenaPromotionReward",
+  "MasterArenaRankingReward",
+  "MasterBattleLivePlace",
+  "MasterParameter",
   "MasterLiveMusic",
   "MasterText",
   "MasterDegree",
@@ -154,6 +157,11 @@ export async function readArenaCatalog(identity: ArenaCatalog["identity"], reade
   const dailyRewards = masters.MasterArenaDailyReward.map(reward);
   const seasonRewards = masters.MasterArenaSeasonReward.map(reward);
   const promotionRewards = masters.MasterArenaPromotionReward.map(reward);
+  const rankingRewards = masters.MasterArenaRankingReward.map((row) => ({
+    ...reward(row),
+    from: number(row, "_rankStart"),
+    to: number(row, "_rankEnd"),
+  }));
   const nativeSongs = new Map(masters.MasterLiveMusic.map((row) => [number(row, "_id"), row]));
   const leagues: ArenaLeague[] = masters.MasterArenaLeague.map((row) => {
     const id = number(row, "_id"),
@@ -184,6 +192,9 @@ export async function readArenaCatalog(identity: ArenaCatalog["identity"], reade
         rank: number(rank, "_rank"),
         division: number(rank, "_division"),
         points: number(rank, "_lp"),
+        resetPoints: number(rank, "_seasonResetLp"),
+        top: rank._isTopRank === true,
+        startAt: rank._startAt ? arenaTimestamp(rank._startAt) : 0,
       })),
       promotionRewards: promotionRewards.filter((entry) => entry.leagueId === id),
     };
@@ -226,6 +237,7 @@ export async function readArenaCatalog(identity: ArenaCatalog["identity"], reade
           })),
           dailyRewards,
           seasonRewards,
+          rankingRewards,
           events: rows(documents.events.entries).filter(overlaps),
           exchanges: rows(documents.exchange.entries).filter(
             (exchange) => exchangeIds.has(String(exchange.id)) && overlaps(exchange),
@@ -234,5 +246,20 @@ export async function readArenaCatalog(identity: ArenaCatalog["identity"], reade
       ];
     }),
   );
-  return { schema: "haneoka-arena-v1", identity, entries, images: { ranks, missions } };
+  const basePoints = masters.MasterBattleLivePlace.map((row) => ({
+    tier: number(row, "_matchRank"),
+    players: number(row, "_matchPlayers"),
+    place: number(row, "_place"),
+    points: number(row, "_basePoint"),
+  })).filter((row) => row.tier > 0 && row.players >= 2 && row.place >= 1 && row.place <= row.players);
+  const parameters = Object.fromEntries(
+    masters.MasterParameter.flatMap((row) => {
+      const id = String(row._id || ""),
+        value = Number(row._value);
+      return id.startsWith("arena_") && /^int/iu.test(String(row._type)) && Number.isFinite(value)
+        ? [[id.slice(6), value]]
+        : [];
+    }),
+  );
+  return { schema: "haneoka-arena-v1", identity, entries, images: { ranks, missions }, basePoints, parameters };
 }

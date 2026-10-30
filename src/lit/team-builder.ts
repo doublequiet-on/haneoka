@@ -348,6 +348,8 @@ export class TeamBuilder extends LitElement {
   private visualsController?: AbortController;
   catalogMetadataError = false;
   private pageData?: TeamBuilderPageData;
+  /** League named by `?tab=arena&league=`, applied once the owner's Arena draft is restored. */
+  private pendingArenaLeague = 0;
 
   constructor() {
     super();
@@ -358,7 +360,10 @@ export class TeamBuilder extends LitElement {
     return this;
   }
   connectedCallback() {
-    const openBox = navigationDocumentUrl().searchParams.get("tab") === "box";
+    const startTab = navigationDocumentUrl().searchParams.get("tab");
+    const openBox = startTab === "box";
+    const league = Number(navigationDocumentUrl().searchParams.get("league"));
+    if (startTab === "arena") this.pendingArenaLeague = Number.isSafeInteger(league) && league > 0 ? league : 0;
     const payload = readPageData<TeamBuilderPageData>(this);
     if (payload?.schema === "haneoka-team-builder-page-v1") this.preparePage(payload);
     super.connectedCallback();
@@ -380,8 +385,8 @@ export class TeamBuilder extends LitElement {
     this.layoutObserver.observe(this);
     if (this.closest("#main-content")) this.layoutObserver.observe(this.closest("#main-content")!);
     void this.load(readReleaseServer() || this.server);
-    if (openBox) void this.updateComplete.then(() => {
-      if (this.isConnected) this.setTab("box");
+    if (openBox || startTab === "arena") void this.updateComplete.then(() => {
+      if (this.isConnected) this.setTab(openBox ? "box" : "arena");
     });
   }
   preparePage(payload: TeamBuilderPageData, server = payload.server, allowedServers?: readonly string[]) {
@@ -680,6 +685,8 @@ export class TeamBuilder extends LitElement {
       }
       this.songComparison.restore();
       this.arena.restore();
+      if (this.pendingArenaLeague) this.arena.league(this.pendingArenaLeague);
+      this.pendingArenaLeague = 0;
       this.engine?.prefetch(this.searchSettings.songs);
     }
     this.requestUpdate();

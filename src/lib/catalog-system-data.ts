@@ -1,4 +1,5 @@
 import type { ArenaCatalog } from "./arena";
+import type { RankingCardCatalog } from "./game-records";
 import type { CrossCatalogDTO } from "./cross-server/catalog";
 import type { ReleaseServer } from "./release-server";
 
@@ -10,6 +11,8 @@ export interface CatalogSystemPayload {
   entityId?: string;
   arena?: ArenaCatalog;
   marks?: Record<string, string>;
+  /** Card art and growth tables for the Arena leaderboard, for the page's own server. */
+  rankingCards?: Partial<Record<"jp" | "intl", RankingCardCatalog>>;
   pointName?: unknown;
   release?: { releaseId: string; sourceId: string };
   mode?: string;

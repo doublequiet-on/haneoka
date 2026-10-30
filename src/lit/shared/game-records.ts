@@ -24,6 +24,7 @@ export function gameRecordsRegionPicker(
   region: GameRecordsRegion,
   onSelect: (region: GameRecordsRegion) => void,
   name = "ranking-region",
+  regions: readonly GameRecordsRegion[] = GAME_RECORDS_REGIONS.map((option) => option.value),
 ) {
   const label = (key: string, fallback: string) => clientText(locale, `catalog.rankings.songs.${key}`, fallback);
   return html`
@@ -32,7 +33,7 @@ export function gameRecordsRegionPicker(
       role="radiogroup"
       aria-label=${label("region", "Ranking region")}
     >
-      ${GAME_RECORDS_REGIONS.map(
+      ${GAME_RECORDS_REGIONS.filter((option) => regions.includes(option.value)).map(
         (option) => html`
           <label class="settings-option" title=${label(option.key, option.value)}>
             <input

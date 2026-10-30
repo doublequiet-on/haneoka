@@ -1,35 +1,546 @@
 @layer pages {
-  .arena-page .arena-rule-mark {
+  .arena-page {
+    container: arena / inline-size;
+    min-inline-size: 0;
+  }
+  .arena-page .surface {
+    min-inline-size: 0;
+    padding: 16px;
+  }
+
+  /* Season header and league selector */
+  .arena-hero {
+    gap: 12px;
+    padding: 16px 20px 20px;
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    background: var(--md-sys-color-surface-container);
+  }
+  .arena-hero__season {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+  .arena-hero__title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 4px 12px;
+    min-inline-size: 0;
+  }
+  .arena-hero__title h2 {
+    margin: 0;
+  }
+  .arena-hero__facts {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 20px;
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-medium-weight) var(--md-sys-typescale-body-medium-size) /
+      var(--md-sys-typescale-body-medium-line-height) var(--app-font);
+  }
+  .arena-hero__facts > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .arena-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 12px;
+    border-radius: var(--md-sys-shape-corner-full);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container-highest);
+    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
+      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
+  }
+  .arena-status[data-status="current"] {
+    color: var(--md-sys-color-on-primary-container);
+    background: var(--md-sys-color-primary-container);
+  }
+  .arena-status[data-status="upcoming"] {
+    color: var(--md-sys-color-on-tertiary-container);
+    background: var(--md-sys-color-tertiary-container);
+  }
+  .arena-leagues {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .arena-league {
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+    min-inline-size: 0;
+    padding: 12px;
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container-lowest);
+    text-align: start;
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4, 200ms);
+  }
+  .arena-league:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .arena-league[aria-checked="true"] {
+    color: var(--md-sys-color-on-secondary-container);
+    background: var(--md-sys-color-secondary-container);
+  }
+  .arena-league__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-inline-size: 0;
+    inline-size: 100%;
+  }
+  .arena-league__head img {
+    flex: 0 0 auto;
+    object-fit: contain;
+  }
+  .arena-league__name {
+    overflow: hidden;
+    font: var(--md-sys-typescale-title-small-weight) var(--md-sys-typescale-title-small-size) /
+      var(--md-sys-typescale-title-small-line-height) var(--app-font);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .arena-league__meta {
+    color: inherit;
+    opacity: 0.8;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Rule marks */
+  .arena-rule {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .arena-rule {
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    white-space: normal;
+  }
+  .arena-rule__part {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
+      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
+  }
+  .arena-condition__summary {
+    margin: 0;
+  }
+  .arena-rule--empty {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .arena-attribute {
+    flex: 0 0 auto;
+    object-fit: contain;
+  }
+  .arena-attribute--text,
+  .arena-mission--text {
+    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
+      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
+  }
+  .arena-mission {
+    display: inline-flex;
+  }
+
+  /* Tabs and panel grid */
+  .arena-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .arena-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .arena-wide {
+    grid-column: 1 / -1;
+  }
+
+  /* Current condition */
+  .arena-condition__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+  .arena-condition__head > div {
+    flex: 1 1 140px;
+    min-inline-size: 0;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .arena-condition__head h3 {
+    margin: 0;
+    color: var(--md-sys-color-on-surface);
+  }
+  .arena-condition__rule {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 16px;
+  }
+  .arena-condition__attribute {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .arena-condition__attribute span {
+    display: grid;
+  }
+  .arena-condition__attribute small,
+  .arena-sections small {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .arena-sections {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .arena-sections li {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    padding: 8px 4px;
+    border-radius: var(--md-sys-shape-corner-medium);
+    background: var(--md-sys-color-surface-container);
+    text-align: center;
+  }
+  .arena-condition__window {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    margin: 0;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .arena-next {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .arena-next li {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    white-space: nowrap;
+    padding: 4px 10px;
+    border-radius: var(--md-sys-shape-corner-small);
+    background: var(--md-sys-color-surface-container);
+    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
+      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
   }
-  .arena-page .arena-rule-mark img {
+
+  /* Rotation strip */
+  .arena-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .arena-strip li {
+    display: grid;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: var(--md-sys-shape-corner-small);
+    background: var(--md-sys-color-surface-container);
+  }
+  .arena-strip li[aria-current="time"] {
+    color: var(--md-sys-color-on-secondary-container);
+    background: var(--md-sys-color-secondary-container);
+  }
+
+  /* Population */
+  .arena-population {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .arena-population li {
+    display: grid;
+    grid-template-columns: 32px minmax(72px, 112px) minmax(0, 1fr) 64px 48px;
+    align-items: center;
+    gap: 8px;
+    min-block-size: 36px;
+  }
+  .arena-population__name {
+    display: grid;
+    min-inline-size: 0;
+    font: var(--md-sys-typescale-label-large-weight) var(--md-sys-typescale-label-large-size) /
+      var(--md-sys-typescale-label-large-line-height) var(--app-font);
+  }
+  .arena-population__name small,
+  .arena-population__share {
+    color: var(--md-sys-color-on-surface-variant);
+    font-variant-numeric: tabular-nums;
+  }
+  .arena-population__bar {
+    display: block;
+    block-size: 10px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-surface-container-highest);
+  }
+  .arena-population__bar > span {
+    display: block;
+    block-size: 100%;
+    border-radius: inherit;
+    background: var(--md-sys-color-primary);
+  }
+  .arena-population strong {
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+  }
+  .arena-population__share {
+    text-align: end;
+  }
+
+  /* Card use */
+  .arena-usage {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .arena-usage__list {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .arena-usage__list li {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+  }
+  .arena-usage__list a {
+    display: block;
+    inline-size: 100%;
+  }
+  .arena-usage__list img,
+  .arena-usage__empty {
+    display: block;
+    inline-size: 100%;
+    aspect-ratio: 1;
+    border-radius: var(--md-sys-shape-corner-small);
+    object-fit: cover;
+    background: var(--md-sys-color-surface-container-highest);
+  }
+  .arena-usage__list small {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Leaderboard */
+  .arena-ranking__row {
+    grid-template-columns: 44px 40px minmax(100px, 1fr) minmax(96px, auto) minmax(64px, auto) minmax(220px, 280px);
+  }
+  .arena-ranking__list--compact .arena-ranking__row {
+    grid-template-columns: 32px 36px minmax(0, 1fr) minmax(88px, auto) 56px;
+    padding: 6px 4px;
+    gap: 8px;
+  }
+  .arena-ranking__tier {
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-inline-size: 0;
+    font: var(--md-sys-typescale-label-medium-weight) var(--md-sys-typescale-label-medium-size) /
+      var(--md-sys-typescale-label-medium-line-height) var(--app-font);
+  }
+  .arena-ranking__tier img {
+    flex: 0 0 auto;
     object-fit: contain;
   }
-  .arena-page .arena-period {
-    display: grid;
-    gap: 4px;
-    scroll-margin-block: 24px;
-    white-space: normal;
+  .arena-ranking__controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
   }
-  .arena-page .arena-period .chip {
-    justify-self: start;
+  .arena-ranking__jump {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
   }
-  .arena-page .arena-current-label[aria-hidden="true"] {
-    visibility: hidden;
+  .arena-ranking__jump .field {
+    inline-size: 168px;
   }
-  .arena-page .arena-current-label {
+  .arena-ranking__window {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Schedule, songs and rewards */
+  .arena-schedule__band {
+    display: inline-grid;
+    justify-items: center;
+    gap: 2px;
+    border: 0;
     color: inherit;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+  .arena-schedule__band[aria-pressed="true"] {
+    color: var(--md-sys-color-primary);
+  }
+  .arena-period {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   .arena-page tr:has([aria-current="time"]) > * {
     background: var(--md-sys-color-secondary-container);
     color: var(--md-sys-color-on-secondary-container);
   }
-  @media (max-width: 600px) {
-    .arena-page .arena-period {
-      max-width: 116px;
+  .arena-song {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-inline-size: 180px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .arena-song:hover {
+    text-decoration: underline;
+  }
+  .arena-song img {
+    flex: 0 0 auto;
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    object-fit: cover;
+  }
+  .arena-rank {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+  }
+  .arena-rank-icon {
+    flex: 0 0 auto;
+    object-fit: contain;
+  }
+  .arena-negative {
+    color: var(--md-sys-color-error);
+  }
+  .arena-rewards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    white-space: normal;
+  }
+  .arena-reward {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .arena-reward img {
+    flex: 0 0 auto;
+    object-fit: contain;
+  }
+  .arena-reward__name {
+    max-inline-size: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .arena-reward__count {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .arena-ranking__row .song-ranking__deck-preview {
+    max-inline-size: 360px;
+  }
+  @container arena (max-width: 1099px) {
+    .arena-leagues {
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(148px, 1fr);
+      grid-template-columns: none;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .arena-ranking__row {
+      grid-template-columns: 44px 36px minmax(0, 1fr) minmax(88px, auto) minmax(56px, auto);
+    }
+    .arena-ranking__row .song-ranking__deck-preview {
+      grid-column: 1 / -1;
+    }
+  }
+  @container arena (max-width: 839px) {
+    .arena-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .arena-usage {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .arena-usage__list {
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+  }
+  @container arena (max-width: 599px) {
+    .arena-hero {
+      padding: 12px 16px 16px;
+    }
+    .arena-hero__facts {
+      justify-content: flex-start;
+    }
+    .arena-condition__rule {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .arena-ranking__row,
+    .arena-ranking__list--compact .arena-ranking__row {
+      grid-template-columns: 36px 32px minmax(0, 1fr) minmax(56px, auto);
+      row-gap: 4px;
+    }
+    .arena-ranking__row .arena-ranking__tier {
+      grid-column: 3;
+      grid-row: 2;
+    }
+    .arena-ranking__row .song-ranking__score {
+      grid-column: 4;
+      grid-row: 1 / span 2;
+    }
+    .arena-ranking__row .song-ranking__player-copy {
+      grid-column: 3;
+      grid-row: 1;
+    }
+    .arena-ranking__row .song-ranking__deck-preview {
+      grid-row: 3;
+    }
+    .arena-usage__list {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .arena-ranking__jump {
+      flex: 1 1 100%;
+    }
+    .arena-ranking__jump .field {
+      flex: 1 1 auto;
+    }
+    .arena-population li {
+      grid-template-columns: 28px minmax(64px, 88px) minmax(0, 1fr) 56px;
+    }
+    .arena-population__share {
+      display: none;
     }
   }
 }

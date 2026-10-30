@@ -64,6 +64,33 @@ export interface SongRankingDto extends GameRankingDto {
   musicId: number;
 }
 
+/** A league ranking row: the song-ranking row plus Arena points. */
+export interface ArenaRankingRowDto extends SongRankingRowDto {
+  point: number;
+}
+
+export interface ArenaRankingDto extends Omit<GameRankingDto, "rows"> {
+  seasonId: string;
+  bandId: string;
+  /** Inclusive one-based rank window of `rows`. */
+  start: number;
+  end: number;
+  /** Players ranked on this league board. */
+  maxRank: number | null;
+  rows: ArenaRankingRowDto[];
+}
+
+/** Players per rank tier, found by locating each tier's lowest point threshold on the board. */
+export interface ArenaPopulationDto {
+  region: GameRecordsRegion;
+  seasonId: string;
+  bandId: string;
+  provider: "official" | "moenotes";
+  observedAtMs: number;
+  maxRank: number | null;
+  tiers: Array<{ threshold: number; count: number }>;
+}
+
 export interface EventChallengeDto {
   id: string;
   musicId: string;

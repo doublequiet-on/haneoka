@@ -20,7 +20,7 @@ from core.manifests import write_json
 from core.storage import cas_key
 from publish.r2 import R2Store, _current_release_manifest
 
-LOOKUPS = {"MasterLiveMusic", "MasterText", "MasterDegree", "MasterExchange"}
+LOOKUPS = {"MasterLiveMusic", "MasterText", "MasterDegree", "MasterExchange", "MasterBattleLivePlace", "MasterParameter"}
 
 
 class WranglerReader:

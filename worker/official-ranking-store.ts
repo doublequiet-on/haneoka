@@ -1,10 +1,10 @@
 // L3 — GEB
 // Input: Validated official catalogs, observations and region-scoped read identities.
-// Output: Immutable R2 payloads, D1 indexes, numeric history cursors and board health.
+// Output: Immutable R2 payloads, D1 indexes, numeric history cursors and board health; Arena league windows separately.
 // Pos: [Map](L2.md); official ranking persistence, separate from legacy provider history.
 // Effects/Dependencies: Reads and writes private R2 and D1; reads preserve original observation timestamps.
 import type { GameRecordsRegion } from "../src/lib/game-records";
-import type { OfficialCatalog, OfficialObservation } from "../src/lib/official-ranking";
+import type { OfficialArenaObservation, OfficialCatalog, OfficialObservation } from "../src/lib/official-ranking";
 
 export interface OfficialRankingStoreBindings {
   DB?: D1Database;
@@ -199,4 +199,39 @@ export async function readOfficialBoardStatus(env: OfficialRankingStoreBindings,
       openGapMs: age === null ? null : Math.max(0, age - 300_000) });
   }
   return boards;
+}
+
+export async function saveOfficialArenaObservation(env: OfficialRankingStoreBindings, observation: OfficialArenaObservation): Promise<void> {
+  const { db, bucket } = storage(env);
+  const body = JSON.stringify(observation);
+  if (new TextEncoder().encode(body).byteLength > MAX_PAYLOAD_BYTES) throw new Error("official_observation_too_large");
+  const hash = await officialDigest(body);
+  const previous = await db.prepare("SELECT payload_hash FROM official_arena_ranking_observations WHERE region = ? AND snapshot_id = ?")
+    .bind(observation.region, observation.snapshotId).first<{ payload_hash: string }>();
+  if (previous) {
+    if (previous.payload_hash !== hash) throw new Error("official_observation_conflict");
+    return;
+  }
+  const key = `official/1/${observation.region}/arena/${observation.snapshotId}/${hash}.json`;
+  await bucket.put(key, body, { httpMetadata: { contentType: "application/json" } });
+  await db.prepare(`INSERT INTO official_arena_ranking_observations
+    (region, snapshot_id, season_id, band_id, start_rank, end_rank, max_rank, observed_at_ms, payload_key, payload_hash, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(region, snapshot_id) DO NOTHING`)
+    .bind(observation.region, observation.snapshotId, observation.seasonId, observation.bandId, observation.startRank,
+      observation.endRank, observation.maxRank ?? null, observation.observedAtMs, key, hash, observation.error ?? null).run();
+}
+
+/** The latest successful window of a league board that contains `rank`. */
+export async function readOfficialArenaLatest(env: OfficialRankingStoreBindings, region: GameRecordsRegion, seasonId: string,
+  bandId: string, rank: number): Promise<(OfficialArenaObservation & { cursor: number }) | null> {
+  const { db, bucket } = storage(env);
+  const row = await db.prepare(`SELECT cursor, payload_key, payload_hash FROM official_arena_ranking_observations
+    WHERE region = ? AND season_id = ? AND band_id = ? AND start_rank <= ? AND end_rank >= ? AND error IS NULL
+    ORDER BY observed_at_ms DESC, cursor DESC LIMIT 1`).bind(region, seasonId, bandId, rank, rank).first<ObservationRow>();
+  if (!row) return null;
+  const observation = await readPayload<OfficialArenaObservation>(bucket, row.payload_key, row.payload_hash);
+  if (observation.region !== region || observation.seasonId !== seasonId || observation.bandId !== bandId) {
+    throw new Error("official_observation_identity_mismatch");
+  }
+  return { ...observation, cursor: row.cursor };
 }

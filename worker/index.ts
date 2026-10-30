@@ -27,6 +27,7 @@ export { CommunityMediaContainer } from "./community-media-container";
 export { OfficialRankingCollector } from "./official-ranking-collector";
 import { OFFICIAL_RANKING_REGIONS, officialRegionEnabled } from "./official-ranking-collector";
 import { handleOfficialRankingApi, officialRankingStatus } from "./official-ranking-api";
+import { handleArenaRankingApi } from "./arena-ranking";
 import { handleAdminRequest } from "./admin";
 import { applySiteSettings, readSiteSettings, testContentAllowed, isPublicResourceServer, restrictedResourceRequest, privateResourceResponse } from "./site-settings";
 import { serveStaticDocument, staticDocumentRedirect, staticPublicationContext } from "./static-documents";
@@ -3988,6 +3989,8 @@ async function handleScopedRequest(request: Request, env: Env, ctx: ExecutionCon
   if (publicGame) return publicGame;
   const gamePlatform = await handleGamePlatform(request, env);
   if (gamePlatform) return gamePlatform;
+  const arenaRanking = await handleArenaRankingApi(request, ctx, url, env);
+  if (arenaRanking) return arenaRanking;
   const officialRecords = await handleOfficialRankingApi(request, url, env);
   if (officialRecords) return officialRecords;
   const gameRecords = await handleGameRecordsApi(ctx, request, url, env);

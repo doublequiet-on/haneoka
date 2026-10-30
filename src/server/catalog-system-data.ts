@@ -1,4 +1,5 @@
 import { arenaCatalog } from "./arena-catalog";
+import { rankingCardsPageData } from "./tool-page-data";
 import { loadStaticCrossServerCatalog } from "../lib/cross-server/static";
 import { OFFICIAL_CATALOG_SERVERS, type CrossCatalogResource, type OfficialCatalogServer } from "../lib/cross-server/catalog";
 import { isCrossCatalogResource } from "../lib/cross-server/definitions";
@@ -44,6 +45,8 @@ async function loadData(kind: CatalogSystemKind, server: ReleaseServer, locale: 
     const release = await staticCatalogRelease(server);
     payload.arena = await arenaCatalog(server, release);
     payload.marks = await fetchStaticCatalog("ui-marks", server, release) as Record<string, string>;
+    const source = server === "jp" || server === "jp-cbt" ? "jp" : "intl";
+    payload.rankingCards = { [source]: (await rankingCardsPageData())[source] };
     return payload;
   }
   if (kind === "studio") {

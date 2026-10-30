@@ -51,6 +51,19 @@
 5. localhost接口只供本机验证。云端通过同域 Worker 提供已采集数据，游戏凭据与CDN配置只留在受控采集服务，不进入浏览器。采集和网站读取开关分别按区服设置，配置方式见README的云端模式。
 6. v1与v2保持各自合同及历史游标：网站适配器按区服切换，旧Moenotes历史保留来源，不改标为官方自采；官方四曲总榜使用独立total路径。Taki旧入口独立维护。切回原来源不删除已采集的官方历史。
 
+## 竞技场联赛榜单（待接入）
+
+网站侧合同已就绪，采集端尚未请求竞技场榜单。接入时：
+
+| 项 | 合同 |
+| --- | --- |
+| 目录 | `haneoka:official-ranking-update/1` 的 `catalog.arena`：`seasonId`、`startAtMs`、`endAtMs`、`rankingEndAtMs`、`bandIds`（十进制字符串）；无竞技场时为 null 或省略 |
+| 尝试 | 沿用 `attempt`；仅有竞技场赛季、没有活动时也允许 |
+| 观测 | `{ type: "arena-observation", observation }`；`observation` 含 `snapshotId`、`region`、`seasonId`、`bandId`、`startRank`、`endRank`（一次最多 100 名）、`maxRank`、`observedAtMs`，成功时 `players` 保留游戏 snake_case 字段（`rank`、`point`、`profile`／`player_data`、`deck`），失败时 `error`／`httpStatus`／`grpcStatus` |
+| 保存与读取 | Worker 写入私有 R2 与 `official_arena_ranking_observations`；`/api/v1/game/records/{region}/arena/seasons/{season}/leagues/{band}/ranking?start=` 在官方读取开启时优先返回覆盖该名次的最新官方窗口，否则读取 Moenotes |
+
+建议每轮至少采集各乐队前 100 名；段位人数接口按段位门槛查找名次，可由更大的窗口覆盖减少外部读取。
+
 ## 验收界限
 
 独立目录转换/自动换期可用固定Master表及模拟时间验证；不能替代新活动真实发布、紧急关闭或当前客户端边界语义验证。当前官方获取已通过独立 catalog 入口实服验证；动态密码变化与换期使用隔离模拟验证。真实实服换期、新版连续榜单采样和公网网页及时刷新未验收。既有采集器实验与本版本证据分别记录，不将旧结果计入本版本。
