@@ -1,14 +1,14 @@
 // L3 — GEB
-// Input: Saved regional official catalogs/observations and public ranking requests.
-// Output: Normalized event, challenge, total and cursor-history DTOs.
+// Input: Saved regional official catalogs/observations, collector availability and public requests.
+// Output: Normalized rankings and explicit pending availability.
 // Pos: [Map](L2.md); official read adapter alongside legacy PT and SHA history.
 // Effects/Dependencies: Reads D1/private R2; never requests the game or writes observations.
 import type { EventRankingDto, EventTrackerDto, GameRecordsRegion, SongRankingCardDto, SongRankingRowDto } from "../src/lib/game-records";
 import type { OfficialCatalog, OfficialObservation } from "../src/lib/official-ranking";
-import { OFFICIAL_RANKING_REGIONS, officialRegionEnabled } from "./official-ranking-collector";
+import { OFFICIAL_RANKING_REGIONS, officialCollectorAvailability, officialRegionEnabled, type OfficialCollectorConfigurationBindings } from "./official-ranking-collector";
 import { OFFICIAL_RANKING_STALE_MS, readOfficialBoardStatus, readOfficialCatalog, readOfficialHistory, readOfficialLatest, type OfficialRankingStoreBindings, type StoredOfficialObservation } from "./official-ranking-store";
 
-export interface OfficialRankingReadBindings extends OfficialRankingStoreBindings {
+export interface OfficialRankingReadBindings extends OfficialRankingStoreBindings, OfficialCollectorConfigurationBindings {
   OFFICIAL_RANKING_READ_REGIONS?: string;
 }
 
@@ -158,6 +158,11 @@ function response(request: Request, body: unknown, status = 200): Response {
 function failure(request: Request, kind: string, status: number): Response {
   return response(request, { error: { kind, retryAfter: status === 503 ? 30 : null } }, status);
 }
+async function pending(request: Request, env: OfficialRankingReadBindings, region: GameRecordsRegion): Promise<Response> {
+  const collectorStatus = await officialCollectorAvailability(env, region);
+  return response(request, { error: { kind: "pending", retryAfter: collectorStatus ? null : 30,
+    ...(collectorStatus ? { collectorStatus } : {}) } }, 503);
+}
 function publicObservation(value: StoredOfficialObservation, now: number) {
   return {
     snapshotId: value.snapshotId,
@@ -180,11 +185,11 @@ export async function handleOfficialRankingApi(request: Request, url: URL, env: 
   if (!current && !board) return null;
   if (board && version === "v1" && board[4] === "history") return null;
   if (current ? url.searchParams.size > 0 : board![4] !== "history" && url.searchParams.size > 0) return failure(request, "invalid_request", 400);
-  if (!env.DB || !env.OFFICIAL_RANKING_DATA) return failure(request, "pending", 503);
+  if (!env.DB || !env.OFFICIAL_RANKING_DATA) return pending(request, env, region);
   try {
     if (current) {
       const catalog = await readOfficialCatalog(env, region);
-      return catalog ? response(request, officialEventTracker(catalog)) : failure(request, "pending", 503);
+      return catalog ? response(request, officialEventTracker(catalog)) : pending(request, env, region);
     }
     const eventId = board![1], challengeId = board![3] ?? "", operation = board![4]!;
     if (!decimalId(eventId)) return failure(request, "invalid_request", 400);
@@ -201,7 +206,7 @@ export async function handleOfficialRankingApi(request: Request, url: URL, env: 
         observations: history.observations.map((value) => publicObservation(value, now)), nextCursor: history.nextCursor });
     }
     const observation = await readOfficialLatest(env, region, eventId, kind, challengeId);
-    return observation ? response(request, officialEventRanking(observation)) : failure(request, "pending", 503);
+    return observation ? response(request, officialEventRanking(observation)) : pending(request, env, region);
   } catch (error) {
     console.warn(JSON.stringify({ event: "official_ranking_read_failed", region, error: error instanceof Error ? error.name : "Error" }));
     return failure(request, "upstream", 503);

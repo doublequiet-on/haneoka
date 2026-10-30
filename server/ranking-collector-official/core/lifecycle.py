@@ -1,11 +1,18 @@
-"""L3: server/L2.md -> ranking-collector-official; catalog discovery and credential generation."""
+"""L3: server/L2.md -> ranking-collector-official; catalog discovery, credential generations and authentication rejection."""
 import hashlib
 import json
 from pathlib import Path
 import re
 import time
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from regions import region_config
+
+def authentication_failed(receipt):
+    if not receipt:return False
+    metadata={key.lower():value for source in ('headers','trailers') for key,value in receipt.get(source,{}).items()}
+    grpc=str(metadata.get('grpc-status',receipt.get('grpc_status')))
+    return (receipt.get('status')==401 or grpc=='16'
+            or grpc=='2' and unquote(metadata.get('grpc-message',''))=='authentication failed')
 
 def normalize_proxy(value):
     if value=='':return ''

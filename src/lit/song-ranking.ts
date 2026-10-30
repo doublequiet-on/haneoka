@@ -453,7 +453,7 @@ export class SongRanking extends GameRecordsCardsElement {
     const showMore = this.rows.length > 20 && !this.expanded;
     const failed = this.rankingFailure?.kind;
     const failureText =
-      failed === "pending"
+      failed === "pending" && this.retryAt > 0
         ? this.label("pending", "Ranking is being collected. Try again in {seconds}s.").replace(
             "{seconds}",
             String(Math.max(0, Math.ceil((this.retryAt - Date.now()) / 1000))),

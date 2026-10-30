@@ -8,7 +8,7 @@ import time
 from types import SimpleNamespace
 import uuid
 from history import History
-from lifecycle import targets, credential_generation, read_credentials
+from lifecycle import authentication_failed, targets, credential_generation, read_credentials
 from regions import region_config
 from process_lock import process_lock
 
@@ -94,7 +94,7 @@ def run(args):
                     failures+=1
                     history.record(identity,oid,int(time.time()*1000),receipt=receipt,error=type(error).__name__)
                     print(json.dumps({'board':kind,'challenge':challenge,'error':type(error).__name__}),flush=True)
-                    if receipt and (receipt.get('status') in (401,403,429) or receipt.get('grpc_status') in ('7','8','16')):
+                    if receipt and (authentication_failed(receipt) or receipt.get('status') in (403,429) or receipt.get('grpc_status') in ('7','8')):
                         raise RuntimeError('Identity or rate limit requires intervention') from None
                 finally:
                     sampler.args.deadline=args.deadline

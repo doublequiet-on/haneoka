@@ -17,7 +17,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 import uuid
 
-from lifecycle import read_credentials, targets, retry_delay
+from lifecycle import authentication_failed, read_credentials, targets, retry_delay
 from official_catalog import OfficialCatalog, CatalogRequestError, NoRedirect
 from regions import region_config
 from transport import Sampler, VersionError
@@ -89,7 +89,7 @@ def failure_status(receipt, authenticated=True):
     receipt = receipt or {}
     if receipt.get('status') == 429 or str(receipt.get('grpc_status')) == '8':
         return 'rate_limited'
-    if authenticated and (receipt.get('status') in (401, 403) or str(receipt.get('grpc_status')) in ('7', '16')):
+    if authenticated and (authentication_failed(receipt) or receipt.get('status') == 403 or str(receipt.get('grpc_status')) == '7'):
         return 'auth_paused'
     return 'failed'
 
@@ -181,10 +181,10 @@ def run_job(job, origin):
                             catalogTableHashes=catalog.get('tableHashes'),
                             descriptorSha256=hashlib.sha256((Path(__file__).parent/configured.descriptor).read_bytes()).hexdigest())
                     except Exception as error:
-                        observation['error'] = type(error).__name__
                         observation['httpStatus'] = receipt.get('status') if receipt else None
                         observation['grpcStatus'] = receipt.get('grpc_status') if receipt else None
                         status = failure_status(receipt)
+                        observation['error'] = 'authentication_failed' if status == 'auth_paused' else type(error).__name__
                         if status == 'rate_limited':
                             retry_after = retry_delay(receipt, 300)
                             observation['retryAfterSeconds'] = retry_after

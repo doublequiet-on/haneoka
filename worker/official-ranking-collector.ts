@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Region configuration, container callbacks and scheduled collection work.
-// Output: Durable per-region job state, checkpoints and private ranking observations.
+// Output: Durable regional jobs/observations and read-only current collection availability.
 // Pos: [Map](L2.md); official collector coordination and recovery.
 // Effects/Dependencies: Starts isolated containers, persists DO state and writes D1/R2; credentials stay server-side.
 import { Container } from "@cloudflare/containers";
@@ -9,6 +9,9 @@ import type { OfficialCatalog, OfficialCollectorJob, OfficialCollectorUpdate, Of
 import { officialDigest, saveOfficialCatalog, saveOfficialObservation } from "./official-ranking-store";
 
 export const OFFICIAL_RANKING_REGIONS = ["jp", "tw", "en", "kr"] as const;
+export type OfficialCollectorConfigurationBindings = Partial<Pick<Env,
+  "OFFICIAL_RANKING_JP_CONFIG" | "OFFICIAL_RANKING_TW_CONFIG" | "OFFICIAL_RANKING_EN_CONFIG" | "OFFICIAL_RANKING_KR_CONFIG"
+>> & { OFFICIAL_RANKING_ENABLED_REGIONS?: string };
 const INTERVAL_MS = 300_000;
 const JOB_MS = 120_000;
 const MAX_UPDATE_BYTES = 8 * 1024 * 1024;
@@ -76,7 +79,8 @@ function retryMs(value: unknown): number {
   return Math.max(INTERVAL_MS, Math.min(maximum, value * 1000));
 }
 function authRejected(observation: OfficialObservation): boolean {
-  return observation.httpStatus === 401 || observation.httpStatus === 403 || observation.grpcStatus === "7" || observation.grpcStatus === "16";
+  return observation.httpStatus === 401 || observation.httpStatus === 403 || observation.grpcStatus === "7" || observation.grpcStatus === "16"
+    || observation.grpcStatus === "2" && observation.error === "authentication_failed";
 }
 function limited(observation: OfficialObservation): boolean { return observation.httpStatus === 429 || observation.grpcStatus === "8"; }
 function json(body: unknown, status = 200): Response {
@@ -88,7 +92,7 @@ async function sameToken(actual: string, expected: string): Promise<boolean> {
   return crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(actual));
 }
 
-async function configFor(env: Env, region: GameRecordsRegion): Promise<CollectorConfig | null> {
+async function configFor(env: OfficialCollectorConfigurationBindings, region: GameRecordsRegion): Promise<CollectorConfig | null> {
   const secret = env[`OFFICIAL_RANKING_${region.toUpperCase()}_CONFIG` as "OFFICIAL_RANKING_JP_CONFIG"];
   if (!secret?.trim()) return null;
   if (secret.length > 131_072) throw new Error("invalid_collector_config");
@@ -109,6 +113,15 @@ async function configFor(env: Env, region: GameRecordsRegion): Promise<Collector
   const authentication = { player_id: auth.player_id, credential: auth.credential, device_id: deviceId, ...(bid ? { bid } : {}) };
   return { clientVersion: config.clientVersion, credentials, masterConfig: object(config.masterConfig),
     generation: await officialDigest(canonical({ region, origin: credentials.origin, auth: authentication })) };
+}
+
+export async function officialCollectorAvailability(
+  env: OfficialCollectorConfigurationBindings,
+  region: GameRecordsRegion,
+): Promise<"disabled" | "not_configured" | "invalid_config" | null> {
+  if (!officialRegionEnabled(env.OFFICIAL_RANKING_ENABLED_REGIONS, region)) return "disabled";
+  try { return await configFor(env, region) ? null : "not_configured"; }
+  catch { return "invalid_config"; }
 }
 
 function validateCatalog(value: unknown, region: GameRecordsRegion): asserts value is OfficialCatalog {
@@ -231,12 +244,15 @@ export class OfficialRankingCollector extends Container<Env> {
 
   async status(region: GameRecordsRegion): Promise<Record<string, unknown>> {
     const state = await this.stateFor(region);
+    const unavailable = await officialCollectorAvailability(this.env, region);
     const now = Date.now();
     const age = state.lastSuccessfulObservationAtMs === null ? null : now - state.lastSuccessfulObservationAtMs;
-    return { contract: "haneoka:ranking-status/1", region, serverTimeMs: now, collectorStatus: state.status,
+    return { contract: "haneoka:ranking-status/1", region, serverTimeMs: now, collectorStatus: unavailable ?? state.status,
+      collectionEnabled: officialRegionEnabled(this.env.OFFICIAL_RANKING_ENABLED_REGIONS, region),
+      readEnabled: officialRegionEnabled(this.env.OFFICIAL_RANKING_READ_REGIONS, region),
       samplingIntervalSeconds: INTERVAL_MS / 1000, lastSuccessfulObservationAtMs: state.lastSuccessfulObservationAtMs,
-      ageMs: age, stale: age === null || age < 0 || age > 600_000, pollAfterSeconds: 30,
-      nextAttemptAtMs: state.blockedGeneration ? null : state.nextAtMs || null, catalogProvider: "official-master" };
+      ageMs: age, stale: age === null || age < 0 || age > 600_000, pollAfterSeconds: unavailable ? 300 : 30,
+      nextAttemptAtMs: unavailable || state.blockedGeneration ? null : state.nextAtMs || null, catalogProvider: "official-master" };
   }
 
   async collectDue(region: GameRecordsRegion): Promise<void> {

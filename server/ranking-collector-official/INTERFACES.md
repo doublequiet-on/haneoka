@@ -16,7 +16,7 @@
 
 | GET 路径 | 返回 |
 | --- | --- |
-| `/status` | `haneoka:ranking-status/1`；region、serverTimeMs、collectorStatus、samplingIntervalSeconds、lastSuccessfulObservationAtMs、ageMs、stale、pollAfterSeconds、catalogProvider |
+| `/status` | `haneoka:ranking-status/1`；region、serverTimeMs、collectorStatus、samplingIntervalSeconds、lastSuccessfulObservationAtMs、ageMs、stale、pollAfterSeconds、catalogProvider；云端另含 collectionEnabled、readEnabled |
 | `/events/current` | 官方主数据投影；没有当前活动时event=null |
 | `/events/{eventId}/challenges/{challengeId}/latest` | 指定单曲最后成功观测 |
 | `/events/{eventId}/total/latest` | 四曲总榜最后成功观测 |
@@ -26,7 +26,7 @@
 
 运行数据库以 `collector_identity` 持久绑定一个分区，观测和目录写入在同一事务内校验分区。读取旧日服库不添加元数据，写入时才采用其已存在的日服身份；混服数据及与配置或状态不符的区域拒绝读取。运行配置 `haneoka:official-ranking-collector/2` 要求显式 `region`，旧 `haneoka:official-jp-collector/1` 缺省仍为 `jp` 且只允许日服。
 
-当前状态stale阈值为10分钟；状态接口的最后成功时间是全局最新值，**不能代替某一榜单自己的observedAtMs/stale**。collectorStatus是最后持久状态，不是操作系统存活证明；停止更新时仍须按age判断。全部接口Cache-Control:no-store；Host只接受当前端口的127.0.0.1或localhost，存在Origin时也只接受本机HTTP来源，其余返回403。404表示尚无该成功观测，400表示查询参数错误，存储损坏或读取失败返回500。数据损坏不能将空榜视为成功。
+当前状态stale阈值为10分钟；状态接口的最后成功时间是全局最新值，**不能代替某一榜单自己的observedAtMs/stale**。本地 collectorStatus 是最后持久状态；云端先反映当前开关及配置的 disabled、not_configured、invalid_config，其余沿用持久状态。状态查询不启动采集或清除认证暂停；停止更新时仍须按age判断。全部接口Cache-Control:no-store；Host只接受当前端口的127.0.0.1或localhost，存在Origin时也只接受本机HTTP来源，其余返回403。404表示尚无该成功观测，400表示查询参数错误，存储损坏或读取失败返回500。数据损坏不能将空榜视为成功。
 
 ## 云端任务与网站接入
 
@@ -37,6 +37,8 @@
 区域 Durable Object 持久保存调度、当前凭据代际、在途检查点与暂停/冷却；D1 保存历史索引，私有 R2 保存不可变正文。容器临时目录及完成任务缓存只用于本轮执行，不是恢复或读接口的依据。Worker 重新读取同一观测不会修改时间或生成新游标。
 
 云端沿用上表 v2 路径，公开格式使用网站 DTO：`events/current` 返回 `EventTrackerDto`，榜单 `latest` 返回 `EventRankingDto`，包含 `provider=official`、`snapshotId`、`observedAtMs`、`serverTimeMs` 和归一化 `rows`；`history?after=` 返回独立数字游标、成功观测的 `ranking` 或失败元数据。原始 `players` 和协议扩展字段只保存在私有 R2，不直接公开。localhost API 继续返回原始 `haneoka:ranking-observation/2`，两者不共享正文合同。云端 `status` 附逐榜最后尝试、最后成功、连续失败和开放缺口，不能用全局成功代替逐榜健康。
+
+云端缺少目录或成功观测时保留 HTTP 503 pending。采集未启用、未配置或配置无效时，错误附 collectorStatus，retryAfter 为 null；状态查询的 nextAttemptAtMs 为 null、pollAfterSeconds 为300。采集可用时保留原轮询提示，提示间隔不代表已经排队或必定产生新数据。
 
 网站 v1 根据区服来源开关适配，单曲保持 `/events/{id}/challenges/{challenge}/ranking`，官方总榜使用 `/events/{id}/total/latest`。旧 `/events/{id}/latest` 始终表示 PT，旧 SHA 历史继续独立读取。
 

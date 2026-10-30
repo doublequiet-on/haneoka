@@ -10,7 +10,7 @@ import time
 from types import SimpleNamespace
 import uuid
 from history import History
-from lifecycle import accept_catalog, targets, read_credentials, credential_ready, retry_delay
+from lifecycle import accept_catalog, authentication_failed, targets, read_credentials, credential_ready, retry_delay
 from sample import run as sample
 from official_catalog import CatalogRequestError
 from transport import VersionError
@@ -104,7 +104,7 @@ def cycle(args,history,state,discover_fn=None,sample_fn=sample):
         headers={k.lower():v for k,v in receipt.get('headers',{}).items()}
         trailers={k.lower():v for k,v in receipt.get('trailers',{}).items()}
         grpc=trailers.get('grpc-status',headers.get('grpc-status'))
-        if receipt.get('status')==401 or grpc=='16':
+        if authentication_failed(receipt):
             state['blockedGeneration']=generation;status='credentials_required'
         elif receipt.get('status')==429 or grpc=='8':
             state['retryAfter']=time.time()+retry_delay(receipt,args.interval);status='rate_limited'

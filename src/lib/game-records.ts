@@ -131,6 +131,7 @@ export interface GameRecordsErrorDto {
   error: {
     kind: string;
     retryAfter: number | null;
+    collectorStatus?: "disabled" | "not_configured" | "invalid_config";
   };
 }
 
