@@ -331,10 +331,34 @@ async function assertPublishContext() {
   const version = JSON.parse(
     run(["versions", "view", active.versions[0].version_id, "--config", path.join(root, "wrangler.jsonc"), "--json"], true),
   );
-  const activeWorkerSha = /^Worker ([a-f0-9]{40}); static [a-f0-9]{64}$/u.exec(version.annotations?.["workers/message"] || "")?.[1];
-  if (!activeWorkerSha) throw new Error("Active Worker source identity is missing");
+  const messageSource = (value) => /^Worker ([a-f0-9]{40}); static [a-f0-9]{64}$/u.exec(value.annotations?.["workers/message"] || "")?.[1];
+  const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object"
+    ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
+  const fingerprint = (value) => {
+    const resources = value.resources;
+    if (typeof resources?.script?.etag !== "string" || !resources.script.etag || !resources.script_runtime || !Array.isArray(resources.bindings))
+      throw new Error("Worker version content identity is missing");
+    return JSON.stringify(canonical({ etag: resources.script.etag, runtime: resources.script_runtime,
+      bindings: resources.bindings.filter((binding) => !["secret_text", "secret_key"].includes(binding.type))
+        .map(canonical).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))) }));
+  };
+  let activeWorkerSha = messageSource(version), identityMatchedVersionId = active.versions[0].version_id;
+  if (!activeWorkerSha) {
+    const identity = fingerprint(version);
+    const versions = JSON.parse(run(["versions", "list", "--config", path.join(root, "wrangler.jsonc"), "--json"], true));
+    const activeNumber = versions.find((entry) => entry.id === active.versions[0].version_id)?.number;
+    if (!Number.isInteger(activeNumber)) throw new Error("Active Worker is missing from version history");
+    const matches = new Map();
+    for (const prior of versions.filter((entry) => entry.number < activeNumber && messageSource(entry)).sort((a, b) => b.number - a.number).slice(0, 20)) {
+      const details = JSON.parse(run(["versions", "view", prior.id, "--config", path.join(root, "wrangler.jsonc"), "--json"], true));
+      const sha = messageSource(details);
+      if (sha && fingerprint(details) === identity) matches.set(sha, prior.id);
+    }
+    if (matches.size !== 1) throw new Error("Active Worker content has no unique published source identity");
+    [activeWorkerSha, identityMatchedVersionId] = matches.entries().next().value;
+  }
   const context = publicationSourceContext({ root, toolingRoot, sourceSha, activeWorkerSha,
-    activeWorkerVersionId: active.versions[0].version_id });
+    activeWorkerVersionId: active.versions[0].version_id, identityMatchedVersionId });
   const repository = process.env.GITHUB_REPOSITORY;
   const currentRun = process.env.GITHUB_RUN_ID;
   if (!repository || !currentRun) throw new Error("GitHub publication identity is missing");

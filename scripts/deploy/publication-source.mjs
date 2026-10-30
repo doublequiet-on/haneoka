@@ -89,7 +89,7 @@ export function resolveSealedPublication(repository, runId) {
   return { sourceSha: run.head_sha, runId, artifactName, artifactId: artifacts[0].id };
 }
 
-export function publicationSourceContext({ root, toolingRoot, sourceSha, activeWorkerSha, activeWorkerVersionId }) {
+export function publicationSourceContext({ root, toolingRoot, sourceSha, activeWorkerSha, activeWorkerVersionId, identityMatchedVersionId }) {
   const repository = process.env.GITHUB_REPOSITORY, runId = process.env.GITHUB_RUN_ID;
   if (!repository || !runId) throw new Error("GitHub publication identity is missing");
   const recoveryRunId = process.env.HANEOKA_PUBLICATION_ARTIFACT_RUN_ID || "";
@@ -111,7 +111,7 @@ export function publicationSourceContext({ root, toolingRoot, sourceSha, activeW
   catch { git(root, "fetch", "--no-tags", "origin", activeWorkerSha); }
   return {
     ...sourceEligibility(root, sourceSha, mainSha, { allowPublicationTooling: Boolean(recoveryRunId), activeWorkerSha }),
-    activeWorkerVersionId, publisherSha, recoveredFromRunId: recoveryRunId || null,
+    activeWorkerVersionId, identityMatchedVersionId, publisherSha, recoveredFromRunId: recoveryRunId || null,
   };
 }
 
