@@ -10,6 +10,7 @@ export interface GekisoRewardOptions {
   luckSamples: number;
   rank: 1;
   minComboBonus?: number;
+  minJustWindowMs?: number;
 }
 export const DEFAULT_GEKISO_REWARDS: GekisoRewardOptions = { just: 0.25, luckSamples: 32, rank: 1 };
 

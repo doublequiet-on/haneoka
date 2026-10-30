@@ -9,10 +9,10 @@ import { tileMedia } from "../ui/tile";
 import { specList } from "../ui/spec";
 import { sectionHeading } from "./catalog";
 import { songRulesControl } from "./song-rules";
-import { saveTeam } from "./results";
+import { justWindowValue, saveTeam } from "./results";
 import { renderSongComparison } from "./song-comparison-view";
 import { toolLayout } from "./tool-layout";
-import { eventSection, gekisoSamplingAdvanced, playConditions, songList } from "./build-tab";
+import { eventSection, gekisoSamplingAdvanced, justWindowControl, playConditions, songList } from "./build-tab";
 import { segmented } from "../ui/controls";
 import { clock } from "../../lib/team-builder/engine/execution";
 import { compareHits } from "../../lib/team-builder/engine/merge";
@@ -39,11 +39,15 @@ function teamSpec(host: TeamBuilder) {
 }
 function manualSamplingReady(host: TeamBuilder): boolean {
   const goal = host.manualGoal();
-  if (goal.kind !== "gekiso" || (Number.isInteger(goal.seeds) && goal.seeds >= 0)) return true;
+  if (goal.kind !== "gekiso") return true;
+  const invalidSamples = !Number.isInteger(goal.seeds) || goal.seeds < 0;
+  const window = host.hasMission("JustCount", goal.songs) ? host.searchSettings.justWindowMs : 0;
+  if (!invalidSamples && Number.isInteger(window) && window >= 0) return true;
   host.submitted = true;
-  host.error = host.t("pt.invalidSamples", "Enter zero or a positive integer");
+  host.error = invalidSamples ? host.t("pt.invalidSamples", "Enter zero or a positive integer")
+    : host.t("invalidCombo", "Enter a positive integer");
   host.requestUpdate();
-  void host.focusInput("tb-luck-samples");
+  void host.focusInput(invalidSamples ? "tb-luck-samples" : "tb-just-window");
   return false;
 }
 async function evaluate(host: TeamBuilder) {
@@ -64,7 +68,7 @@ async function evaluate(host: TeamBuilder) {
       team: teamSpec(host),
       songs: goal.songs,
       play: goal.kind === "score" ? goal.play : { great: 0, good: 0, bad: 0, miss: 0 },
-      ...(goal.kind === "gekiso" ? { gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds } } : {}),
+      ...(goal.kind === "gekiso" ? { gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds, minJustWindowMs: goal.minJustWindowMs } } : {}),
       challengeEventId: goal.kind === "score" ? goal.challengeEventId : null,
       event: null,
     });
@@ -74,7 +78,7 @@ async function evaluate(host: TeamBuilder) {
     }
   } catch (error) {
     if (host.ownsTask(task) && !(error instanceof DOMException && error.name === "AbortError"))
-      host.error = String(error);
+      host.error = host.errorReason(error);
   } finally {
     if (host.ownsTask(task)) {
       host.manualBusy = false;
@@ -164,7 +168,7 @@ async function suggest(host: TeamBuilder, slot: number) {
     }
   } catch (error) {
     if (host.ownsTask(task) && !(error instanceof DOMException && error.name === "AbortError"))
-      host.error = String(error);
+      host.error = host.errorReason(error);
   } finally {
     if (host.ownsTask(task)) {
       host.manualSuggesting = -1;
@@ -202,6 +206,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
   const rows = results
     ? [...results].sort((a, b) => b.score.mean - a.score.mean).map((row) => ({ song: row.song, row }))
     : host.manualGoal().songs.map((song) => ({ song, row: null }));
+  const showJustWindow = rows.some(value => value.row?.justWindow);
   const suggestions = host.manualSuggestionsFor === host.manualSuggestionContext() ? host.manualSuggestions : null;
   const suggesting = host.manualSuggesting;
   const calculating = host.taskKind === "evaluation" || host.taskKind === "suggestion";
@@ -457,6 +462,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
             <section class="surface stack">
               ${sectionHeading({ icon: "piano", label: host.t("farm.conditions", "Play and account conditions") })}
               ${playConditions(host, { ...host.searchSettings, goal: showSkipScore ? "score" : "gekiso" })}
+              ${showSkipScore ? nothing : justWindowControl(host)}
               ${
               showSkipScore
                 ? html`
@@ -546,6 +552,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                                             ? `${format(host, row.score.min)} – ${format(host, row.score.max)}`
                                             : "—",
                                         },
+                                        row?.justWindow ? { label: host.t("justWindowActual", "JUST tap window"), value: justWindowValue(host, row.justWindow) } : null,
                                         showSkipScore
                                           ? {
                                               label: host.t("skipScore", "Skip score"),
@@ -575,6 +582,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                         <th scope="col" class="is-numeric">${host.t("power", "Power")}</th>
                         <th scope="col" class="is-numeric">${host.t("expectedScore", "Expected score")}</th>
                         <th scope="col" class="is-numeric">${host.t("scoreRange", "Range")}</th>
+                        ${showJustWindow ? html`<th scope="col" class="is-numeric">${host.t("justWindowActual", "JUST tap window")}</th>` : nothing}
                         ${
                         showSkipScore
                           ? html`
@@ -598,6 +606,7 @@ function renderTeamWorkspace(host: TeamBuilder, mode: "teams" | "manual" | "comp
                           <td class="is-numeric">
                             ${row ? `${format(host, row.score.min)} – ${format(host, row.score.max)}` : "—"}
                           </td>
+                          ${showJustWindow ? html`<td class="is-numeric">${row?.justWindow ? justWindowValue(host, row.justWindow) : "—"}</td>` : nothing}
                           ${
                                         showSkipScore
                                           ? html`

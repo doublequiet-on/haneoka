@@ -267,11 +267,17 @@ const QUICK_MS = 700;
 /** Leader shards per Worker: enough for the free Workers to even out uneven subtrees. */
 const SHARDS_PER_WORKER = 4;
 
+function requestMissions(data: TeamBuilderData, request: EngineRequest, song: SongRef): number[] {
+  const original = objectRow(data.songs[String(song.songId)]?.gekisou).missionTypes;
+  const arena = request.goal.kind === "gekiso" ? request.goal.arena : undefined;
+  return [0, 1, 2].map(index => arena?.missions[index] || request.songRules?.missions[index]
+    || (Array.isArray(original) ? original[index] : 0));
+}
+
 function wholeSongReward(data: TeamBuilderData, request: EngineRequest): boolean {
   const goal = request.goal;
   if (request.k !== 1 || goal.kind !== "event" || !goal.gekiso || goal.songs.length !== 1) return false;
-  const missions = objectRow(data.songs[String(goal.songs[0]!.songId)]?.gekisou).missionTypes;
-  return Array.isArray(missions) && missions.length > 0 && missions.every(mission => mission === 2 || mission === 3);
+  return requestMissions(data, request, goal.songs[0]!).every(mission => mission === 2 || mission === 3);
 }
 
 function weightedLiveReward(request: EngineRequest): boolean {
@@ -285,8 +291,7 @@ function phasedReward(data: TeamBuilderData, request: EngineRequest): boolean {
   if (weightedLiveReward(request)) return true;
   const goal = request.goal;
   if (request.k !== 1 || goal.kind !== "event" || !goal.gekiso || goal.songs.length !== 1) return false;
-  const missions = objectRow(data.songs[String(goal.songs[0]!.songId)]?.gekisou).missionTypes;
-  return Array.isArray(missions) && missions.length > 0 && missions.every(mission => mission === 1);
+  return requestMissions(data, request, goal.songs[0]!).every(mission => mission === 1);
 }
 
 /** Main-thread handle on the engine Workers. A search is split by leader over a pool of Workers and merged; cancelling
@@ -416,6 +421,9 @@ export class EngineClient {
   }
 
   private async execute(request: EngineRequest, started: number, progress?: Pending["progress"], snapshot?: Pending["snapshot"], onFinalResult?: FinalResultHandler, responseKey: string | null = null, pool = this.pool): Promise<EngineResponse> {
+    const justWindow = request.goal.kind === "gekiso" ? request.goal.minJustWindowMs
+      : request.goal.kind === "event" ? request.goal.gekiso?.minJustWindowMs : undefined;
+    if (justWindow && justWindow > 0) request = { ...request, noFloor: true };
     const idlest = () => this.idlest(pool);
     const before = pool.map(worker => worker.timing());
     let latest = emptyResponse(request);
@@ -512,21 +520,21 @@ export class EngineClient {
                 team: { members: team.members, snaps: team.snaps, leader: team.members[0]! },
                 songs: goal.songs.filter((_, position) => position % count === index),
                 play: { great: 0, good: 0, bad: 0, miss: 0 }, challengeEventId: null, event: null,
-                gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds, arena: goal.arena } },
+                gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds, arena: goal.arena, minJustWindowMs: goal.minJustWindowMs } },
             })))).flat();
             if (stopped) return latest;
             const bySong = new Map(evaluated.map(value => [chartKey(value.song), value]));
             const songs: EngineHit[] = goal.songs.map(song => {
               const value = bySong.get(chartKey(song))!;
               return { ...team, song, power: value.power, slotPowers: value.slotPowers, key: value.score.mean,
-                score: value.score, event: null, skipScore: value.skipScore, potential: null };
+                score: value.score, justWindow: value.justWindow, event: null, skipScore: value.skipScore, potential: null };
             });
             const average = (value: (hit: EngineHit) => number) => songs.reduce((sum, hit) => sum + value(hit), 0) / songs.length;
-            sharedSeed = { ...team, song: null, key: average(hit => hit.score!.mean), power: average(hit => hit.power),
+            sharedSeed = evaluated.every(value => value.justWindow?.meetsTarget !== false) ? { ...team, song: null, key: average(hit => hit.score!.mean), power: average(hit => hit.power),
               slotPowers: team.slotPowers.map((_, index) => average(hit => hit.slotPowers[index]!)),
               score: { mean: average(hit => hit.score!.mean), min: average(hit => hit.score!.min), max: average(hit => hit.score!.max),
                 median: average(hit => hit.score!.median), orders: [], ranks: {}, bestOrder: [], worstOrder: [] },
-              event: null, skipScore: null, potential: null, aggregate: { kind: "mean", songs } };
+              event: null, skipScore: null, potential: null, aggregate: { kind: "mean", songs } } : undefined;
           }
         }
         const parts = workers.map(() => emptyResponse(request));
@@ -573,13 +581,13 @@ export class EngineClient {
         request = { ...request, rewardLexicographic: true };
       const opponents = request.goal.kind === "gekiso" && !!request.goal.opponents;
       const wholeReward = wholeSongReward(this.data, request);
-      const smallSampledReward = wholeReward && request.members.length < PARALLEL_MIN_MEMBERS
+      const parallelSampledReward = wholeReward
         && request.goal.kind === "event" && (request.goal.gekiso?.luckSamples ?? 0) >= 16 && request.constraints.leader === null;
       const wholeChallenge = request.goal.kind === "event" && !request.goal.gekiso
         && request.goal.route === "challenge" && request.goal.songs.length === 1 && request.k > 1;
-      const parallel = pool.length > 1 && (request.members.length >= PARALLEL_MIN_MEMBERS || smallSampledReward) && request.goal.kind !== "plan" && !request.seedOnly
+      const parallel = pool.length > 1 && (request.members.length >= PARALLEL_MIN_MEMBERS || parallelSampledReward) && request.goal.kind !== "plan" && !request.seedOnly
         && !wholeChallenge
-        && (!wholeReward || smallSampledReward)
+        && (!wholeReward || parallelSampledReward)
         && !(request.goal.kind === "gekiso" && request.goal.songs.length === 1 && (request.constraints.leader !== null || request.goal.opponents));
       if (!parallel) {
         const response = await idlest().send<EngineResponse>({ type: "run", id: 0, request }, progress, opponents ? undefined : accept);
@@ -590,6 +598,8 @@ export class EngineClient {
       if (request.goal.kind === "gekiso" && !request.goal.opponents) {
         const goal = request.goal;
         const deferScores = goal.criterion === "max" && goal.seeds === 0 && request.k > 1;
+        const comboMean = goal.songs.length === 1 && goal.criterion === "mean" && goal.seeds === 0
+          && requestMissions(this.data, request, goal.songs[0]!).every(mission => mission === 1);
         const count = request.constraints.leader ? 1 : pool.length;
         const sampledMax = goal.criterion === "max" && goal.seeds >= 16 && request.k === 1;
         if (sampledMax) this.warm();
@@ -635,14 +645,15 @@ export class EngineClient {
           const hit = job.hit;
           const key = exactTeam(hit);
           const evaluations = await engine.send<TeamEvaluation[]>({ type: "evaluate", id: 0, request: {
+            songRules: request.songRules,
             members: request.members, snaps: request.snaps, player: request.player, unknownPolicy: request.unknownPolicy,
             team: { members: hit.members, snaps: hit.snaps, leader: hit.members[0]! }, songs: [hit.song!],
-            play: { great: 0, good: 0, bad: 0, miss: 0 }, gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds },
+            play: { great: 0, good: 0, bad: 0, miss: 0 }, gekiso: { accuracy: goal.accuracy, rank: goal.rank, seeds: goal.seeds, arena: goal.arena, minJustWindowMs: goal.minJustWindowMs },
             challengeEventId: null, event: null,
           } });
           if (stopped) return;
           const evaluation = evaluations[0]!;
-          if (evaluation.score.max !== hit.key || evaluation.power !== hit.power) throw new Error("engine-score-completion-mismatch");
+          if (evaluation.score.max !== hit.key || evaluation.power !== hit.power || evaluation.justWindow?.meetsTarget === false) throw new Error("engine-score-completion-mismatch");
           const value: DeferredHit = { ...hit, score: evaluation.score };
           delete value.pendingScores;
           completeScores.set(key, value);
@@ -679,6 +690,11 @@ export class EngineClient {
               for (const key of response.unknownCards) unknownCards.add(key);
               if (job.shard === null) {
                 state.warm[job.seed!] = response;
+                if (comboMean && !state.seeded && response.overall.length >= request.k) {
+                  state.seeded = true;
+                  for (const shard of state.responses) shard.results[0]!.hits = response.results[0]?.hits ?? [];
+                  wake();
+                }
                 if (sampledMax && !request.noFloor && engine.supportsFloor && !state.seeded && response.overall.length >= request.k) {
                   state.seeded = true;
                   wake();
@@ -827,7 +843,7 @@ export class EngineClient {
           if (hit?.score?.orders.length !== 120 || pendingScores(hit)) return;
           if (!rewardBest || compareHits(hit, rewardBest) < 0) rewardBest = hit;
         };
-        if (!request.noFloor && !smallSampledReward && stage <= 0) {
+        if (!request.noFloor && !(parallelSampledReward && request.members.length < PARALLEL_MIN_MEMBERS) && stage <= 0) {
           quickWorker = idlest();
           let quick: EngineResponse;
           const quickResponse = (response: EngineResponse): EngineResponse => request.rewardLexicographic ? {

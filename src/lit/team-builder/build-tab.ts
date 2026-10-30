@@ -106,6 +106,28 @@ export function comboBonusControl(host: TeamBuilder): TemplateResult | typeof no
   `;
 }
 
+export function justWindowControl(host: TeamBuilder): TemplateResult | typeof nothing {
+  const s = host.searchSettings;
+  if (!host.hasMission("JustCount", s.songs)) return nothing;
+  return html`
+    <md-outlined-text-field
+      id="tb-just-window"
+      data-tb-field
+      type="number"
+      min="0"
+      step="1"
+      inputmode="numeric"
+      label=${host.t("justWindow", "Ideal JUST tap window")}
+      prefix-text="±"
+      suffix-text="ms"
+      .value=${live(s.justWindowMs === 0 ? "" : String(s.justWindowMs))}
+      placeholder=${host.t("unlimitedCombo", "No minimum")}
+      ?error=${host.submitted && (!Number.isInteger(s.justWindowMs) || s.justWindowMs < 0)}
+      @change=${(event: Event) => host.updateSettings({ justWindowMs: Number((event.target as HTMLInputElement).value) })}
+    ></md-outlined-text-field>
+  `;
+}
+
 export function placementControl(host: TeamBuilder): TemplateResult {
   const s = host.searchSettings;
   const set = (patch: Partial<BuildSettings>) => host.updateSettings(patch);
@@ -827,7 +849,7 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                 ${
                   s.goal === "gekiso"
                     ? html`
-                        ${comboBonusControl(host)} ${placementControl(host)}
+                        ${comboBonusControl(host)} ${justWindowControl(host)} ${placementControl(host)}
                       `
                     : nothing
                 }

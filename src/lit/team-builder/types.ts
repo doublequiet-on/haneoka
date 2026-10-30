@@ -71,6 +71,7 @@ export interface BuildSettings {
   gekisoRank: number;
   gekisoPlacementMode: "rank" | "opponents";
   minComboBonus: number;
+  justWindowMs: number;
   gekisoSamplingMode: LuckSamplingMode;
   /** Manual draft: zero retains nominal expectations; positive counts average seeds 0 through n-1. */
   gekisoSeeds: number;
@@ -147,6 +148,7 @@ export const DEFAULT_SETTINGS: BuildSettings = {
   gekisoRank: 1,
   gekisoPlacementMode: "rank",
   minComboBonus: 1,
+  justWindowMs: 0,
   gekisoSamplingMode: "auto",
   gekisoSeeds: 0,
   gekisoOpponents: ["", "", ""],

@@ -122,6 +122,8 @@ export type Goal =
       rank: number;
       /** Minimum base multiplier at the opening COMBO, evaluated at initial LIFE. */
       minComboBonus?: number;
+      /** Minimum steady JUST tap half-window, in milliseconds. */
+      minJustWindowMs?: number;
       /** Opponents' scores in each range; when given they decide the placements instead of `rank`. */
       opponents?: number[][];
       /** Luck ranges: 0 takes the exact nominal lottery expectation; n > 0 averages n native lottery seeds instead. */
@@ -205,6 +207,7 @@ export interface EngineHit {
   rewardRanking?: RewardFraction[];
   /** Base multiplier, including the first-COMBO sustained bonus. */
   comboBonus?: number | null;
+  justWindow?: { beforeMs: number; afterMs: number; meetsTarget: boolean };
   gekiso?: { just: GekisoJustSummary; luckSamples: number; sampled: boolean; rank: 1 };
   song: SongRef | null;
   /** Leader first. */
@@ -455,6 +458,8 @@ export async function runEngine(master: EngineMaster, charts: ChartCache, reques
   if (request.aggregation === "mean") throw new Error("shared-native-required");
   if (request.goal.kind === "gekiso" && request.goal.arena) throw new Error("arena-native-required");
   if (request.goal.kind === "event" && request.goal.rewardPlan) throw new Error("reward-plan-native-required");
+  if ((request.goal.kind === "gekiso" && request.goal.minJustWindowMs) ||
+    (request.goal.kind === "event" && request.goal.gekiso?.minJustWindowMs)) throw new Error("just-window-native-required");
   const started = performance.now();
   const deadline = deadlineOf(request);
   request = { ...request, deadline };
@@ -891,6 +896,7 @@ export interface TeamEvaluation {
   score: HitScore;
   skipScore: number;
   event: { points: number; items: number; bonusPercent: number; itemBonusPercent: number } | null;
+  justWindow?: { beforeMs: number; afterMs: number; meetsTarget: boolean };
 }
 export async function evaluateTeam(
   master: EngineMaster,

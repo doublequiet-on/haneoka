@@ -972,9 +972,17 @@ export class TeamBuilder extends LitElement {
       minComboBonus: this.hasComboSongs(songs) ? settings.minComboBonus : 1,
       just: this.hasMission("JustCount", songs) ? settings.just : 100,
       ptJust: this.hasMission("JustCount", songs) ? settings.ptJust : 100,
+      justWindowMs: this.hasMission("JustCount", songs) ? settings.justWindowMs : 0,
       songs,
       planChallengeSongs: settings.planChallengeSongs.filter((song) => exists(song) && challengeIds.has(song.songId)),
     };
+  }
+  errorReason(error: unknown): string {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (reason === "just-window-input") return this.t("invalidCombo", "Enter a positive integer");
+    if (reason === "just-window-timing") return this.t("justWindowTiming", "JUST tap timing data is missing");
+    if (reason === "just-window-random") return this.t("justWindowRandom", "Window targets are unavailable for this random skill");
+    return reason;
   }
   inputIssues(recommendation = false): { field: string; message: string }[] {
     const s = this.searchSettings,
@@ -1044,7 +1052,9 @@ export class TeamBuilder extends LitElement {
     }
     if (s.goal === "event" && s.rewardPlan && !compileRewardPlan(effectiveRewardPlan(s.rewardPlan, s.route !== "live"), { songs: s.planChallengeSongs, consumption: s.challengePoints }))
       add("tb-reward-plan", "rewardPlan.invalidRate", "Enter conversion rates and challenge charts");
-    const gekiso = recommendation ? s.ptMode === "gekiso" : s.goal === "gekiso";
+    const gekiso = s.goal === "gekiso" || (s.goal === "event" && s.ptMode === "gekiso" && s.route === "live");
+    if (gekiso && this.hasMission("JustCount", s.songs) && (!Number.isInteger(s.justWindowMs) || s.justWindowMs < 0))
+      add("tb-just-window", "invalidCombo", "Enter a positive integer");
     if (gekiso && (!Number.isInteger(s.minComboBonus) || s.minComboBonus < 1))
       add("tb-combo", "invalidCombo", "Enter a positive integer");
     if (s.goal === "gekiso" && s.gekisoSamplingMode === "manual" &&
@@ -1148,6 +1158,7 @@ export class TeamBuilder extends LitElement {
       },
       rank: s.gekisoPlacementMode === "opponents" ? 1 : s.gekisoRank,
       minComboBonus: s.minComboBonus,
+      ...(s.justWindowMs > 0 ? { minJustWindowMs: s.justWindowMs } : {}),
       ...(s.gekisoPlacementMode === "opponents" ? { opponents: parseOpponents(s.gekisoOpponents).ranges } : {}),
       seeds: resolveLuckSamples(s),
     };
@@ -1189,7 +1200,7 @@ export class TeamBuilder extends LitElement {
             ranking: s.ptMode === "gekiso" && s.route === "live" ? "pt-only" : "primary",
             route: s.route, eventId: s.eventId, songs: s.route === "skip" ? [] : s.songs,
             consumption: s.route === "challenge" ? s.challengePoints : s.boosts, play,
-            ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: resolveLuckSamples(s, "rewards"), rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
+            ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: resolveLuckSamples(s, "rewards"), rank: 1 as const, minComboBonus: s.minComboBonus, ...(s.justWindowMs > 0 ? { minJustWindowMs: s.justWindowMs } : {}) } } : {}),
           };
         }
         return {
@@ -1210,7 +1221,7 @@ export class TeamBuilder extends LitElement {
                 },
               }
             : {}),
-          ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: resolveLuckSamples(s, "rewards"), rank: 1 as const, minComboBonus: s.minComboBonus } } : {}),
+          ...(s.ptMode === "gekiso" && s.route === "live" ? { gekiso: { just: s.ptJust / 100, luckSamples: resolveLuckSamples(s, "rewards"), rank: 1 as const, minComboBonus: s.minComboBonus, ...(s.justWindowMs > 0 ? { minJustWindowMs: s.justWindowMs } : {}) } } : {}),
           ranking: s.ptMode === "gekiso" && s.route === "live" ? "pt-only" : s.fullRanking ? undefined : "primary",
           route: s.route,
           eventId: s.eventId,
@@ -1354,7 +1365,7 @@ export class TeamBuilder extends LitElement {
       if (generation !== this.runGeneration || contextKey !== this.calculationContext()) return;
       if (response.stopReason === "error")
         this.error = this.t("searchFailed", "The search failed: {reason}", {
-          reason: response.error ?? "engine-error",
+          reason: this.errorReason(response.error ?? "engine-error"),
         });
       if (!accepted) {
         this.resultSession = session;
@@ -1397,7 +1408,7 @@ export class TeamBuilder extends LitElement {
         !(error instanceof DOMException && error.name === "AbortError")
       )
         this.error = this.t("searchFailed", "The search failed: {reason}", {
-          reason: error instanceof Error ? error.message : String(error),
+          reason: this.errorReason(error),
         });
     } finally {
       loading.finish();
@@ -1430,7 +1441,7 @@ export class TeamBuilder extends LitElement {
       if (this.ownsTask(task) && this.growth?.context === context) this.growth = null;
       if (this.ownsTask(task) && !(error instanceof DOMException && error.name === "AbortError"))
         this.error = this.t("searchFailed", "The search failed: {reason}", {
-          reason: error instanceof Error ? error.message : String(error),
+          reason: this.errorReason(error),
         });
     }
     this.releaseTask(task);

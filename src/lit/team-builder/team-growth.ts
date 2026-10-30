@@ -408,7 +408,7 @@ export class TeamGrowthComparison {
     } catch (error) {
       if (active() && !this.stopped && !(error instanceof DOMException && error.name === "AbortError"))
         this.error = host.t("searchFailed", "The search failed: {reason}", {
-          reason: error instanceof Error ? error.message : String(error),
+          reason: host.errorReason(error),
         });
     } finally {
       if (this.task === task) {

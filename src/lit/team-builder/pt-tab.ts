@@ -30,6 +30,7 @@ import {
   renderBuildRun,
   renderCandidates,
   comboBonusControl,
+  justWindowControl,
   gekisoSamplesControl,
   eventSection,
   playSection,
@@ -139,6 +140,7 @@ export class PtController {
               luckSamples: resolveLuckSamples(s, "rewards"),
               rank: 1 as const,
               minComboBonus: s.minComboBonus,
+              ...(s.justWindowMs > 0 ? { minJustWindowMs: s.justWindowMs } : {}),
             },
           }
         : {}),
@@ -381,7 +383,7 @@ export class PtController {
       );
       await this.runner.run(job, scope, deadline);
     } catch (error) {
-      if (generation === this.generation) this.error = error instanceof Error ? error.message : String(error);
+      if (generation === this.generation) this.error = host.errorReason(error);
     } finally {
       if (this.task === task) {
         this.running = false;
@@ -587,6 +589,7 @@ function renderSetup(host: TeamBuilder): TemplateResult {
                 ${host.t("playAp", "All Perfect")} · ${host.t("gekisoPlacements", "Scoring placements")}: 1
               </span>
               ${comboBonusControl(host)}
+              ${justWindowControl(host)}
               ${
                 host.hasMission("JustCount")
                   ? ptField(

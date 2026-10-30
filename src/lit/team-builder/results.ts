@@ -32,9 +32,15 @@ import { entityHref, resourceCollectionHref } from "../../lib/resource-route";
 import type { ReleaseServer } from "../../lib/release-server";
 import type { Locale } from "../../i18n/locales";
 import { roomRequiredScore, teamPowerNeeded } from "../../lib/chart-rates";
+import { specList } from "../ui/spec";
 
 const RANK_NAMES: Record<string, string> = { "1": "E", "2": "D", "3": "C", "4": "B", "5": "A", "6": "S", "7": "SS" };
 export const timelines = new Map<string, Timeline | "loading" | "error">();
+export function justWindowValue(host: TeamBuilder, window: NonNullable<EngineHit["justWindow"]>): TemplateResult {
+  const before = format(host, window.beforeMs, 2), after = format(host, window.afterMs, 2);
+  return html`<span class="cluster"><span class="tabular">${before === after ? `±${before} ms` : `−${before} / +${after} ms`}</span>
+    ${window.meetsTarget ? nothing : html`<span class="chip">${host.t("justWindowUnmet", "Below the desired window")}</span>`}</span>`;
+}
 const resultInputs = resultRequest;
 function growthPolicyLabel(host: TeamBuilder, settings: BuildSettings): string {
   const input = resultInputs(host);
@@ -1133,6 +1139,7 @@ export function renderHit(
                   }
                   <div class="cluster">${chips(host, hit)}</div>
                   ${eventBonusDetails(host, hit)}
+                  ${hit.justWindow ? specList([{ label: host.t("justWindowActual", "JUST tap window"), value: justWindowValue(host, hit.justWindow) }]) : nothing}
                   ${distribution(host, hit, hit.song)} ${powerNeeded(host, hit, hit.song)} ${skillOrderView(host, hit)}
                 </div>
               `
