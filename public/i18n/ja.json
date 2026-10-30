@@ -301,10 +301,23 @@
       "manual": "マニュアル",
       "loadingTips": "ロード中のヒント",
       "showSpoilerContent": "ネタバレを含む内容を表示",
-      "dateFormat": "日付の形式",
-      "dateLong": "長い日付",
-      "dateShort": "短い日付",
-      "dateIso": "ISO 形式"
+      "timeZone": "タイムゾーン",
+      "zoneLocal": "現地時間",
+      "dateAuto": "自動",
+      "dateOrder": "日付の順序",
+      "dateMonth": "月",
+      "dateDay": "日",
+      "dateSeparator": "区切り",
+      "dateYear": "年",
+      "yearAuto": "今年以外",
+      "yearAlways": "常に",
+      "yearNever": "表示しない",
+      "dateYearDigits": "年の桁数",
+      "dateWeekday": "曜日",
+      "timeFormat": "時刻の形式",
+      "timeHour": "時",
+      "timeSeconds": "秒",
+      "timeZoneName": "タイムゾーン表記"
     }
   },
   "home": {

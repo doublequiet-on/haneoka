@@ -301,10 +301,23 @@
       "manual": "Manual",
       "loadingTips": "Loading tips",
       "showSpoilerContent": "Show spoiler content",
-      "dateFormat": "Date format",
-      "dateLong": "Long date",
-      "dateShort": "Short date",
-      "dateIso": "ISO date"
+      "timeZone": "Time zone",
+      "zoneLocal": "Local time",
+      "dateAuto": "Auto",
+      "dateOrder": "Date order",
+      "dateMonth": "Month",
+      "dateDay": "Day",
+      "dateSeparator": "Separator",
+      "dateYear": "Year",
+      "yearAuto": "Other years",
+      "yearAlways": "Always",
+      "yearNever": "Never",
+      "dateYearDigits": "Year digits",
+      "dateWeekday": "Weekday",
+      "timeFormat": "Time format",
+      "timeHour": "Hour",
+      "timeSeconds": "Seconds",
+      "timeZoneName": "Time zone label"
     }
   },
   "home": {

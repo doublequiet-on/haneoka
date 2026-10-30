@@ -50,6 +50,8 @@
   }
   .settings-options {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 8px;
     align-items: center;
     min-width: 0;
@@ -74,6 +76,9 @@
     padding-inline: 16px;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
+  }
+  .settings-zone {
+    min-inline-size: min(280px, 100%);
   }
   .settings-option input {
     position: absolute;
@@ -228,6 +233,7 @@
       padding-block: 20px;
     }
     .settings-options {
+      justify-content: flex-start;
       padding-inline-start: 40px;
     }
   }
@@ -253,6 +259,13 @@
     }
     .settings-options--seed {
       gap: 4px;
+    }
+    .settings-option.settings-option--sample {
+      width: auto;
+      flex-basis: auto;
+    }
+    .settings-option__sample {
+      padding-inline: 12px;
     }
     .settings-option__palette {
       width: 32px;

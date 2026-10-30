@@ -6,7 +6,7 @@ import I18nText from "./I18nText.astro";
 import SettingsOption from "./SettingsOption.astro";
 import type { Locale } from "../i18n/locales";
 import { t } from "../i18n/messages";
-import { formatDate } from "../lib/date-format";
+import { DATE_CHOICES, formatDate, formatTime, type DateChoiceKey, type DatePreferences } from "../lib/date-format";
 import "../styles/settings.css";
 import cnFlag from "circle-flags/flags/cn.svg?url";
 import enUsFlag from "circle-flags/flags/language/en-us.svg?url";
@@ -41,7 +41,62 @@ interface Group {
   initial: string;
   options: Option[];
 }
-const sample = Date.UTC(2026, 9, 30, 3);
+// Thursday 5 March, 21:07:09 UTC: single-digit month and day show padding, the hour shows the cycle.
+const sample = Date.UTC(2026, 2, 5, 21, 7, 9);
+const morning = Date.UTC(2026, 2, 5, 9, 7, 9);
+const dateSample = (preferences: Partial<DatePreferences>, year: "always" | "never" = "never") =>
+  formatDate(locale, sample, { timeZone: "UTC", year, preferences: { weekday: "none", ...preferences } });
+const timeSample = (preferences: Partial<DatePreferences>, at = sample) =>
+  formatTime(locale, at, { timeZone: "UTC", preferences: { seconds: "off", ...preferences } });
+const named = (key: string, label: string) => ({ keyName: `settings.labels.${key}`, label, sample: t(locale, `settings.labels.${key}`, label) });
+const dateSamples: { [K in DateChoiceKey]: (value: DatePreferences[K]) => Partial<Option> } = {
+  order: (order) => (order === "auto" ? named("dateAuto", "Auto") : { sample: dateSample({ order }, "always") }),
+  month: (month) => ({ sample: dateSample({ month }) }),
+  day: (day) => ({ sample: dateSample({ day }) }),
+  separator: (separator) => ({ sample: dateSample({ month: "numeric", separator }, "always") }),
+  year: (year) =>
+    ({ auto: named("yearAuto", "Other years"), always: named("yearAlways", "Always"), never: named("yearNever", "Never") })[year],
+  yearDigits: (yearDigits) => ({ sample: dateSample({ yearDigits }, "always") }),
+  weekday: (weekday) => ({ sample: dateSample({ weekday }) }),
+  cycle: (cycle) => ({ sample: timeSample({ cycle }) }),
+  hour: (hour) => ({ sample: timeSample({ hour, cycle: "h23" }, morning) }),
+  seconds: (seconds) => ({ sample: timeSample({ seconds }) }),
+  zoneName: (zoneName) =>
+    zoneName === "none"
+      ? { sample: formatTime(locale, sample, { timeZone: "Asia/Tokyo", preferences: { seconds: "off" } }) }
+      : { sample: formatTime(locale, sample, { preferences: { seconds: "off", zone: "Asia/Tokyo", zoneName } }) },
+};
+const dateTitles: Record<DateChoiceKey, [string, string, string]> = {
+  order: ["dateOrder", "Date order", "swap_horiz"],
+  month: ["dateMonth", "Month", "calendar_month"],
+  day: ["dateDay", "Day", "event"],
+  separator: ["dateSeparator", "Separator", "more_horiz"],
+  year: ["dateYear", "Year", "calendar_month"],
+  yearDigits: ["dateYearDigits", "Year digits", "pin"],
+  weekday: ["dateWeekday", "Weekday", "event"],
+  cycle: ["timeFormat", "Time format", "schedule"],
+  hour: ["timeHour", "Hour", "schedule"],
+  seconds: ["timeSeconds", "Seconds", "schedule"],
+  zoneName: ["timeZoneName", "Time zone label", "public"],
+};
+const dateGroups: Group[] = (Object.keys(DATE_CHOICES) as DateChoiceKey[]).map((key) => {
+  const [title, label, icon] = dateTitles[key];
+  const values = (DATE_CHOICES[key] as readonly string[]).filter((value) => key !== "day" || value !== "ordinal" || locale === "en");
+  return {
+    name: `date-${key}`,
+    key: `settings.labels.${title}`,
+    label,
+    icon,
+    initial: values[0],
+    options: values.map((value) => {
+      const option = (dateSamples[key] as (value: string) => Partial<Option>)(value);
+      return { value, label: option.sample ?? value, ...option } as Option;
+    }),
+  };
+});
+const timeZones = (Intl as typeof Intl & { supportedValuesOf(kind: "timeZone"): string[] }).supportedValuesOf("timeZone");
+const preview = formatDate(locale, sample, { time: true, timeZone: "UTC" });
+
 const groups: Group[] = [
   {
     name: "theme",
@@ -82,19 +137,7 @@ const groups: Group[] = [
       { value: "compact", icon: "density_small", keyName: "common.layout.compact", label: "Compact" },
     ],
   },
-  {
-    name: "dateFormat",
-    key: "settings.labels.dateFormat",
-    label: "Date format",
-    icon: "calendar_month",
-    initial: "long",
-    options: (["long", "short", "iso"] as const).map((format) => ({
-      value: format,
-      sample: formatDate(locale, sample, { format, timeZone: "UTC", year: format === "iso" ? "always" : "never" }),
-      keyName: `settings.labels.date${format[0].toUpperCase()}${format.slice(1)}`,
-      label: { long: "Long date", short: "Short date", iso: "ISO date" }[format],
-    })),
-  },
+  ...dateGroups,
   {
     name: "locale",
     key: "settings.labels.language",
@@ -129,8 +172,45 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
   <AppShell locale={locale} route="/settings" title={title} titleKey="navigation.settings">
     <section class="page">
       <div class="settings-content">
-        {[groups.slice(0, 4), groups.slice(4, 5), groups.slice(5)].map((card) => (
+        {[groups.slice(0, 3), dateGroups, groups.slice(3 + dateGroups.length, 4 + dateGroups.length), groups.slice(4 + dateGroups.length)].map((card) => (
           <div class="settings-card">
+            {card === dateGroups && (
+              <section class="settings-group" aria-labelledby="date-zone-title">
+                <div class="settings-row">
+                  <header class="settings-row__header">
+                    <span class="settings-row__icon">
+                      <Icon name="public" />
+                    </span>
+                    <div>
+                      <h2 id="date-zone-title">
+                        <I18nText keyName="settings.labels.timeZone" fallback="Time zone" locale={locale} />
+                      </h2>
+                      <p class="settings-current" data-date-preview aria-live="polite">{preview}</p>
+                    </div>
+                  </header>
+                  <md-outlined-select
+                    class="settings-zone"
+                    data-date-zone
+                    menu-positioning="fixed"
+                    aria-label={t(locale, "settings.labels.timeZone", "Time zone")}
+                    data-i18n-aria-label="settings.labels.timeZone"
+                    data-i18n-aria-label-fallback="Time zone"
+                  >
+                    <md-select-option value="local" selected>
+                      <div slot="headline" data-i18n="settings.labels.zoneLocal" data-i18n-fallback="Local time">
+                        {t(locale, "settings.labels.zoneLocal", "Local time")}
+                      </div>
+                    </md-select-option>
+                    <md-select-option value="UTC"><div slot="headline">UTC</div></md-select-option>
+                    {timeZones.map((zone) => (
+                      <md-select-option value={zone}>
+                        <div slot="headline">{zone.replaceAll("_", " ")}</div>
+                      </md-select-option>
+                    ))}
+                  </md-outlined-select>
+                </div>
+              </section>
+            )}
             {card.map((group) => (
               <section class="settings-group" aria-labelledby={`${group.name}-title`}>
                 <div class="settings-row">
@@ -208,9 +288,20 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
 
 <script>
   import "@material/web/switch/switch.js";
+  import "@material/web/select/outlined-select.js";
+  import "@material/web/select/select-option.js";
   import { applySeed, currentSeed, isSeed } from "../lib/tuning";
   import { applyDensity, currentDensity, isDensity } from "../lib/density";
-  import { applyDateFormat, currentDateFormat, isDateFormat } from "../lib/date-format";
+  import {
+    datePreferences,
+    formatDate,
+    isDateChoice,
+    isDateChoiceKey,
+    isTimeZone,
+    setDatePreferences,
+    DATE_CHOICES,
+    type DateChoiceKey,
+  } from "../lib/date-format";
   import { japaneseSongTitles, setJapaneseSongTitles } from "../lib/song-display";
   import { difficultyEstimatesEnabled, setDifficultyEstimatesEnabled, observeDifficultyDisplay } from "../lib/difficulty-display";
   import { isReleaseServer, readSelectedReleaseServer, releaseServerPath, writeReleaseServer } from "../lib/release-server";
@@ -249,7 +340,25 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
     select("theme", document.documentElement.dataset.themePreference || "system");
     select("seed", currentSeed());
     select("density", currentDensity());
-    select("dateFormat", currentDateFormat());
+    const dates = datePreferences();
+    const datePreview = settings.querySelector<HTMLElement>("[data-date-preview]");
+    const showDatePreview = () => {
+      if (datePreview) datePreview.textContent = formatDate(document.documentElement.lang || "ja", Date.now(), { time: true });
+    };
+    (Object.keys(DATE_CHOICES) as DateChoiceKey[]).forEach((key) => select(`date-${key}`, dates[key]));
+    showDatePreview();
+    const zone = settings.querySelector<HTMLElement & { value: string }>("[data-date-zone]");
+    if (zone) {
+      zone.value = dates.zone;
+      zone.addEventListener(
+        "change",
+        () => {
+          if (isTimeZone(zone.value)) setDatePreferences({ zone: zone.value });
+          showDatePreview();
+        },
+        { signal },
+      );
+    }
     select("release", readSelectedReleaseServer());
     syncLocale();
     requestAnimationFrame(() => {
@@ -272,8 +381,10 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
           applySeed(value, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
         } else if (name === "density" && isDensity(value)) {
           applyDensity(value);
-        } else if (name === "dateFormat" && isDateFormat(value)) {
-          applyDateFormat(value);
+        } else if (name.startsWith("date-")) {
+          const key = name.slice(5);
+          if (isDateChoiceKey(key) && isDateChoice(key, value)) setDatePreferences({ [key]: value });
+          showDatePreview();
         } else if (name === "locale" && isLocale(value)) {
           location.assign(`${localePath(location.pathname, value)}${location.search}${location.hash}`);
           return;

@@ -301,10 +301,23 @@
       "manual": "说明",
       "loadingTips": "加载提示",
       "showSpoilerContent": "显示剧透内容",
-      "dateFormat": "日期格式",
-      "dateLong": "长日期",
-      "dateShort": "短日期",
-      "dateIso": "ISO 格式"
+      "timeZone": "时区",
+      "zoneLocal": "本地时间",
+      "dateAuto": "自动",
+      "dateOrder": "日期顺序",
+      "dateMonth": "月份",
+      "dateDay": "日",
+      "dateSeparator": "分隔符",
+      "dateYear": "年份",
+      "yearAuto": "非本年",
+      "yearAlways": "始终",
+      "yearNever": "不显示",
+      "dateYearDigits": "年份位数",
+      "dateWeekday": "星期",
+      "timeFormat": "时间格式",
+      "timeHour": "小时",
+      "timeSeconds": "秒",
+      "timeZoneName": "时区标注"
     }
   },
   "home": {

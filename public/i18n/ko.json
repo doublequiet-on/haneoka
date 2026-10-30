@@ -301,10 +301,23 @@
       "manual": "매뉴얼",
       "loadingTips": "로딩 팁",
       "showSpoilerContent": "스포일러 콘텐츠 표시",
-      "dateFormat": "날짜 형식",
-      "dateLong": "긴 날짜",
-      "dateShort": "짧은 날짜",
-      "dateIso": "ISO 형식"
+      "timeZone": "시간대",
+      "zoneLocal": "현지 시간",
+      "dateAuto": "자동",
+      "dateOrder": "날짜 순서",
+      "dateMonth": "월",
+      "dateDay": "일",
+      "dateSeparator": "구분 기호",
+      "dateYear": "연도",
+      "yearAuto": "올해 제외",
+      "yearAlways": "항상",
+      "yearNever": "표시 안 함",
+      "dateYearDigits": "연도 자릿수",
+      "dateWeekday": "요일",
+      "timeFormat": "시간 형식",
+      "timeHour": "시",
+      "timeSeconds": "초",
+      "timeZoneName": "시간대 표기"
     }
   },
   "home": {
