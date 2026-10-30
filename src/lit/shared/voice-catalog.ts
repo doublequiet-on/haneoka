@@ -5,6 +5,7 @@
 // Effects/Dependencies: Resolves interface labels through the locale catalogue.
 import { clientText } from "../../i18n/client";
 import type { JsonRecord } from "./catalog";
+import { formatDate } from "../../lib/date-format";
 
 export function voiceText(locale: string, key: string, ...values: Array<string | number>): string {
   return clientText(locale, `media.voice.${key}`, key, values);
@@ -228,12 +229,7 @@ export function voiceCalendarDate(locale: string, value: unknown, year = 0): str
   const match = /^(\d{1,2})\/(\d{1,2})$/.exec(String(value || ""));
   if (!match) return "";
   const date = new Date(Date.UTC(year > 0 ? year : 2000, Number(match[1]) - 1, Number(match[2])));
-  return new Intl.DateTimeFormat(locale, {
-    month: "long",
-    day: "numeric",
-    ...(year > 0 ? { year: "numeric" as const } : {}),
-    timeZone: "UTC",
-  }).format(date);
+  return formatDate(locale, date, { timeZone: "UTC", year: year > 0 ? "always" : "never" });
 }
 export function voiceSeasonRange(entry: JsonRecord, locale: string): string {
   const year = Number(entry.year) || 0;

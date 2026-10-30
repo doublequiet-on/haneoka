@@ -27,6 +27,7 @@ import { loadingIndicator } from "./ui/loading-indicator";
 import { accordion } from "./ui/accordion";
 import { serverAvailabilityBadge } from "./shared/server-availability";
 import { preferredVoiceRecordings } from "../lib/cross-server/voices";
+import { formatDate } from "../lib/date-format";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -353,12 +354,7 @@ export class CharacterVoices extends LitElement {
     const startAt = Number((entry.startAt as number[] | undefined)?.[0] || 0);
     const realLiveDate =
       voiceGroup(entry) === "realLive" && startAt
-        ? new Intl.DateTimeFormat(this.locale, {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-            timeZone: "Asia/Tokyo",
-          }).format(startAt)
+        ? formatDate(this.locale, startAt, { timeZone: "Asia/Tokyo", year: "always" })
         : "";
     return seasonal || birthdayDate || realLiveDate;
   }

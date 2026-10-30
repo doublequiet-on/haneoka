@@ -31,6 +31,7 @@ import {
   type CalendarKind,
   type CalendarOccurrence,
 } from "../lib/calendar-model";
+import { formatDate, formatDateRange } from "../lib/date-format";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -215,12 +216,7 @@ export class CalendarPage extends LitElement {
     return resolveLocalizedText(item.title, this.locale);
   }
   private dateLabel(date: CalendarDate, weekday = false) {
-    return new Intl.DateTimeFormat(this.locale, {
-      timeZone: "UTC",
-      month: "long",
-      day: "numeric",
-      ...(weekday ? { weekday: "long" as const } : {}),
-    }).format(calendarDateUtc(date));
+    return formatDate(this.locale, calendarDateUtc(date), { timeZone: "UTC", weekday });
   }
   private select(date: CalendarDate, focus = false) {
     this.selected = date;
@@ -319,15 +315,10 @@ export class CalendarPage extends LitElement {
     }
   }
   private timedRange(startAtMs: number, endAtMs?: number) {
-    const date = new Intl.DateTimeFormat(this.locale, {
-      timeZone: this.zone,
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    return `${date.format(startAtMs)}${endAtMs ? ` – ${date.format(endAtMs)}` : ""}`;
+    const options = { time: true, timeZone: this.zone };
+    return endAtMs
+      ? formatDateRange(this.locale, startAtMs, endAtMs, options)
+      : formatDate(this.locale, startAtMs, options);
   }
   private gameRange(item: CalendarOccurrence) {
     const window = item.gameWindow;

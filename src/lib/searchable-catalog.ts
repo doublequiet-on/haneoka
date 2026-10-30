@@ -16,6 +16,7 @@ import {
   type StaticCatalogRelease,
 } from "./static-catalog-source";
 import type { ReleaseServer } from "./release-server";
+import { formatDate as siteDate } from "./date-format";
 
 export interface SearchableCatalogFact {
   key: string;
@@ -296,7 +297,7 @@ function timestamp(value: unknown): number {
 
 function formatDate(value: unknown, locale: Locale): string {
   const time = timestamp(value);
-  return time ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(time)) : "";
+  return siteDate(locale, time);
 }
 
 function collectSkillNames(value: unknown, locale: Locale, output: string[] = []): string[] {

@@ -12,15 +12,16 @@ interface Props {
   icon?: string;
   image?: string;
   swatch?: string;
+  sample?: string;
   beta?: boolean;
   selected?: boolean;
 }
-const { name, value, locale, label, keyName, icon, image, swatch, beta, selected } = Astro.props;
+const { name, value, locale, label, keyName, icon, image, swatch, sample, beta, selected } = Astro.props;
 const text = keyName ? t(locale, keyName, label) : label;
 ---
 
 <label
-  class:list={["settings-option", { "settings-option--swatch": swatch }]}
+  class:list={["settings-option", { "settings-option--swatch": swatch, "settings-option--sample": sample }]}
   style={
     swatch && swatch !== "haneoka"
       ? `--swatch: var(--md-ref-${swatch}); --swatch-container: var(--md-ref-${swatch}-container); --swatch-on: var(--md-ref-${swatch}-on-container)`
@@ -43,6 +44,8 @@ const text = keyName ? t(locale, keyName, label) : label;
         <i></i>
         <i></i>
       </span>
+    ) : sample ? (
+      <span class="settings-option__sample md-label-large">{sample}</span>
     ) : image ? (
       <span class="settings-option__image">
         <img src={image} width="28" height="28" alt="" />

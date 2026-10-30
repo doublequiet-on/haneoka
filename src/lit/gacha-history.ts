@@ -49,6 +49,7 @@ import { emptyState, loadingState } from "./ui/state";
 import { renderDetailSectionHeading } from "./shared/detail-section-heading";
 import "../styles/gacha-history.css";
 import { renderLocalSaveSourcePicker } from "./shared/local-save-source-picker";
+import { formatDate, formatTime } from "../lib/date-format";
 
 type Axis = "category" | "pool" | "kind" | "rarity" | "pickup";
 type Tab = "overview" | "pools" | "collection" | "records" | "trends" | "settings";
@@ -254,14 +255,10 @@ export class GachaHistory extends LitElement {
     return analyzeGachaHistory(batches, this.offsetMinutes);
   }
   private serverTime(value: string, kind: "time" | "date" | "dateTime") {
-    return new Intl.DateTimeFormat(this.locale, {
-      timeZone: "UTC",
-      ...(kind === "time"
-        ? { timeStyle: "short" as const }
-        : kind === "date"
-          ? { dateStyle: "medium" as const }
-          : { dateStyle: "medium" as const, timeStyle: "short" as const }),
-    }).format(new Date(new Date(value).getTime() + this.offsetMinutes * 60000));
+    const shifted = new Date(value).getTime() + this.offsetMinutes * 60000;
+    return kind === "time"
+      ? formatTime(this.locale, shifted, { timeZone: "UTC" })
+      : formatDate(this.locale, shifted, { timeZone: "UTC", time: kind !== "date" });
   }
   private t(key: string, values: Record<string, string | number> = {}) {
     return clientText(this.locale, `catalog.gachaHistory.${key}`, "", values);
@@ -1510,7 +1507,7 @@ export class GachaHistory extends LitElement {
               label:
                 day === "unknown"
                   ? this.t("unknownTime")
-                  : new Intl.DateTimeFormat(this.locale, { dateStyle: "full" }).format(new Date(`${day}T12:00:00`)),
+                  : formatDate(this.locale, `${day}T12:00:00`, { weekday: true }),
               metadata: this.drawSummary(batches),
               expanded: this.expanded.has(day),
               onExpandedChange: (open) => this.toggleExpanded(day, open),

@@ -49,6 +49,7 @@ import {
 import "../styles/playlists.css";
 import { snackbar } from "../lib/snackbar";
 import { navigationDocumentUrl } from "../lib/document-url";
+import { formatDate } from "../lib/date-format";
 
 type RecordValue = Record<string, unknown>;
 type View = "hub" | "detail" | "edit";
@@ -1270,7 +1271,7 @@ export class PlaylistHub extends LitElement {
                   playlist.updatedAt
                     ? html`
                         <span>
-                          ${this.t("updated", "Updated {date}", { date: new Date(playlist.updatedAt).toLocaleDateString(this.locale) })}
+                          ${this.t("updated", "Updated {date}", { date: formatDate(this.locale, playlist.updatedAt) })}
                         </span>
                       `
                     : nothing

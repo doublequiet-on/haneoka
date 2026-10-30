@@ -300,7 +300,11 @@
       "tuneDefault": "기본",
       "manual": "매뉴얼",
       "loadingTips": "로딩 팁",
-      "showSpoilerContent": "스포일러 콘텐츠 표시"
+      "showSpoilerContent": "스포일러 콘텐츠 표시",
+      "dateFormat": "날짜 형식",
+      "dateLong": "긴 날짜",
+      "dateShort": "짧은 날짜",
+      "dateIso": "ISO 형식"
     }
   },
   "home": {

@@ -3,6 +3,7 @@ import { localizedFallbacks } from "./localized-text";
 import { preferredDeviceLocale } from "../i18n/negotiation";
 import { isLocale, type Locale } from "../i18n/locales";
 import { isReleaseServer, type ReleaseServer } from "./resource-route";
+import { formatDate } from "./date-format";
 
 /** Current operational data; timestamps are Unix seconds, independent of releases. */
 export interface Announcement {
@@ -125,22 +126,7 @@ export function mergeAnnouncements(
   return sortAnnouncements([...entries.values()]);
 }
 export function announcementDate(seconds: number, locale: string, full = false): string {
-  const date = new Date(seconds * 1000);
-  if (!seconds || !Number.isFinite(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(
-    locale,
-    full
-      ? {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          timeZoneName: "short",
-        }
-      : { year: "numeric", month: "short", day: "numeric" },
-  ).format(date);
+  return formatDate(locale, seconds * 1000, full ? { time: true, year: "always" } : {}) || "—";
 }
 export const announcementDatetime = (seconds: number): string =>
   seconds > 0 && Number.isFinite(new Date(seconds * 1000).getTime()) ? new Date(seconds * 1000).toISOString() : "";

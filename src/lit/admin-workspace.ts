@@ -27,6 +27,7 @@ import { segmented } from "./ui/controls";
 import type { AdminAnalyticsView, AdminSeriesData, AdminGeoData, AdminAnalyticsOptions } from "./admin-analytics";
 import "./community-sticker";
 import { snackbar } from "../lib/snackbar";
+import { formatDate } from "../lib/date-format";
 
 type Value = Record<string, unknown>;
 const sections = ["overview", "users", "posts", "forums", "reports", "appeals", "operations"] as const;
@@ -329,11 +330,7 @@ export class AdminWorkspace extends LitElement {
   }
   private date(value: unknown) {
     const number = typeof value === "number" ? value : Date.parse(String(value || ""));
-    return Number.isFinite(number)
-      ? new Intl.DateTimeFormat(document.documentElement.lang, { dateStyle: "medium", timeStyle: "short" }).format(
-          number,
-        )
-      : "—";
+    return formatDate(document.documentElement.lang, number, { time: true }) || "—";
   }
   private country(value: unknown) {
     const code = typeof value === "string" ? value : "";
@@ -2130,9 +2127,7 @@ export class AdminWorkspace extends LitElement {
   private fullDate(value: unknown) {
     if (value === null || value === undefined || value === "") return "—";
     const date = new Date(typeof value === "number" || /^\d+$/u.test(String(value)) ? Number(value) : String(value));
-    return Number.isFinite(date.getTime())
-      ? new Intl.DateTimeFormat(preferredLocale(), { dateStyle: "medium", timeStyle: "medium" }).format(date)
-      : "—";
+    return formatDate(preferredLocale(), date, { time: true, seconds: true }) || "—";
   }
   private userFields(rows: Array<[string, unknown]>) {
     return html`

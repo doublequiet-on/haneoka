@@ -25,6 +25,7 @@ import { fetchJson } from "./shared/catalog";
 import { readCompanionHistory } from "../lib/gacha-history-device";
 import { downloadBlob } from "../lib/canvas-capture";
 import { withUiMarksProjection } from "../lib/ui-marks";
+import { formatDate } from "../lib/date-format";
 
 class GachaHistoryWorkspace extends HTMLElement {
   private records: StoredHistory[] = [];
@@ -316,7 +317,7 @@ class GachaHistoryWorkspace extends HTMLElement {
           row.snapshot.source.server
         ],
       ),
-      label: new Date(row.snapshot.queriedAt).toLocaleString(view.locale),
+      label: formatDate(view.locale, row.snapshot.queriedAt, { time: true }),
     }));
     view.selectedAccountKey = this.selected;
     view.historyKinds = (current?.histories ?? (snapshot ? [snapshot] : [])).map((row) => row.historyKind);

@@ -24,6 +24,7 @@ import {
 } from "./shared/game-records";
 
 import type { GameRecordsRegion, GameRankingDto, SongRankingRowDto, GameRecordsErrorDto } from "../lib/game-records";
+import { formatDate } from "../lib/date-format";
 type Region = GameRecordsRegion;
 type Phase = "idle" | "loading" | "ready" | "error";
 
@@ -260,7 +261,7 @@ export class SongRanking extends GameRecordsCardsElement {
     const cached = this.cache.get(this.rankingUrl(region));
     const value = cached?.reportedAt || 0;
     if (!value) return "";
-    return new Intl.DateTimeFormat(this.locale, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(value));
+    return formatDate(this.locale, value, { time: true });
   }
 
   private renderPageActions() {

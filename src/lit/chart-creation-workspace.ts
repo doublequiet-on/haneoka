@@ -110,6 +110,7 @@ import {
   moveChartSelection,
   deleteChartSelectionGroup,
 } from "../../packages/chart-editor/src/creation/selection";
+import { formatDate } from "../lib/date-format";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -3659,7 +3660,7 @@ export class ChartCreationWorkspace extends LitElement {
           ${this.documents.map(
             (document) => html`
               <md-select-option value=${document.id}>
-                <div slot="headline">${document.title || this.t("project")} · ${new Date(document.updatedAt).toLocaleString(this.locale)}</div>
+                <div slot="headline">${document.title || this.t("project")} · ${formatDate(this.locale, document.updatedAt, { time: true })}</div>
               </md-select-option>
             `,
           )}
@@ -3678,7 +3679,7 @@ export class ChartCreationWorkspace extends LitElement {
                 .selected=${revision.revision === this.activeRevision}
               >
                 <div slot="headline">
-                  ${revision.revision} · ${new Date(revision.savedAt).toLocaleString(this.locale)}
+                  ${revision.revision} · ${formatDate(this.locale, revision.savedAt, { time: true })}
                 </div>
               </md-select-option>
             `,

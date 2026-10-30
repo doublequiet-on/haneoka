@@ -29,6 +29,7 @@ import {
 import { renderResults } from "./results";
 import { segmented } from "../ui/controls";
 import { SCORE_GOALS, scoreText } from "./score-goal";
+import { formatDate } from "../../lib/date-format";
 
 interface ArenaDraft {
   leagueId: number;
@@ -258,7 +259,7 @@ export function renderArenaTab(host: TeamBuilder) {
             period.regulation
               ? html`
                   <time datetime=${new Date(period.regulation.endAt).toISOString()}>
-                    ${host.t("arena.until", "Until {time}", { time: new Intl.DateTimeFormat(host.locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: arena.catalog!.timeZone, timeZoneName: "short" }).format(period.regulation.endAt) })}
+                    ${host.t("arena.until", "Until {time}", { time: formatDate(host.locale, period.regulation.endAt, { time: true }) })}
                   </time>
                 `
               : nothing

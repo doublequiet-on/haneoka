@@ -12,6 +12,7 @@ import { rememberSignedIn, signedInHint } from "../lib/community-viewer";
 import { readEarlyJson, takeEarlyRead } from "../lib/early-read";
 import { snackbar } from "../lib/snackbar";
 import { hasUserCapability } from "../lib/user-roles";
+import { formatDate } from "../lib/date-format";
 
 const ACCOUNT_LABEL_KEYS: Readonly<Record<string, string>> = {
   appeal: "community.page.appeal",
@@ -187,10 +188,7 @@ export class AccountWorkspace extends LitElement {
     return value.startsWith("/") && !value.startsWith("//") ? value : "/account";
   }
   private date(value: unknown) {
-    const date = typeof value === "number" ? new Date(value) : new Date(String(value || ""));
-    return Number.isFinite(date.valueOf())
-      ? new Intl.DateTimeFormat(document.documentElement.lang, { dateStyle: "medium", timeStyle: "short" }).format(date)
-      : "—";
+    return formatDate(document.documentElement.lang, typeof value === "number" ? value : String(value || ""), { time: true }) || "—";
   }
 
   private async request(url: string, init: RequestInit = {}) {

@@ -24,6 +24,7 @@ import { icon } from "./ui/icon";
 import { emptyState, errorState } from "./ui/state";
 import "@material/web/progress/linear-progress.js";
 import "../styles/song-ranking.css";
+import { formatDate } from "../lib/date-format";
 
 const WINDOW = 100;
 
@@ -381,7 +382,7 @@ export class ArenaRanking extends GameRecordsCardsElement {
             ? html`
                 <p class="song-ranking__fetched">
                   ${data.provider === "official" ? this.label("officialSource", "Official game rankings") : this.label("updated", "Updated")}
-                  ${new Intl.DateTimeFormat(this.locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(observedAt))}
+                  ${formatDate(this.locale, observedAt, { time: true })}
                 </p>
               `
             : nothing

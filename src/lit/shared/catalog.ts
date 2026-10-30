@@ -7,6 +7,7 @@ import { withUiMarksProjection } from "../../lib/ui-marks";
 import { clientText, getI18nClient } from "../../i18n/client";
 import { resolveLocalizedText } from "../../lib/localized-text";
 import { readReleaseServer } from "../../lib/release-server";
+import { formatDate, formatDateRange } from "../../lib/date-format";
 
 export type JsonRecord = Record<string, unknown>;
 export const UI_LOCALES = ["ja", "en", "zh-TW", "zh-CN", "ko"] as const;
@@ -154,21 +155,10 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
  *  Master dates are JST-authored and stored as UTC milliseconds; the
  *  browser converts them to local time. */
 export function gameDateTime(locale: string, value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "";
-  return new Intl.DateTimeFormat(locale, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
+  return formatDate(locale, value, { time: true });
 }
 
 /** A game-side window, rendered in the viewer's own timezone. */
 export function gameDateTimeRange(locale: string, start: number, end: number): string {
-  const from = gameDateTime(locale, start);
-  const to = gameDateTime(locale, end);
-  if (!from) return to;
-  return `${from} - ${to || "\u2014"}`;
+  return formatDateRange(locale, start, end, { time: true });
 }

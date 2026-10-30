@@ -45,6 +45,7 @@ import { icon } from "./ui/icon";
 import { clientText } from "../i18n/client";
 import type { Locale } from "@haneoka/i18n";
 import "../styles/mission.css";
+import { formatDate } from "../lib/date-format";
 
 type Mode = "all" | "regular" | "limited";
 const CATEGORY_LABELS: Record<number, [string, string]> = {
@@ -528,17 +529,7 @@ export class MissionWorkspace extends LitElement {
     `;
   }
   private date(value: number) {
-    return value && Number.isFinite(value)
-      ? new Intl.DateTimeFormat(this.locale, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          timeZone: "Asia/Tokyo",
-          timeZoneName: "short",
-        }).format(new Date(value))
-      : "";
+    return formatDate(this.locale, value, { time: true });
   }
   private goal(mission: Mission) {
     const goal = Number(mission.goal || 0);

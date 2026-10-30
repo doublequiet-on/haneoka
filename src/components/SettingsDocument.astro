@@ -6,6 +6,7 @@ import I18nText from "./I18nText.astro";
 import SettingsOption from "./SettingsOption.astro";
 import type { Locale } from "../i18n/locales";
 import { t } from "../i18n/messages";
+import { formatDate } from "../lib/date-format";
 import "../styles/settings.css";
 import cnFlag from "circle-flags/flags/cn.svg?url";
 import enUsFlag from "circle-flags/flags/language/en-us.svg?url";
@@ -29,6 +30,7 @@ interface Option {
   icon?: string;
   image?: string;
   swatch?: string;
+  sample?: string;
   beta?: boolean;
 }
 interface Group {
@@ -39,6 +41,7 @@ interface Group {
   initial: string;
   options: Option[];
 }
+const sample = Date.UTC(2026, 9, 30, 3);
 const groups: Group[] = [
   {
     name: "theme",
@@ -80,6 +83,19 @@ const groups: Group[] = [
     ],
   },
   {
+    name: "dateFormat",
+    key: "settings.labels.dateFormat",
+    label: "Date format",
+    icon: "calendar_month",
+    initial: "long",
+    options: (["long", "short", "iso"] as const).map((format) => ({
+      value: format,
+      sample: formatDate(locale, sample, { format, timeZone: "UTC", year: format === "iso" ? "always" : "never" }),
+      keyName: `settings.labels.date${format[0].toUpperCase()}${format.slice(1)}`,
+      label: { long: "Long date", short: "Short date", iso: "ISO date" }[format],
+    })),
+  },
+  {
     name: "locale",
     key: "settings.labels.language",
     label: "Language",
@@ -113,7 +129,7 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
   <AppShell locale={locale} route="/settings" title={title} titleKey="navigation.settings">
     <section class="page">
       <div class="settings-content">
-        {[groups.slice(0, 3), groups.slice(3, 4), groups.slice(4)].map((card) => (
+        {[groups.slice(0, 4), groups.slice(4, 5), groups.slice(5)].map((card) => (
           <div class="settings-card">
             {card.map((group) => (
               <section class="settings-group" aria-labelledby={`${group.name}-title`}>
@@ -194,6 +210,7 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
   import "@material/web/switch/switch.js";
   import { applySeed, currentSeed, isSeed } from "../lib/tuning";
   import { applyDensity, currentDensity, isDensity } from "../lib/density";
+  import { applyDateFormat, currentDateFormat, isDateFormat } from "../lib/date-format";
   import { japaneseSongTitles, setJapaneseSongTitles } from "../lib/song-display";
   import { difficultyEstimatesEnabled, setDifficultyEstimatesEnabled, observeDifficultyDisplay } from "../lib/difficulty-display";
   import { isReleaseServer, readSelectedReleaseServer, releaseServerPath, writeReleaseServer } from "../lib/release-server";
@@ -232,6 +249,7 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
     select("theme", document.documentElement.dataset.themePreference || "system");
     select("seed", currentSeed());
     select("density", currentDensity());
+    select("dateFormat", currentDateFormat());
     select("release", readSelectedReleaseServer());
     syncLocale();
     requestAnimationFrame(() => {
@@ -254,6 +272,8 @@ const estimatedDifficultyLabel = "settings.labels.showDifficultyEstimates";
           applySeed(value, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
         } else if (name === "density" && isDensity(value)) {
           applyDensity(value);
+        } else if (name === "dateFormat" && isDateFormat(value)) {
+          applyDateFormat(value);
         } else if (name === "locale" && isLocale(value)) {
           location.assign(`${localePath(location.pathname, value)}${location.search}${location.hash}`);
           return;

@@ -17,6 +17,7 @@ import { scoreRankIcon } from "./shared/score-rank";
 import "./song-room-calculator";
 import "./song-score-targets";
 import type { ChartRates } from "../lib/chart-rates";
+import { formatDate } from "../lib/date-format";
 
 type Item = Record<string, unknown>;
 
@@ -147,7 +148,7 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
       const timestamp = Number(Array.isArray(raw) ? raw.find((entry) => Number(entry) > 0) : raw || 0);
       const value =
         key === "publishedAt" && timestamp
-          ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(timestamp))
+          ? formatDate(locale, timestamp)
           : fieldValue(item, key);
       return value ? [{ key, value }] : [];
     },

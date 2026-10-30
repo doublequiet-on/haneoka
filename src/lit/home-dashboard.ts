@@ -74,6 +74,7 @@ import {
   birthdayRefreshAt,
   type BirthdayGachaPeriod,
 } from "../lib/home-birthday";
+import { formatDate } from "../lib/date-format";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -965,15 +966,7 @@ export class HomeDashboard extends LitElement {
 
   /* ---------- derived ---------- */
   private formatDate(value: number | string, short = false, timeZone?: string) {
-    const date = new Date(typeof value === "string" && /^\d+$/u.test(value) ? Number(value) : value);
-    return Number.isNaN(date.getTime())
-      ? "—"
-      : new Intl.DateTimeFormat(
-          this.locale,
-          short
-            ? { month: "short", day: "numeric", timeZone }
-            : { year: "numeric", month: "short", day: "numeric", timeZone },
-        ).format(date);
+    return formatDate(this.locale, value, { timeZone, year: short ? "never" : "auto" }) || "—";
   }
   private songTitle(song: JsonRecord) {
     return songTitle(song, this.locale).text;
@@ -2274,20 +2267,9 @@ export class HomeDashboard extends LitElement {
         : undefined;
     let date = "";
     if (instant)
-      date = new Intl.DateTimeFormat(this.locale, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }).format(instant);
+      date = formatDate(this.locale, instant, { time: true });
     else if (entry.eventDate && /^\d{4}-\d{2}-\d{2}$/u.test(entry.eventDate))
-      date = new Intl.DateTimeFormat(this.locale, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      }).format(new Date(`${entry.eventDate}T00:00:00Z`));
+      date = formatDate(this.locale, `${entry.eventDate}T00:00:00Z`, { timeZone: "UTC" });
     return date
       ? [date, entry.venue].filter(Boolean).join(" · ")
       : entry.summary ||

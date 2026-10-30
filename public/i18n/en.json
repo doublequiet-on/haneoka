@@ -300,7 +300,11 @@
       "tuneDefault": "Original key",
       "manual": "Manual",
       "loadingTips": "Loading tips",
-      "showSpoilerContent": "Show spoiler content"
+      "showSpoilerContent": "Show spoiler content",
+      "dateFormat": "Date format",
+      "dateLong": "Long date",
+      "dateShort": "Short date",
+      "dateIso": "ISO date"
     }
   },
   "home": {

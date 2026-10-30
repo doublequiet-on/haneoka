@@ -37,6 +37,7 @@ import type {
 } from "../lib/game-records";
 import "../styles/settings.css";
 import "../styles/song-ranking.css";
+import { formatDate } from "../lib/date-format";
 type Phase = "idle" | "loading" | "ready" | "error" | "unavailable";
 let profileOwnerSequence = 0;
 export class PlayerProfileWorkspace extends GameRecordsCardsElement {
@@ -617,7 +618,7 @@ export class PlayerProfileWorkspace extends GameRecordsCardsElement {
                 <p class="song-ranking__profile-updated">
                   ${this.label("updated", "Updated")} ·
                   <time datetime=${new Date(profile.lastUpdatedAtMs).toISOString()}>
-                    ${new Intl.DateTimeFormat(this.locale, { dateStyle: "medium", timeStyle: "medium" }).format(profile.lastUpdatedAtMs)}
+                    ${formatDate(this.locale, profile.lastUpdatedAtMs, { time: true })}
                   </time>
                 </p>
               `

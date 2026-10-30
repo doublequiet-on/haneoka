@@ -300,7 +300,11 @@
       "tuneDefault": "原色",
       "manual": "說明",
       "loadingTips": "載入提示",
-      "showSpoilerContent": "顯示劇透內容"
+      "showSpoilerContent": "顯示劇透內容",
+      "dateFormat": "日期格式",
+      "dateLong": "長日期",
+      "dateShort": "短日期",
+      "dateIso": "ISO 格式"
     }
   },
   "home": {

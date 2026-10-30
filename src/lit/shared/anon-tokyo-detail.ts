@@ -3,6 +3,7 @@ import { specList, type SpecRow } from "../ui/spec";
 import { icon } from "../ui/icon";
 import { resolveLocalizedText } from "../../lib/localized-text";
 import { recordValues, readPath } from "./catalog";
+import { formatDate } from "../../lib/date-format";
 
 type Value = Record<string, unknown>;
 interface Context {
@@ -138,9 +139,7 @@ export function renderAnonTokyoDetails(c: Context): TemplateResult {
         : typeof value === "string" && value
           ? Date.parse(value)
           : NaN;
-    return Number.isFinite(timestamp)
-      ? new Intl.DateTimeFormat(c.locale, { dateStyle: "medium" }).format(timestamp)
-      : "";
+    return Number.isFinite(timestamp) ? formatDate(c.locale, timestamp) : "";
   };
   add("start", date(availability.start || item.startAt));
   add("end", date(availability.end || item.endAt));

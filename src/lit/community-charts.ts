@@ -38,6 +38,7 @@ import { navigationDocumentUrl } from "../lib/document-url";
 import type { ChartSimulator } from "./runtime/chart-simulator";
 import "./ui/image-gallery";
 import "./entity-comments";
+import { formatDate } from "../lib/date-format";
 interface ChartVersion {
   revision: number;
   title: string;
@@ -454,9 +455,7 @@ export class CommunityCharts extends LitElement {
                     {
                       label: this.t("publishedAt"),
                       value: row.publishedAt
-                        ? new Intl.DateTimeFormat(this.locale, { dateStyle: "medium" }).format(
-                            new Date(row.publishedAt),
-                          )
+                        ? formatDate(this.locale, row.publishedAt)
                         : "—",
                     },
                   ],
@@ -531,7 +530,7 @@ export class CommunityCharts extends LitElement {
                                         ${version.revision} · ${version.title}
                                       </strong>
                                       <span class="list-item__supporting">
-                                        ${new Date(version.createdAt).toLocaleString(this.locale)} ·
+                                        ${formatDate(this.locale, version.createdAt, { time: true })} ·
                                         ${this.t(version.publishedAt ? "published" : "draft")}
                                       </span>
                                     </span>

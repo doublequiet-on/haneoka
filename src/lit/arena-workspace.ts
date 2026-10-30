@@ -40,6 +40,7 @@ import { filterChip, iconButton, rovingKeydown, segmented } from "./ui/controls"
 import "./arena-ranking";
 import "../styles/settings.css";
 import "../styles/arena.css";
+import { formatDate, formatDateRange } from "../lib/date-format";
 
 type Tab = "overview" | "ranking" | "schedule" | "songs" | "ranks" | "rules";
 const TABS: readonly Tab[] = ["overview", "ranking", "schedule", "songs", "ranks", "rules"];
@@ -264,12 +265,7 @@ export class ArenaWorkspace extends LitElement {
     `;
   }
   private short(at: number) {
-    return new Intl.DateTimeFormat(this.locale, {
-      month: "numeric",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(at);
+    return formatDate(this.locale, at, { time: true });
   }
   private remaining(until: number) {
     const minutes = Math.max(0, Math.round((until - this.now) / 60000));
@@ -366,14 +362,7 @@ export class ArenaWorkspace extends LitElement {
     `;
   }
   private range(start: number, end: number) {
-    const format = new Intl.DateTimeFormat(this.locale, {
-      month: "numeric",
-      day: "numeric",
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    return format.formatRange(start, end);
+    return formatDateRange(this.locale, start, end, { time: true, weekday: true });
   }
   private rewardList(rewards: readonly ArenaReward[]) {
     return html`
@@ -1052,7 +1041,7 @@ export class ArenaWorkspace extends LitElement {
                 ? html`
                     <span class="arena-status" data-status="upcoming">${this.short(published)}</span>
                   `
-                : new Intl.DateTimeFormat(this.locale, { dateStyle: "medium" }).format(published),
+                : formatDate(this.locale, published),
             ];
           }),
         )}

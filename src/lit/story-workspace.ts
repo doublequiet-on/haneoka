@@ -81,6 +81,7 @@ import { SPOILER_CONTENT_EVENT } from "../lib/spoiler-content";
 import type { StoryPayload } from "../lib/entity-graph";
 import type { WorkspaceCollectionPayload } from "../lib/workspace-page-data";
 import { loadingIndicator } from "./ui/loading-indicator";
+import { formatDate } from "../lib/date-format";
 
 /** Message paths for this view's finite control/metadata identifiers. */
 const uiLabelPaths: Readonly<Record<string, string>> = {
@@ -1091,7 +1092,7 @@ export class StoryWorkspace extends LitElement {
   }
   private releaseDate(item: JsonRecord) {
     const value = this.releaseValue(item);
-    return value ? new Intl.DateTimeFormat(this.locale, { dateStyle: "medium" }).format(new Date(value)) : "";
+    return formatDate(this.locale, value);
   }
   private duration(item: JsonRecord) {
     const seconds = Math.round(Number(item.playTime || 0));
