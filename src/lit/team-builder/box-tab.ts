@@ -295,7 +295,7 @@ export function renderCardEditor(host: TeamBuilder): TemplateResult | typeof not
   };
   const fieldKey = (field: string) => `${kind === "members" ? "m" : "s"}${cardId}.${({ awk: "awake", lvl: "level", rnk: "rank", sk: "liveSkillLevel", gsk: "gekisoSkillLevel" } as Record<string,string>)[field] ?? field}`;
   const steps = (label: string, field: string, value: number | null, max: number) => ptField(host, fieldKey(field),
-    growthSteps(label, value, Array.from({ length: max }, (_, index) => index + 1), field === "awk" || field === "rnk", next => write(field, next)));
+    growthSteps(label, value, Array.from({ length: max }, (_, index) => index + 1), kind === "snaps" && field === "rnk", next => write(field, next)));
   const levelField = (value: number | null, cap: number) => ptField(host, fieldKey("lvl"), html`
     <div class="tb-field">
       <span class="tb-field__label">${host.t("level", "Level")}<output>${value === null ? "—" : Math.min(value, cap)} / ${cap}</output></span>

@@ -1,7 +1,7 @@
 import { html } from "lit";
 import { segmented } from "./controls";
 
-/** Stored stages stay one-based; training and rank are displayed as counts. */
+/** Stored stages stay one-based; callers can display counts without shifting writes. */
 export function growthSteps(
   label: string,
   value: number | null,
