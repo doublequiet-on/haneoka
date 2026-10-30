@@ -1,6 +1,6 @@
 // L3 — GEB
 // Input: Saved regional official catalogs/observations, collector availability and public requests.
-// Output: Normalized rankings and explicit pending availability.
+// Output: Normalized rankings, preferred saved v1 totals and explicit pending availability.
 // Pos: [Map](L2.md); official read adapter alongside legacy PT and SHA history.
 // Effects/Dependencies: Reads D1/private R2; never requests the game or writes observations.
 import type { EventRankingDto, EventTrackerDto, GameRecordsRegion, SongRankingCardDto, SongRankingRowDto } from "../src/lib/game-records";
@@ -179,13 +179,15 @@ export async function handleOfficialRankingApi(request: Request, url: URL, env: 
   const route = /^\/api\/(v1|v2)\/game\/records\/([^/]+)\/events\/(.+)$/u.exec(url.pathname);
   if (!route || !regionValue(route[2])) return null;
   const version = route[1], region = route[2], path = route[3]!;
-  if (version === "v1" && !officialRankingReadEnabled(env, region)) return null;
   const current = path === "current";
   const board = /^([1-9][0-9]{0,18})\/(total|challenges\/([1-9][0-9]{0,18}))\/(latest|ranking|history)$/u.exec(path);
+  const optionalTotal = version === "v1" && !officialRankingReadEnabled(env, region)
+    && board?.[2] === "total" && board[4] === "latest";
+  if (version === "v1" && !officialRankingReadEnabled(env, region) && !optionalTotal) return null;
   if (!current && !board) return null;
   if (board && version === "v1" && board[4] === "history") return null;
   if (current ? url.searchParams.size > 0 : board![4] !== "history" && url.searchParams.size > 0) return failure(request, "invalid_request", 400);
-  if (!env.DB || !env.OFFICIAL_RANKING_DATA) return pending(request, env, region);
+  if (!env.DB || !env.OFFICIAL_RANKING_DATA) return optionalTotal ? null : pending(request, env, region);
   try {
     if (current) {
       const catalog = await readOfficialCatalog(env, region);
@@ -206,9 +208,9 @@ export async function handleOfficialRankingApi(request: Request, url: URL, env: 
         observations: history.observations.map((value) => publicObservation(value, now)), nextCursor: history.nextCursor });
     }
     const observation = await readOfficialLatest(env, region, eventId, kind, challengeId);
-    return observation ? response(request, officialEventRanking(observation)) : pending(request, env, region);
+    return observation ? response(request, officialEventRanking(observation)) : optionalTotal ? null : pending(request, env, region);
   } catch (error) {
     console.warn(JSON.stringify({ event: "official_ranking_read_failed", region, error: error instanceof Error ? error.name : "Error" }));
-    return failure(request, "upstream", 503);
+    return optionalTotal ? null : failure(request, "upstream", 503);
   }
 }
