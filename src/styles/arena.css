@@ -158,11 +158,17 @@
     overflow-x: auto;
     scrollbar-width: none;
   }
+  /* Masonry: each panel spans the 8px rows its measured height needs (set by the workspace). */
   .arena-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
+    grid-auto-rows: 8px;
+    grid-auto-flow: row dense;
     align-items: start;
+    column-gap: 16px;
+  }
+  .arena-grid > * {
+    grid-row-end: span var(--arena-rows, 24);
   }
   .arena-wide {
     grid-column: 1 / -1;

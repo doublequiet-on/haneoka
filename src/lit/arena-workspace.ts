@@ -89,6 +89,16 @@ export class ArenaWorkspace extends LitElement {
   private populationRequest?: AbortController;
   private populationKey = "";
   private images = new LazyImages();
+  /** Keeps each panel's row span equal to its height plus the 16px gap, so panels pack like a waterfall. */
+  private masonry =
+    typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver((entries) => {
+          for (const entry of entries) {
+            const panel = entry.target as HTMLElement;
+            panel.style.setProperty("--arena-rows", String(Math.ceil((panel.getBoundingClientRect().height + 16) / 8)));
+          }
+        });
   private localeReady = () => {
     this.locale = preferredLocale(this.locale) as Locale;
   };
@@ -140,6 +150,7 @@ export class ArenaWorkspace extends LitElement {
     this.populationRequest?.abort();
     clearTimeout(this.timer);
     this.images.disconnect();
+    this.masonry?.disconnect();
     clearAppBarActions(this.owner);
     removeEventListener("haneoka:locale-ready", this.localeReady);
     document.removeEventListener("visibilitychange", this.visibility);
@@ -417,7 +428,7 @@ export class ArenaWorkspace extends LitElement {
             ? html`
                 <a
                   class="icon-button"
-                  href=${`/${this.server}/${this.locale}/team-builder/?tab=arena&league=${league.id}`}
+                  href=${`/${this.locale}/team-builder/?tab=arena&league=${league.id}`}
                   aria-label=${this.t("buildTeam")}
                   title=${this.t("buildTeam")}
                 >
@@ -438,6 +449,7 @@ export class ArenaWorkspace extends LitElement {
     );
   }
   updated() {
+    for (const panel of this.querySelectorAll<HTMLElement>(".arena-grid > *")) this.masonry?.observe(panel);
     this.images.observe(this);
     this.renderStaticChrome();
     this.loadPopulation();
@@ -623,10 +635,7 @@ export class ArenaWorkspace extends LitElement {
               ${rule ? this.t("currentRule") : shown ? this.t("nextRule") : this.t("noSchedule")}
             </span>
           </div>
-          <a
-            class="button button--filled"
-            href=${`/${this.server}/${this.locale}/team-builder/?tab=arena&league=${league.id}`}
-          >
+          <a class="button button--filled" href=${`/${this.locale}/team-builder/?tab=arena&league=${league.id}`}>
             ${icon("groups")}${this.t("buildTeam")}
           </a>
         </header>
