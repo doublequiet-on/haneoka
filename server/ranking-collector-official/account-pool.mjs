@@ -208,8 +208,8 @@ export class AccountPool {
   finish(lease, outcome) {
     return this.transaction(() => {
       const { row, token } = lease, timestamp = now();
-      const blocked = ["authentication", "auth_uncertain", "device_conflict", "version"].includes(outcome.kind);
-      const state = outcome.ok ? "ready" : ["authentication", "auth_uncertain"].includes(outcome.kind) ? "auth_required" : blocked ? outcome.kind : "cooldown";
+      const blocked = ["authentication", "permission", "auth_uncertain", "device_conflict", "version"].includes(outcome.kind);
+      const state = outcome.ok ? "ready" : ["authentication", "permission", "auth_uncertain"].includes(outcome.kind) ? "auth_required" : blocked ? outcome.kind : "cooldown";
       const result = this.db.prepare(`UPDATE game_query_account SET state=?,last_error=?,last_success_at=CASE WHEN ? THEN ? ELSE last_success_at END,
         failure_count=failure_count+?,lease_token=NULL,lease_until=0,next_request_at=?,updated_at=? WHERE id=? AND lease_token=? AND generation=?`)
         .run(state, outcome.ok ? null : outcome.kind, outcome.ok ? 1 : 0, timestamp, outcome.ok ? 0 : 1,

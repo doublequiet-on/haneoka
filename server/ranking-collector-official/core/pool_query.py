@@ -54,6 +54,8 @@ def query(job):
             receipt, response, _ = sampler.rpc('/app.event.EventService/' + method, request,
                 'app.event.' + method + 'Response', 'pool-board')
             if response is None:
+                if receipt.get('status') == 403 or str(receipt.get('grpc_status')) == '7':
+                    return {'ok': False, 'kind': 'permission'}
                 if authentication_failed(receipt):
                     return {'ok': False, 'kind': 'authentication'}
                 if receipt.get('status') is None:
