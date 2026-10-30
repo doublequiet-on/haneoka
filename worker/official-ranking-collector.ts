@@ -50,6 +50,7 @@ interface CollectorState {
   lastRunAtMs: number | null;
   failures: number;
   blockedGeneration: string | null;
+  callbackProtocolVersion?: number;
   lastFailure?: OfficialCollectorFailure | null;
   run: CollectorRun | null;
 }
@@ -264,6 +265,14 @@ export class OfficialRankingCollector extends Container<Env> {
       if (state.blockedGeneration === config.generation) {
         if (!["auth_paused", "auth_uncertain"].includes(state.status)) state.status = "auth_paused";
         await this.persist(state, false); return;
+      }
+      if (state.callbackProtocolVersion !== 1 && state.status === "failed" && state.run?.complete
+        && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration
+        && state.lastFailure?.stage === "catalog_callback" && state.lastFailure.code === "CallbackError"
+        && state.lastFailure.httpStatus === 403) {
+        state.callbackProtocolVersion = 1;
+        state.failures = 0;
+        state.nextAtMs = Date.now();
       }
       if (state.status === "failed" && state.lastFailure === undefined && state.run?.complete
         && !state.run.catalog && !state.run.pendingAttempt && !state.blockedGeneration) {
