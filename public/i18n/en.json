@@ -815,6 +815,17 @@
       }
     },
     "analysis": {
+      "roomSsReference": {
+        "chart": "Chart unavailable",
+        "thresholdMissing": "Target threshold unavailable",
+        "title": "Five-player SS reference",
+        "threshold": "Five-player SS threshold",
+        "base": "Base per player · similar teams",
+        "placements": "Places by section",
+        "personal": "Personal reference",
+        "offset": "A surplus can cover another player’s shortfall.",
+        "failed": "Could not load reference scores"
+      },
       "fields": {
         "metaR": "Difficulty Rating",
         "metaTime": "Song Duration",

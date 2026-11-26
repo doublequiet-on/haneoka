@@ -815,6 +815,17 @@
       }
     },
     "analysis": {
+      "roomSsReference": {
+        "chart": "譜面缺失",
+        "thresholdMissing": "目標評級門檻缺失",
+        "title": "五人 SS 參考分數",
+        "threshold": "五人房 SS 門檻",
+        "base": "單人基礎分數 · 相近練度",
+        "placements": "三段名次",
+        "personal": "個人參考分數",
+        "offset": "一人超出的分數可補另一人的差額。",
+        "failed": "參考分數載入失敗"
+      },
       "fields": {
         "metaR": "難度評級",
         "metaTime": "樂曲時長",
