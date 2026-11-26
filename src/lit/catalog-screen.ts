@@ -7444,6 +7444,7 @@ export class CatalogScreen extends LitElement {
       this.songDetailRewards?.renderSongRewards({
         item,
         chart: this.chartRow(item),
+        identity: this.songTimingIdentity(item),
         server: this.dataServer(),
         label: (key, fallback) => this.label(key, fallback),
         localized: (value) => this.localized(value),

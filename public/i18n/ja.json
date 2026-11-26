@@ -815,6 +815,17 @@
       }
     },
     "analysis": {
+      "roomSsReference": {
+        "chart": "譜面がありません",
+        "thresholdMissing": "目標ランクの基準がありません",
+        "title": "5人のSS参考スコア",
+        "threshold": "5人ルームのSSライン",
+        "base": "1人分の基礎スコア（同等編成）",
+        "placements": "各区間の順位",
+        "personal": "個人参考スコア",
+        "offset": "超過分でほかの人の不足を補えます。",
+        "failed": "参考スコアを読み込めませんでした"
+      },
       "fields": {
         "metaR": "難易度レーティング",
         "metaTime": "楽曲時間",

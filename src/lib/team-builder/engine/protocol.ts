@@ -1,5 +1,5 @@
 // L3 — GEB
-// Input: 引擎请求／结果、配队数据类型、联机房各席输入和步进预算。
+// Input: 引擎请求／结果、配队数据类型、联机房各席输入和步进预算、五人 SS 参考分的谱面。
 // Output: EngineCall、EngineReply（含准备就绪、执行应答、实例故障和请求结果）、停止原因及 EngineSnapshot。
 // Pos: [Map](L2-2.md)；主线程与当前引擎 Worker 的消息边界。
 // Effects/Dependencies: 类型声明；资源获取与计算由 client／worker 实现。
@@ -41,6 +41,17 @@ export interface SectionMetricDistribution {
 }
 export interface PlaySample { score: number; lowestLife: number; notes: { index: number; timeMs: number; op: number; judgementType: number }[]; judgements: number[] }
 
+export interface RoomSsReference {
+  reference: {
+    roomThreshold: number;
+    seats: { ranks: [number, number, number] }[];
+  };
+  neutralCrossing: {
+    baseScore: number;
+    scores: [number, number, number, number, number];
+  } | null;
+}
+
 export type ExplainRequest = {
   songRules?: import("../arena").SongRules;
   arena?: import("./api").ArenaGoal;
@@ -66,6 +77,7 @@ export type EngineCall = (
   | { type: "eventGrowthPage"; id: number; page: number; paused?: boolean }
   | { type: "roomStart"; id: number; request: RoomSearchInput; songs: SongRef[]; maxWork: number; budgetMs: number }
   | { type: "roomStep"; id: number; searchId: number; maxWork: number; budgetMs: number }
+  | { type: "roomSsReference"; id: number; song: SongRef }
   | { type: "pauseEventGrowth"; id: number; paused: boolean }
   | { type: "evaluate"; id: number; request: EvaluateRequest }
   | { type: "sectionMetrics"; id: number; request: EvaluateRequest }

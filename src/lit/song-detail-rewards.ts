@@ -12,6 +12,7 @@ import { byScoreRank, isSongScoreRank, roomRequiredScore, scoreRankName } from "
 import { clientText } from "../i18n/client";
 import { scoreRankIcon } from "./shared/score-rank";
 import "./song-room-calculator";
+import "./room-ss-reference";
 import "./song-score-targets";
 import type { ChartRates } from "../lib/chart-rates";
 import { formatDate } from "../lib/date-format";
@@ -21,6 +22,7 @@ type Item = Record<string, unknown>;
 export interface SongRewardRenderOptions {
   item: Item;
   chart: Item;
+  identity?: import("../lib/cross-server/catalog").CrossCatalogIdentity | undefined;
   server: string;
   label(key: string, fallback: string): string;
   localized(value: unknown): string;
@@ -215,6 +217,7 @@ export function renderSongSummary(options: SongSummaryRenderOptions) {
 export function renderSongRewards({
   item,
   chart,
+  identity,
   server,
   label,
   localized,
@@ -294,6 +297,18 @@ export function renderSongRewards({
     ranks.filter((rank) => Number(rank.battleLiveRequiredScore || 0) > 0),
     (rank) => Number(rank.scoreRank),
   );
+  const roomReference = identity && (identity.server === "jp" || identity.server === "intl") &&
+    item.musicId != null && chart.difficulty != null
+    ? html`<room-ss-reference
+        .charts=${[{
+          song: { songId: Number(item.musicId), difficulty: Number(chart.difficulty) },
+          identity,
+          label: difficultyKey(chart).toUpperCase(),
+        }]}
+        locale=${locale}
+        panel-id="song-room-ss-reference"
+      ></room-ss-reference>`
+    : nothing;
   const players = [1, 2, 3, 4, 5];
   const hasScore = scoreRankIds.length > 0;
   const hasCombo = combo.length > 0;
@@ -400,6 +415,7 @@ export function renderSongRewards({
               </tbody>
             </table>
           </div>
+          ${roomReference}
           <song-room-calculator
             .ranks=${roomRanks.map((rank) => [Number(rank.scoreRank), Number(rank.battleLiveRequiredScore)] as [number, number])}
             server=${server}

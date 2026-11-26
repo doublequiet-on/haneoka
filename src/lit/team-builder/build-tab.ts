@@ -30,6 +30,7 @@ import type { TeamBuilder } from "../team-builder";
 import { farmingConditions, missionSummary, parseOpponents } from "./workspace-state";
 import { ptField, ptFieldInvalid } from "./pt-fields";
 import { MAX_GEKISO_COUNT, validGekisoCount } from "../../lib/team-builder/constraint-feasibility";
+import "../room-ss-reference";
 
 const GOALS = [
   { id: "score", icon: "music_note" },
@@ -926,6 +927,7 @@ function requiredPicker(host: TeamBuilder): TemplateResult | typeof nothing {
 
 export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): TemplateResult {
   const s = host.searchSettings;
+  const catalog = host.catalog!;
   const goals = host.classicLayout ? GOALS : FREE_GOALS;
   const selectGoal = (goal: GoalKind) => {
     const tab = goal === "gekiso" ? "live" : "build";
@@ -1121,6 +1123,16 @@ export function renderBuildTab(host: TeamBuilder, leading?: TemplateResult): Tem
                       ? useChallengeSongsButton(host, challengeSongs, (songs) => set({ songs: s.goal === "power" ? songs.slice(0, 1) : songs }), s.goal === "power")
                       : nothing,
                   })}
+                ${host.tab === "live" && s.goal === "gekiso" && s.songs.length ? html`
+                  <room-ss-reference
+                    .charts=${s.songs.map(song => ({
+                      song,
+                      identity: catalog.songIdentity(song.songId),
+                      label: `${catalog.songTitle(song.songId)} · ${catalog.difficultyLabel(song.songId, song.difficulty)}`,
+                    }))}
+                    locale=${host.locale}
+                    panel-id="team-room-ss-reference"
+                  ></room-ss-reference>` : nothing}
                 ${multiSongControl(host)}
               ${songRulesControl(host)}
               </section>
